@@ -1,0 +1,165 @@
+
+baremetal.elf:	file format elf32-littleriscv
+
+SYMBOL TABLE:
+00000000 l    df *ABS*	00000000 baremetal.c
+80000040 l       .text	00000000 $x
+80000173 l       .data	00000000 $d
+00000000 l       .debug_loclists	00000000 $d
+00000000 l       .debug_abbrev	00000000 $d
+00000000 l       .debug_info	00000000 $d
+00000000 l       .debug_rnglists	00000000 $d
+00000000 l       .debug_str_offsets	00000000 $d
+00000012 l       .debug_str	00000000 $d
+00000000 l       .debug_addr	00000000 $d
+00000013 l       .comment	00000000 $d
+00000000 l       *ABS*	00000000 $d
+00000000 l       .debug_frame	00000000 $d
+00000000 l       .debug_line	00000000 $d
+0000003f l       .debug_line_str	00000000 $d
+80000000 l       .text	00000000 $x
+800001a0 l       .data	00000000 asm_label
+800001a0 l       .data	00000000 $d
+80000020 l       .text	00000000 $x
+00000000 l       *ABS*	00000000 $d
+00000000 l       .debug_aranges	00000000 $d
+0000005f l       .debug_rnglists	00000000 $d
+00000149 l       .debug_abbrev	00000000 $d
+00000229 l       .debug_info	00000000 $d
+00000140 l       .debug_line	00000000 $d
+0000003f l       .debug_line_str	00000000 $d
+80000040 g     F .text	000000ec main
+80000020 g       .text	00000000 asm_demo_func
+1100bff8 g       *ABS*	00000000 TIMERL
+11100000 g       *ABS*	00000000 SYSCON
+80000000 g       .text	00000000 _start
+800021c0 g       .stack	00000000 _sstack
+00001000 g       *ABS*	00000000 __heap_size
+00001000 g       *ABS*	00000000 __stack_size
+80000000 g       .text	00000000 __TEXT_BEGIN__
+8000012c g       .text	00000000 __TEXT_END__
+80000130 g       .data	00000000 __DATA_BEGIN__
+800001ba g       .data	00000000 __DATA_END__
+800001c0 g       .bss	00000000 __BSS_BEGIN__
+800001c0 g       .bss	00000000 __BSS_END__
+800001c0 g       .heap	00000000 _sheap
+800011c0 g       .heap	00000000 _eheap
+800011c0 g       .stack	00000000 _estack
+
+baremetal.elf:	file format elf32-littleriscv
+
+Disassembly of section .text:
+
+80000000 <_start>:
+; 	la	sp, _sstack
+80000000: 00002117     	auipc	sp, 0x2
+80000004: 1c010113     	addi	sp, sp, 0x1c0
+; 	addi	sp,sp,-16
+80000008: ff010113     	addi	sp, sp, -0x10
+; 	sw	ra,12(sp)
+8000000c: 00112623     	sw	ra, 0xc(sp)
+; 	call	main
+80000010: 00000097     	auipc	ra, 0x0
+80000014: 030080e7     	jalr	0x30(ra) <main>
+		...
+
+80000020 <asm_demo_func>:
+; 	addi sp, sp, -16
+80000020: ff010113     	addi	sp, sp, -0x10
+; 	sw t0, 12(sp)
+80000024: 00512623     	sw	t0, 0xc(sp)
+; 	la t0, asm_label
+80000028: 00000297     	auipc	t0, 0x0
+8000002c: 17828293     	addi	t0, t0, 0x178
+; 	csrw 0x138, t0
+80000030: 13829073     	csrw	0x138, t0
+; 	lw t0, 12(sp)
+80000034: 00c12283     	lw	t0, 0xc(sp)
+; 	addi sp, sp, 16
+80000038: 01010113     	addi	sp, sp, 0x10
+; 	ret
+8000003c: 00008067     	ret
+
+80000040 <main>:
+; {
+80000040: ff010113     	addi	sp, sp, -0x10
+80000044: 00112623     	sw	ra, 0xc(sp)
+80000048: 00812423     	sw	s0, 0x8(sp)
+; 	asm volatile( ".option norvc\ncsrrw x0, 0x138, %0\n" : : "r" (s));
+8000004c: 00000517     	auipc	a0, 0x0
+80000050: 00000597     	auipc	a1, 0x0
+80000054: 12750413     	addi	s0, a0, 0x127
+80000058: 12558513     	addi	a0, a1, 0x125
+8000005c: 13841073     	csrw	0x138, s0
+80000060: 13851073     	csrw	0x138, a0
+80000064: 00000517     	auipc	a0, 0x0
+80000068: 0cc50513     	addi	a0, a0, 0xcc
+8000006c: 13851073     	csrw	0x138, a0
+; 	asm volatile( ".option norvc\ncsrrw x0, 0x137, %0\n" : : "r" (ptr));
+80000070: 00000517     	auipc	a0, 0x0
+80000074: fd050513     	addi	a0, a0, -0x30
+80000078: 13751073     	csrw	0x137, a0
+; 	asm volatile( ".option norvc\ncsrrw x0, 0x138, %0\n" : : "r" (s));
+8000007c: 00000517     	auipc	a0, 0x0
+80000080: 0e650513     	addi	a0, a0, 0xe6
+80000084: 13851073     	csrw	0x138, a0
+; 	asm_demo_func();
+80000088: 00000097     	auipc	ra, 0x0
+8000008c: f98080e7     	jalr	-0x68(ra) <asm_demo_func>
+; 	asm volatile( ".option norvc\ncsrrw x0, 0x138, %0\n" : : "r" (s));
+80000090: 13841073     	csrw	0x138, s0
+; 	asm volatile(".option norvc\ncsrr %0, 0xC00":"=r" (ccount));
+80000094: c0002573     	rdcycle	a0
+; 	uint32_t timer_initial = TIMERL;
+80000098: 9100c617     	auipc	a2, 0x9100c
+8000009c: f6062583     	lw	a1, -0xa0(a2)
+; 	for( i = 0; i < 1000000; i++ )
+800000a0: 00012223     	sw	zero, 0x4(sp)
+800000a4: 00412703     	lw	a4, 0x4(sp)
+800000a8: 000f46b7     	lui	a3, 0xf4
+800000ac: 23f68793     	addi	a5, a3, 0x23f
+800000b0: 02e7c063     	blt	a5, a4, 0x800000d0 <main+0x90>
+800000b4: 24068693     	addi	a3, a3, 0x240
+; 		asm volatile( "nop" );
+800000b8: 00000013     	nop
+; 	for( i = 0; i < 1000000; i++ )
+800000bc: 00412703     	lw	a4, 0x4(sp)
+800000c0: 00170713     	addi	a4, a4, 0x1
+800000c4: 00e12223     	sw	a4, 0x4(sp)
+800000c8: 00412703     	lw	a4, 0x4(sp)
+800000cc: fed746e3     	blt	a4, a3, 0x800000b8 <main+0x78>
+; 	asm volatile(".option norvc\ncsrr %0, 0xC00":"=r" (ccount));
+800000d0: c00026f3     	rdcycle	a3
+; 	uint32_t timer = TIMERL - timer_initial;
+800000d4: f6062603     	lw	a2, -0xa0(a2)
+; 	uint32_t cyclecount = get_cyc_count() - cyclecount_initial;
+800000d8: 40a686b3     	sub	a3, a3, a0
+; 	uint32_t timer = TIMERL - timer_initial;
+800000dc: 40b60633     	sub	a2, a2, a1
+; 	nprint( cyclecount / timer );
+800000e0: 02c6d533     	divu	a0, a3, a2
+; 	asm volatile( ".option norvc\ncsrrw x0, 0x138, %0\n" : : "r" (s));
+800000e4: 00000597     	auipc	a1, 0x0
+800000e8: 00000617     	auipc	a2, 0x0
+800000ec: 00000697     	auipc	a3, 0x0
+800000f0: 05958593     	addi	a1, a1, 0x59
+800000f4: 13859073     	csrw	0x138, a1
+; 	SYSCON = 0x5555; // Power off
+800000f8: 91100597     	auipc	a1, 0x91100
+; 	asm volatile( ".option norvc\ncsrrw x0, 0x136, %0\n" : : "r" (ptr));
+800000fc: 13651073     	csrw	0x136, a0
+80000100: 00005537     	lui	a0, 0x5
+; 	asm volatile( ".option norvc\ncsrrw x0, 0x138, %0\n" : : "r" (s));
+80000104: 07160613     	addi	a2, a2, 0x71
+80000108: 08768693     	addi	a3, a3, 0x87
+8000010c: 55550513     	addi	a0, a0, 0x555
+; 	asm volatile( ".option norvc\ncsrrw x0, 0x138, %0\n" : : "r" (s));
+80000110: 13861073     	csrw	0x138, a2
+80000114: 13869073     	csrw	0x138, a3
+; 	SYSCON = 0x5555; // Power off
+80000118: f0a5a423     	sw	a0, -0xf8(a1)
+; }
+8000011c: 00c12083     	lw	ra, 0xc(sp)
+80000120: 00812403     	lw	s0, 0x8(sp)
+80000124: 01010113     	addi	sp, sp, 0x10
+80000128: 00008067     	ret

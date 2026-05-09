@@ -10,6 +10,7 @@ This plan addresses the implementation issues found during review in priority or
   - invalid MMIO addresses when no hook claims the range.
 - Assert that these cases enter the guest trap path instead of throwing `IndexOutOfBoundsException` or another Java exception.
 - Fix `RV32IMACore` load/store handling so bus failures are converted into the correct load/store access-fault trap state.
+  - Load access fault (cause 5) and store/AMO access fault (cause 7) require `mtval` to hold the faulting *address*, not the loaded value or PC. The current expression `(trap > 5 && trap <= 8) ? rval : pc` targets the right trap range but uses the wrong variable; update it to pass the faulting address through from the load/store decode paths when P0 traps are added.
 - Add tests for valid boundary accesses at the first and last legal bytes of RAM to avoid overcorrecting the range checks.
 
 ## P1: Make the Published CLI Actually Runnable
@@ -20,7 +21,7 @@ This plan addresses the implementation issues found during review in priority or
 - Update README commands and artifact names so they match the real project version and build output.
 - Keep a release smoke test that runs the packaged CLI and asserts expected UART output or successful startup with a bounded instruction count.
 
-## P2: Correct CSR Side Effects and Machine Trap State
+## P2: Correct CSR Side Effects, Machine Trap State, and mtval Encoding
 
 - Add tests for CSR read/write side-effect rules:
   - `CSRRW rd=x0` must not read the CSR.
@@ -29,6 +30,8 @@ This plan addresses the implementation issues found during review in priority or
 - Add a small custom `CSRHook` test double that records reads and writes so these side effects are observable.
 - Add trap/MRET tests that validate `mepc`, `mcause`, `mtval`, privilege bits, and key `mstatus` bits across `ECALL`, timer interrupt entry, and `MRET`.
 - Fix CSR execution and trap entry/return logic to preserve unrelated `mstatus` bits and match RV32 machine-mode semantics expected by the supported platform.
+- Fix `mtval` for illegal instruction traps (cause 2): RISC-V allows `mtval` to be zero for illegal instructions, but if populated it should hold the faulting instruction encoding (`ir`), not the PC. This project should populate it with `ir` for diagnostics and compliance coverage. The current trap handler sets `mtval = pc` for all non-load/store traps.
+  - Note: load/store access fault `mtval` correctness is tracked under P0, since those traps are not yet reachable.
 
 ## P3: Reject Illegal Instruction Encodings
 
@@ -45,6 +48,7 @@ This plan addresses the implementation issues found during review in priority or
 
 - Add `MMIOBus` contract tests for hook matching, unsigned address ranges, overlapping ranges, read/write widths, and hook write return values.
 - Decide and document whether `HardwareHook.handleWrite(...)=false` means fall through to RAM or means ignored after hook match.
+  - Discussion needed: `MMIOBus` currently ignores the boolean return value entirely — any write whose address falls in a hook's registered range goes to the hook and never reaches RAM, regardless of what the hook returns. However, `CLINTHook.handleWrite()` returns `false` for unrecognized addresses within the CLINT range (e.g., software interrupt register), implying the author expected fallthrough or at least some caller-visible signal. Before fixing, agree on the intended contract: (a) hooks own their entire registered range and `false` is purely informational, or (b) `false` means the hook declined and the write should fall through to RAM. The choice affects the public `HardwareHook` API and all existing hook implementations.
 - If fallthrough is the intended public API, fix `MMIOBus` so writes delegate to RAM when the hook returns `false`.
 - If ignored writes are intended, update `HardwareHook` documentation and tests to remove the fallthrough contract.
 
@@ -59,14 +63,14 @@ This plan addresses the implementation issues found during review in priority or
 
 - Add timer tests for `mtime < mtimecmp`, `mtime == mtimecmp`, and `mtime > mtimecmp`.
 - Assert that MTIP is set when timer reaches the compare value, not one tick later.
-- Fix the timer comparison logic and keep tests for WFI wakeup behavior.
+- Fix the timer comparison logic from `>` to `>=` while preserving the intentional `timerMatch != 0` startup guard, and keep tests for WFI wakeup behavior.
 
-## P7: Improve LR/SC and Atomic Coverage
+## P7: Fix LR/SC Reservation Tracking and Expand Atomic Coverage
 
 - Add tests for `LR.W` and `SC.W` success, failure after address mismatch, and reservation clearing after store or `SC.W`.
-- Add address-alias tests to prove high address bits do not collide in reservation tracking.
+- Add address-range tests covering the primary RAM base (0x80000000), high-bit aliases, and `SC.W` without a preceding `LR.W` to expose the current reservation encoding bugs before fixing them.
 - Add tests for all supported AMO operations, including signed and unsigned min/max edge cases.
-- Fix reservation tracking so it records the full RV32 address and follows the intended single-core memory model consistently.
+- Fix reservation tracking: the current implementation packs only the low 29 address bits into `extraflags` with `rs1 << 3`, so addresses with different high bits alias and there is no explicit valid/invalid reservation state. At 0x80000000 (the standard RAM base), the stored reservation bits are zero, so `SC.W` can incorrectly succeed without a preceding matching `LR.W`. The fix requires a dedicated `reservationAddr int` field plus a validity flag or sentinel value on `RV32IMAState`; the bit-packing approach cannot represent a full 32-bit RV32 address alongside the existing privilege and WFI bits.
 
 ## Testing Strategy Improvements, Prioritized
 
@@ -78,6 +82,15 @@ This plan addresses the implementation issues found during review in priority or
 
 ## Release Readiness and Last Steps
 
+- Document intentional deviations from the RISC-V spec that are carried over from the upstream mini-rv32ima C implementation:
+  - WFI sets `mstatus.MIE = 1` before suspending. The spec treats WFI as a hint and does not require privilege-state changes; the emulator does this to ensure a timer interrupt can wake a waiting CPU. Document this in `RV32IMACore` so contributors do not "fix" it and break WFI wakeup behavior.
+  - The timer interrupt is gated by `timerMatch != 0`. Setting `mtimecmp = 0` does not fire an interrupt immediately, contrary to the spec (`mtime >= mtimecmp` with both at zero). This prevents spurious interrupts at startup before the guest configures the timer. Document the behavior and its rationale.
+- Write public API documentation for every contract that a system-level emulator consumer or hardware hook implementor must rely on:
+  - `MemoryBus`: semantics of byte/short/int reads and writes; signed vs. unsigned return conventions; what happens on access to an unregistered MMIO address; endianness guarantee (once P5 is fixed).
+  - `HardwareHook`: what address range the hook is responsible for; meaning of `handleWrite` return value (once P4 is resolved); whether reads for unhandled addresses within the registered range should return 0 or some other sentinel; thread-safety expectations.
+  - `CSRHook`: when `handleRead` and `handleWrite` are called (after P2 fixes, only when side-effect rules allow); what `handleRead` should return for unrecognized CSR numbers; whether the hook is invoked for read-only or write-only CSRs.
+  - `RV32IMACore.step()`: the meaning of `elapsedUs` and how it drives the timer; behavior of the `count` parameter at trap boundaries; what return values mean; ordering guarantees between trap handling and the post-exec hook.
+  - `RV32IMAState`: which fields are stable public API vs. internal implementation details; LR/SC reservation semantics (once P7 is fixed); how `extraflags` privilege bits interact with machine-mode trap entry and MRET.
 - Add a code formatter after the functional fixes and coverage are in place.
 - Apply the formatter once across the repository.
 - Add a CI check that fails on unformatted Java code.
@@ -99,7 +112,7 @@ This plan addresses the implementation issues found during review in priority or
 - All P0-P7 implementation issues are covered by failing-first tests and fixed.
 - Unit, integration, packaged CLI smoke, ISA compliance, and selected differential tests pass in CI.
 - Public README commands match the packaged artifacts and are exercised by CI.
-- Public API behavior is documented for memory faults, MMIO hooks, CSR hooks, timer behavior, and supported ISA scope.
+- Public API behavior is documented for memory faults, MMIO hooks, CSR hooks, timer behavior, and supported ISA scope. Documentation is sufficient for a downstream integrator to implement a correct `HardwareHook`, `CSRHook`, or alternative `MemoryBus` without reading the emulator source. Known intentional spec deviations (WFI/MIE, timer-at-zero) are explicitly called out with rationale.
 - Release artifacts include usable source and binary jars with correct metadata, license, and attribution.
 - Formatter, Checkstyle, and SpotBugs run in CI with no unsuppressed violations.
 - GitHub Actions release workflow is documented, repeatable, and validated on a dry run or prerelease.

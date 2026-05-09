@@ -32,4 +32,66 @@
         </dependency>
     </dependencies>
 
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.6.1</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>com.alienspacebunny.cli.Main</mainClass>
+                                </transformer>
+                            </transformers>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>packaged-cli-smoke-test</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <java jar="${project.build.directory}/${project.build.finalName}.jar"
+                                      fork="true"
+                                      failonerror="true"
+                                      output="${project.build.directory}/packaged-cli-smoke.out">
+                                    <arg value="-f"/>
+                                    <arg file="${project.basedir}/src/test/resources/bin/baremetal.bin"/>
+                                    <arg value="-c"/>
+                                    <arg value="10000000"/>
+                                    <arg value="-p"/>
+                                </java>
+                                <loadfile property="packaged.cli.output"
+                                          srcFile="${project.build.directory}/packaged-cli-smoke.out"/>
+                                <condition property="packaged.cli.output.ok">
+                                    <contains string="${packaged.cli.output}"
+                                              substring="Hello world from RV32 land."/>
+                                </condition>
+                                <fail unless="packaged.cli.output.ok"
+                                      message="Packaged CLI smoke test did not produce expected UART output."/>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
 </project>

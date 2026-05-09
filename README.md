@@ -35,7 +35,7 @@ This is a Java port of the open-source [mini-rv32ima](https://github.com/cnlohr/
 ### Running the CLI Emulator
 
 ```bash
-java -jar cli/target/rv32emu-cli-1.0-SNAPSHOT.jar -f path/to/image.bin [parameters]
+java -jar cli/target/rv32emu-cli-0.1.0.jar -f path/to/image.bin [parameters]
 ```
 
 #### Parameters:

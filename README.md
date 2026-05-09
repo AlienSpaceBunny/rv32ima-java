@@ -13,6 +13,15 @@ This is a Java port of the open-source [mini-rv32ima](https://github.com/cnlohr/
 - **Multi-Module Maven:** Clean separation between the core emulator library and the CLI runner.
 - **Platform Agnostic:** The core library is stateless and can be integrated into any Java project (e.g., fantasy consoles, simulators).
 
+## MMIO Hooks
+
+`MMIOBus` routes accesses by registered address range. Hook ranges are device-owned:
+once an address matches a hook, the read or write is handled by that hook and
+does not fall through to the backing RAM bus. Unrecognized offsets inside a
+device range should be ignored or read according to that device's own contract.
+
+See [Core API Contracts](docs/API.md) for the public integration contracts.
+
 ## Project Structure
 
 - `core`: The platform-agnostic emulator library.

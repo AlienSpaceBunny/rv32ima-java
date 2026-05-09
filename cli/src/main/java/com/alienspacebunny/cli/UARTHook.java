@@ -10,13 +10,11 @@ import java.io.IOException;
  */
 public class UARTHook implements HardwareHook {
     @Override
-    public boolean handleWrite(int address, int value, int width) {
+    public void handleWrite(int address, int value, int width) {
         if (address == 0x10000000) {
             System.out.print((char) value);
             System.out.flush();
-            return true;
         }
-        return false;
     }
 
     @Override

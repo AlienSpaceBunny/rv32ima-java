@@ -14,15 +14,12 @@ public class CLINTHook implements HardwareHook {
     }
 
     @Override
-    public boolean handleWrite(int address, int value, int width) {
+    public void handleWrite(int address, int value, int width) {
         if (address == 0x11004004) {
             state.timermatchh = value;
-            return true;
         } else if (address == 0x11004000) {
             state.timermatchl = value;
-            return true;
         }
-        return false;
     }
 
     @Override

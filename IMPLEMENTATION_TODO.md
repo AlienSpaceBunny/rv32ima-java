@@ -46,11 +46,9 @@ This plan addresses the implementation issues found during review in priority or
 
 ## P4: Clarify and Enforce MMIO Hook Semantics
 
-- Add `MMIOBus` contract tests for hook matching, unsigned address ranges, overlapping ranges, read/write widths, and hook write return values.
-- Decide and document whether `HardwareHook.handleWrite(...)=false` means fall through to RAM or means ignored after hook match.
-  - Discussion needed: `MMIOBus` currently ignores the boolean return value entirely — any write whose address falls in a hook's registered range goes to the hook and never reaches RAM, regardless of what the hook returns. However, `CLINTHook.handleWrite()` returns `false` for unrecognized addresses within the CLINT range (e.g., software interrupt register), implying the author expected fallthrough or at least some caller-visible signal. Before fixing, agree on the intended contract: (a) hooks own their entire registered range and `false` is purely informational, or (b) `false` means the hook declined and the write should fall through to RAM. The choice affects the public `HardwareHook` API and all existing hook implementations.
-- If fallthrough is the intended public API, fix `MMIOBus` so writes delegate to RAM when the hook returns `false`.
-- If ignored writes are intended, update `HardwareHook` documentation and tests to remove the fallthrough contract.
+- Done: `MMIOBus` contract tests cover hook matching, unsigned address ranges, overlapping ranges, read/write widths, and device-owned write semantics.
+- Done: `HardwareHook.handleWrite(...)` returns `void`; matched hook ranges own reads and writes and never fall through to RAM.
+- Done: `MMIOBus` rejects invalid, wrapping, or overlapping hook ranges.
 
 ## P5: Make Memory Endianness Explicit
 
@@ -87,7 +85,7 @@ This plan addresses the implementation issues found during review in priority or
   - The timer interrupt is gated by `timerMatch != 0`. Setting `mtimecmp = 0` does not fire an interrupt immediately, contrary to the spec (`mtime >= mtimecmp` with both at zero). This prevents spurious interrupts at startup before the guest configures the timer. Document the behavior and its rationale.
 - Write public API documentation for every contract that a system-level emulator consumer or hardware hook implementor must rely on:
   - `MemoryBus`: semantics of byte/short/int reads and writes; signed vs. unsigned return conventions; what happens on access to an unregistered MMIO address; endianness guarantee (once P5 is fixed).
-  - `HardwareHook`: what address range the hook is responsible for; meaning of `handleWrite` return value (once P4 is resolved); whether reads for unhandled addresses within the registered range should return 0 or some other sentinel; thread-safety expectations.
+  - `HardwareHook`: what address range the hook is responsible for; whether reads for unhandled addresses within the registered range should return 0 or some other sentinel; thread-safety expectations.
   - `CSRHook`: when `handleRead` and `handleWrite` are called (after P2 fixes, only when side-effect rules allow); what `handleRead` should return for unrecognized CSR numbers; whether the hook is invoked for read-only or write-only CSRs.
   - `RV32IMACore.step()`: the meaning of `elapsedUs` and how it drives the timer; behavior of the `count` parameter at trap boundaries; what return values mean; ordering guarantees between trap handling and the post-exec hook.
   - `RV32IMAState`: which fields are stable public API vs. internal implementation details; LR/SC reservation semantics (once P7 is fixed); how `extraflags` privilege bits interact with machine-mode trap entry and MRET.

@@ -9,7 +9,19 @@ public class RV32IMACore {
     private static final int MSTATUS_MPIE = 0x80;
     private static final int MSTATUS_MPP = 0x1800;
 
+    /**
+     * Optional instruction callback invoked after instruction execution, or
+     * before trap handling for an instruction that raises a trap.
+     */
     public interface PostExecHook {
+        /**
+         * Observes the instruction that just executed or trapped.
+         *
+         * @param pc The guest PC of the instruction.
+         * @param ir The raw instruction word.
+         * @param trap Zero for normal execution, otherwise the internal trap
+         *     marker before it is committed to machine CSRs.
+         */
         void onPostExec(int pc, int ir, int trap);
     }
 
@@ -51,15 +63,22 @@ public class RV32IMACore {
     /**
      * Executes a number of instructions.
      *
-     * @param state The current processor state.
-     * @param mem The memory bus.
-     * @param ramOffset The base address of RAM (e.g., 0x80000000).
-     * @param ramSize The size of RAM in bytes.
-     * @param elapsedUs Microseconds elapsed since last call (for timer).
-     * @param count Number of instructions to execute.
-     * @param postExec Optional hook called after each instruction.
+     * <p>The instruction-fetch window is defined by {@code ramOffset} and
+     * {@code ramSize}. Data accesses are delegated to {@code mem}; an
+     * {@link IndexOutOfBoundsException} from the memory bus is converted into a
+     * guest load or store access-fault trap.
+     *
+     * @param state The mutable processor state to execute.
+     * @param mem The memory bus used for instruction fetch and data access.
+     * @param ramOffset The base address of executable RAM.
+     * @param ramSize The executable RAM size in bytes.
+     * @param elapsedUs Microseconds elapsed since the previous call, used to
+     *     advance the machine timer before instruction execution.
+     * @param count Maximum number of instructions to execute.
+     * @param postExec Optional hook called after each instruction or trap.
      * @param csrHook Optional hook for custom CSRs.
-     * @return 0 on success, non-zero on special exit conditions (WFI, etc.)
+     * @return 0 after normal execution or trap handling; 1 when the CPU remains
+     *     in WFI and no instruction was executed.
      */
     public int step(RV32IMAState state, MemoryBus mem, int ramOffset, int ramSize, int elapsedUs, int count, PostExecHook postExec, CSRHook csrHook) {
         long currentTimer = state.getTimer();

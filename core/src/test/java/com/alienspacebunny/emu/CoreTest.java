@@ -26,6 +26,31 @@ public class CoreTest {
                 | 0x23;
     }
 
+    private static int csrInstruction(int csr, int funct3, int rd, int rs1OrImmediate) {
+        return (csr << 20) | (rs1OrImmediate << 15) | (funct3 << 12) | (rd << 7) | 0x73;
+    }
+
+    private static final class RecordingCSRHook implements CSRHook {
+        int readCount;
+        int writeCount;
+        int readValue = 0x12345678;
+        int lastWriteCsr;
+        int lastWriteValue;
+
+        @Override
+        public int handleRead(int csrNo) {
+            readCount++;
+            return readValue;
+        }
+
+        @Override
+        public void handleWrite(int csrNo, int value) {
+            writeCount++;
+            lastWriteCsr = csrNo;
+            lastWriteValue = value;
+        }
+    }
+
     @Test
     public void testBasicArithmetic() {
         int ramOffset = RAM_OFFSET;
@@ -176,6 +201,111 @@ public class CoreTest {
             core.step(lastByteStore, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
             assertEquals(0, lastByteStore.mcause);
             assertEquals((byte) 0xa5, ram.readByte(RAM_OFFSET + ramSize - 1));
+        }
+    }
+
+    @Test
+    public void csrrwWithX0DestinationDoesNotReadCsr() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = 0x55aa55aa;
+            RecordingCSRHook csrHook = new RecordingCSRHook();
+            ram.writeInt(RAM_OFFSET, csrInstruction(0x7c0, 1, 0, 1)); // csrrw x0, 0x7c0, x1
+
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, csrHook);
+
+            assertEquals(0, csrHook.readCount);
+            assertEquals(1, csrHook.writeCount);
+            assertEquals(0x7c0, csrHook.lastWriteCsr);
+            assertEquals(0x55aa55aa, csrHook.lastWriteValue);
+        }
+    }
+
+    @Test
+    public void csrrsWithX0SourceReadsButDoesNotWriteCsr() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            RecordingCSRHook csrHook = new RecordingCSRHook();
+            ram.writeInt(RAM_OFFSET, csrInstruction(0x7c0, 2, 2, 0)); // csrrs x2, 0x7c0, x0
+
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, csrHook);
+
+            assertEquals(1, csrHook.readCount);
+            assertEquals(0, csrHook.writeCount);
+            assertEquals(csrHook.readValue, state.regs[2]);
+        }
+    }
+
+    @Test
+    public void csrrsiWithZeroImmediateReadsButDoesNotWriteCsr() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            RecordingCSRHook csrHook = new RecordingCSRHook();
+            ram.writeInt(RAM_OFFSET, csrInstruction(0x7c0, 6, 2, 0)); // csrrsi x2, 0x7c0, 0
+
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, csrHook);
+
+            assertEquals(1, csrHook.readCount);
+            assertEquals(0, csrHook.writeCount);
+            assertEquals(csrHook.readValue, state.regs[2]);
+        }
+    }
+
+    @Test
+    public void ecallTrapPreservesMstatusBitsAndWritesMachineTrapState() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            int unrelatedMstatusBits = 0x00020000;
+            state.mtvec = RAM_OFFSET + 0x80;
+            state.mstatus = unrelatedMstatusBits | 0x08;
+            ram.writeInt(RAM_OFFSET, 0x00000073); // ecall
+
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(11, state.mcause);
+            assertEquals(0, state.mtval);
+            assertEquals(RAM_OFFSET, state.mepc);
+            assertEquals(RAM_OFFSET + 0x80, state.pc);
+            assertEquals(unrelatedMstatusBits | 0x80 | 0x1800, state.mstatus);
+            assertEquals(3, state.extraflags & 3);
+        }
+    }
+
+    @Test
+    public void mretRestoresPrivilegeAndMstatusBits() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            int unrelatedMstatusBits = 0x00020000;
+            state.mepc = RAM_OFFSET + 0x20;
+            state.mstatus = unrelatedMstatusBits | 0x80 | 0x1800;
+            ram.writeInt(RAM_OFFSET, 0x30200073); // mret
+
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(RAM_OFFSET + 0x20, state.pc);
+            assertEquals(unrelatedMstatusBits | 0x80 | 0x08, state.mstatus);
+            assertEquals(3, state.extraflags & 3);
+        }
+    }
+
+    @Test
+    public void illegalInstructionTrapStoresInstructionBitsInMtval() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            int illegalInstruction = 0xffffffff;
+            ram.writeInt(RAM_OFFSET, illegalInstruction);
+
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(2, state.mcause);
+            assertEquals(illegalInstruction, state.mtval);
+            assertEquals(RAM_OFFSET, state.mepc);
         }
     }
 }

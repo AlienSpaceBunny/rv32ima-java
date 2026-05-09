@@ -5,9 +5,47 @@ package com.alienspacebunny.emu;
  * Ported from mini-rv32ima.c.
  */
 public class RV32IMACore {
+    private static final int MSTATUS_MIE = 0x08;
+    private static final int MSTATUS_MPIE = 0x80;
+    private static final int MSTATUS_MPP = 0x1800;
 
     public interface PostExecHook {
         void onPostExec(int pc, int ir, int trap);
+    }
+
+    private int readCsr(RV32IMAState state, CSRHook csrHook, int csrno, long cycle) {
+        return switch (csrno) {
+            case 0x340 -> state.mscratch;
+            case 0x305 -> state.mtvec;
+            case 0x304 -> state.mie;
+            case 0xC00 -> (int) cycle;
+            case 0x344 -> state.mip;
+            case 0x341 -> state.mepc;
+            case 0x300 -> state.mstatus;
+            case 0x342 -> state.mcause;
+            case 0x343 -> state.mtval;
+            case 0xf11 -> 0xff0ff0ff; // mvendorid
+            case 0x301 -> 0x40401101; // misa
+            default -> csrHook != null ? csrHook.handleRead(csrno) : 0;
+        };
+    }
+
+    private void writeCsr(RV32IMAState state, CSRHook csrHook, int csrno, int writeval) {
+        switch (csrno) {
+            case 0x340: state.mscratch = writeval; break;
+            case 0x305: state.mtvec = writeval; break;
+            case 0x304: state.mie = writeval; break;
+            case 0x344: state.mip = writeval; break;
+            case 0x341: state.mepc = writeval; break;
+            case 0x300: state.mstatus = writeval; break;
+            case 0x342: state.mcause = writeval; break;
+            case 0x343: state.mtval = writeval; break;
+            default:
+                if (csrHook != null) {
+                    csrHook.handleWrite(csrno, writeval);
+                }
+                break;
+        }
     }
 
     /**
@@ -45,6 +83,7 @@ public class RV32IMACore {
         int trap = 0;
         int rval = 0;
         int pc = state.pc;
+        int ir = 0;
         long cycle = state.getCycle();
 
         // Check for timer interrupt before starting loop
@@ -53,16 +92,18 @@ public class RV32IMACore {
             pc -= 4; // Will be incremented back to original PC in the interrupt handler
         } else {
             for (int icount = 0; icount < count; icount++) {
-                int ir = 0;
+                ir = 0;
                 rval = 0;
                 cycle++;
                 int ofs_pc = pc - ramOffset;
 
                 if (Integer.compareUnsigned(ofs_pc, ramSize) >= 0) {
                     trap = 1 + 1; // Access violation on instruction read
+                    rval = pc;
                     break;
                 } else if ((ofs_pc & 3) != 0) {
                     trap = 1 + 0; // PC-misaligned access
+                    rval = pc;
                     break;
                 } else {
                     ir = mem.readInt(pc);
@@ -214,28 +255,12 @@ public class RV32IMACore {
                                 // Zicsr
                                 int rs1imm = (ir >> 15) & 0x1f;
                                 int rs1 = state.regs[rs1imm];
-                                int writeval = rs1;
+                                boolean isWrite = microop == 1 || microop == 5;
+                                boolean shouldRead = !(isWrite && rdid == 0);
+                                boolean shouldWrite = isWrite || rs1imm != 0;
 
-                                switch (csrno) {
-                                    case 0x340: rval = state.mscratch; break;
-                                    case 0x305: rval = state.mtvec; break;
-                                    case 0x304: rval = state.mie; break;
-                                    case 0xC00: rval = (int) cycle; break;
-                                    case 0x344: rval = state.mip; break;
-                                    case 0x341: rval = state.mepc; break;
-                                    case 0x300: rval = state.mstatus; break;
-                                    case 0x342: rval = state.mcause; break;
-                                    case 0x343: rval = state.mtval; break;
-                                    case 0xf11: rval = 0xff0ff0ff; break; // mvendorid
-                                    case 0x301: rval = 0x40401101; break; // misa
-                                    default:
-                                        if (csrHook != null) {
-                                            rval = csrHook.handleRead(csrno);
-                                        } else {
-                                            rval = 0;
-                                        }
-                                        break;
-                                }
+                                rval = shouldRead ? readCsr(state, csrHook, csrno, cycle) : 0;
+                                int writeval = rs1;
 
                                 switch (microop) {
                                     case 1: writeval = rs1; break; // CSRRW
@@ -246,29 +271,19 @@ public class RV32IMACore {
                                     case 7: writeval = rval & ~rs1imm; break; // CSRRCI
                                 }
 
-                                switch (csrno) {
-                                    case 0x340: state.mscratch = writeval; break;
-                                    case 0x305: state.mtvec = writeval; break;
-                                    case 0x304: state.mie = writeval; break;
-                                    case 0x344: state.mip = writeval; break;
-                                    case 0x341: state.mepc = writeval; break;
-                                    case 0x300: state.mstatus = writeval; break;
-                                    case 0x342: state.mcause = writeval; break;
-                                    case 0x343: state.mtval = writeval; break;
-                                    default:
-                                        if (csrHook != null) {
-                                            csrHook.handleWrite(csrno, writeval);
-                                        }
-                                        break;
+                                if (shouldWrite) {
+                                    writeCsr(state, csrHook, csrno, writeval);
                                 }
                             } else if (microop == 0) {
                                 // SYSTEM (MRET, ECALL, etc.)
                                 rdid = 0;
-                                if ((csrno & 0xff) == 0x02) {
+                                if (csrno == 0x302) {
                                     // MRET
                                     int startmstatus = state.mstatus;
                                     int startextraflags = state.extraflags;
-                                    state.mstatus = ((startmstatus & 0x80) >> 4) | ((startextraflags & 3) << 11) | 0x80;
+                                    state.mstatus = (startmstatus & ~(MSTATUS_MIE | MSTATUS_MPIE | MSTATUS_MPP))
+                                            | ((startmstatus & MSTATUS_MPIE) >> 4)
+                                            | MSTATUS_MPIE;
                                     state.extraflags = (startextraflags & ~3) | ((startmstatus >> 11) & 3);
                                     pc = state.mepc - 4;
                                 } else {
@@ -361,10 +376,12 @@ public class RV32IMACore {
                 pc += 4;
             } else {
                 state.mcause = trap - 1;
-                state.mtval = (trap > 5 && trap <= 8) ? rval : pc;
+                state.mtval = state.mcause == 2 ? ir : rval;
             }
             state.mepc = pc;
-            state.mstatus = ((state.mstatus & 0x08) << 4) | ((state.extraflags & 3) << 11);
+            state.mstatus = (state.mstatus & ~(MSTATUS_MIE | MSTATUS_MPIE | MSTATUS_MPP))
+                    | ((state.mstatus & MSTATUS_MIE) << 4)
+                    | ((state.extraflags & 3) << 11);
             pc = state.mtvec;
             state.extraflags |= 3; // Enter machine mode
             trap = 0;

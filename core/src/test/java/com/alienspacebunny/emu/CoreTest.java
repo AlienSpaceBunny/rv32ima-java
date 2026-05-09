@@ -4,10 +4,31 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 public class CoreTest {
+    private static final int RAM_OFFSET = 0x80000000;
+
+    private static RV32IMAState machineState() {
+        RV32IMAState state = new RV32IMAState();
+        state.pc = RAM_OFFSET;
+        state.extraflags |= 3;
+        return state;
+    }
+
+    private static int loadInstruction(int funct3, int rd, int rs1, int imm) {
+        return ((imm & 0xfff) << 20) | (rs1 << 15) | (funct3 << 12) | (rd << 7) | 0x03;
+    }
+
+    private static int storeInstruction(int funct3, int rs1, int rs2, int imm) {
+        return (((imm >> 5) & 0x7f) << 25)
+                | (rs2 << 20)
+                | (rs1 << 15)
+                | (funct3 << 12)
+                | ((imm & 0x1f) << 7)
+                | 0x23;
+    }
 
     @Test
     public void testBasicArithmetic() {
-        int ramOffset = 0x80000000;
+        int ramOffset = RAM_OFFSET;
         int ramSize = 1024;
         try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, ramOffset)) {
             RV32IMAState state = new RV32IMAState();
@@ -34,7 +55,7 @@ public class CoreTest {
 
     @Test
     public void testLoadStore() {
-        int ramOffset = 0x80000000;
+        int ramOffset = RAM_OFFSET;
         int ramSize = 1024;
         try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, ramOffset)) {
             RV32IMAState state = new RV32IMAState();
@@ -76,6 +97,85 @@ public class CoreTest {
             
             assertThrows(IndexOutOfBoundsException.class, () -> ram.readInt(0x0000));
             assertThrows(IndexOutOfBoundsException.class, () -> ram.readInt(0x2000));
+        }
+    }
+
+    @Test
+    public void invalidGuestLoadBelowRamRaisesLoadAccessFault() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            int faultAddress = RAM_OFFSET - 4;
+            state.regs[1] = faultAddress;
+            ram.writeInt(RAM_OFFSET, loadInstruction(2, 2, 1, 0)); // lw x2, 0(x1)
+
+            assertDoesNotThrow(() -> new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null));
+
+            assertEquals(5, state.mcause);
+            assertEquals(faultAddress, state.mtval);
+            assertEquals(RAM_OFFSET, state.mepc);
+        }
+    }
+
+    @Test
+    public void invalidGuestStorePastRamRaisesStoreAccessFault() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            int faultAddress = RAM_OFFSET + ramSize;
+            state.regs[1] = faultAddress;
+            state.regs[2] = 0x12345678;
+            ram.writeInt(RAM_OFFSET, storeInstruction(2, 1, 2, 0)); // sw x2, 0(x1)
+
+            assertDoesNotThrow(() -> new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null));
+
+            assertEquals(7, state.mcause);
+            assertEquals(faultAddress, state.mtval);
+            assertEquals(RAM_OFFSET, state.mepc);
+        }
+    }
+
+    @Test
+    public void invalidGuestMmioLoadWithoutHookRaisesLoadAccessFault() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            MMIOBus bus = new MMIOBus(ram);
+            RV32IMAState state = machineState();
+            int faultAddress = 0x10000000;
+            state.regs[1] = faultAddress;
+            ram.writeInt(RAM_OFFSET, loadInstruction(2, 2, 1, 0)); // lw x2, 0(x1)
+
+            assertDoesNotThrow(() -> new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null));
+
+            assertEquals(5, state.mcause);
+            assertEquals(faultAddress, state.mtval);
+            assertEquals(RAM_OFFSET, state.mepc);
+        }
+    }
+
+    @Test
+    public void validBoundaryByteAccessesDoNotTrap() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMACore core = new RV32IMACore();
+
+            RV32IMAState firstByteLoad = machineState();
+            firstByteLoad.regs[1] = RAM_OFFSET;
+            ram.writeByte(RAM_OFFSET, (byte) 0x7f);
+            ram.writeInt(RAM_OFFSET + 4, loadInstruction(0, 2, 1, 0)); // lb x2, 0(x1)
+            firstByteLoad.pc = RAM_OFFSET + 4;
+            core.step(firstByteLoad, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(0, firstByteLoad.mcause);
+            assertEquals(0x7f, firstByteLoad.regs[2]);
+
+            RV32IMAState lastByteStore = machineState();
+            lastByteStore.regs[1] = RAM_OFFSET + ramSize - 1;
+            lastByteStore.regs[2] = 0xa5;
+            ram.writeInt(RAM_OFFSET + 8, storeInstruction(0, 1, 2, 0)); // sb x2, 0(x1)
+            lastByteStore.pc = RAM_OFFSET + 8;
+            core.step(lastByteStore, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(0, lastByteStore.mcause);
+            assertEquals((byte) 0xa5, ram.readByte(RAM_OFFSET + ramSize - 1));
         }
     }
 }

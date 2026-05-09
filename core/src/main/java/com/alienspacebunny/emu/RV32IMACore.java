@@ -118,13 +118,18 @@ public class RV32IMACore {
                             int imm_se = imm | (((imm & 0x800) != 0) ? 0xfffff000 : 0);
                             int addr = rs1 + imm_se;
 
-                            switch ((ir >> 12) & 0x7) {
-                                case 0: rval = mem.readByteSigned(addr); break; // LB
-                                case 1: rval = mem.readShortSigned(addr); break; // LH
-                                case 2: rval = mem.readInt(addr); break; // LW
-                                case 4: rval = mem.readByte(addr) & 0xFF; break; // LBU
-                                case 5: rval = mem.readShort(addr) & 0xFFFF; break; // LHU
-                                default: trap = (2 + 1);
+                            try {
+                                switch ((ir >> 12) & 0x7) {
+                                    case 0: rval = mem.readByteSigned(addr); break; // LB
+                                    case 1: rval = mem.readShortSigned(addr); break; // LH
+                                    case 2: rval = mem.readInt(addr); break; // LW
+                                    case 4: rval = mem.readByte(addr) & 0xFF; break; // LBU
+                                    case 5: rval = mem.readShort(addr) & 0xFFFF; break; // LHU
+                                    default: trap = (2 + 1);
+                                }
+                            } catch (IndexOutOfBoundsException e) {
+                                trap = (5 + 1); // Load access fault
+                                rval = addr;
                             }
                             // Note: C code had some MMIO checks here, but our MemoryBus handles it via MMIOBus
                             break;
@@ -138,11 +143,16 @@ public class RV32IMACore {
                             int addr = rs1 + imm;
                             rdid = 0;
 
-                            switch ((ir >> 12) & 0x7) {
-                                case 0: mem.writeByte(addr, (byte) rs2); break; // SB
-                                case 1: mem.writeShort(addr, (short) rs2); break; // SH
-                                case 2: mem.writeInt(addr, rs2); break; // SW
-                                default: trap = (2 + 1);
+                            try {
+                                switch ((ir >> 12) & 0x7) {
+                                    case 0: mem.writeByte(addr, (byte) rs2); break; // SB
+                                    case 1: mem.writeShort(addr, (short) rs2); break; // SH
+                                    case 2: mem.writeInt(addr, rs2); break; // SW
+                                    default: trap = (2 + 1);
+                                }
+                            } catch (IndexOutOfBoundsException e) {
+                                trap = (7 + 1); // Store access fault
+                                rval = addr;
                             }
                             break;
                         }
@@ -291,10 +301,12 @@ public class RV32IMACore {
                             int rs2 = state.regs[(ir >> 20) & 0x1f];
                             int irmid = (ir >> 27) & 0x1f;
 
-                            // We'll assume the memory bus handles atomics or we just implement them simply
-                            rval = mem.readInt(rs1);
                             boolean dowrite = true;
-                            switch (irmid) {
+                            int accessFaultTrap = (irmid == 2) ? (5 + 1) : (7 + 1);
+                            try {
+                                // We'll assume the memory bus handles atomics or we just implement them simply
+                                rval = mem.readInt(rs1);
+                                switch (irmid) {
                                 case 2: // LR.W
                                     dowrite = false;
                                     state.extraflags = (state.extraflags & 0x07) | (rs1 << 3);
@@ -313,8 +325,12 @@ public class RV32IMACore {
                                 case 24: rs2 = Integer.compareUnsigned(rs2, rval) < 0 ? rs2 : rval; break; // AMOMINU.W
                                 case 28: rs2 = Integer.compareUnsigned(rs2, rval) > 0 ? rs2 : rval; break; // AMOMAXU.W
                                 default: trap = (2 + 1); dowrite = false; break;
+                                }
+                                if (dowrite) mem.writeInt(rs1, rs2);
+                            } catch (IndexOutOfBoundsException e) {
+                                trap = accessFaultTrap;
+                                rval = rs1;
                             }
-                            if (dowrite) mem.writeInt(rs1, rs2);
                             break;
                         }
                         default:

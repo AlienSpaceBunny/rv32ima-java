@@ -205,10 +205,30 @@ public class RV32IMACore {
                             int rs1 = state.regs[(ir >> 15) & 0x1f];
                             boolean is_reg = (opcode & 0x20) != 0;
                             int rs2 = is_reg ? state.regs[imm & 0x1f] : imm;
+                            int funct3 = (ir >> 12) & 7;
+                            int funct7 = (ir >>> 25) & 0x7f;
+                            boolean legalEncoding;
 
-                            if (is_reg && (ir & 0x02000000) != 0) {
+                            if (is_reg) {
+                                legalEncoding = funct7 == 0
+                                        || (funct7 == 0x20 && (funct3 == 0 || funct3 == 5))
+                                        || funct7 == 1;
+                            } else if (funct3 == 1) {
+                                legalEncoding = funct7 == 0;
+                            } else if (funct3 == 5) {
+                                legalEncoding = funct7 == 0 || funct7 == 0x20;
+                            } else {
+                                legalEncoding = true;
+                            }
+
+                            if (!legalEncoding) {
+                                trap = (2 + 1);
+                                break;
+                            }
+
+                            if (is_reg && funct7 == 1) {
                                 // RV32M
-                                switch ((ir >> 12) & 7) {
+                                switch (funct3) {
                                     case 0: rval = rs1 * rs2; break; // MUL
                                     case 1: rval = (int) (((long) rs1 * (long) rs2) >> 32); break; // MULH
                                     case 2: rval = (int) (((long) rs1 * Integer.toUnsignedLong(rs2)) >> 32); break; // MULHSU
@@ -231,7 +251,7 @@ public class RV32IMACore {
                                         break;
                                 }
                             } else {
-                                switch ((ir >> 12) & 7) {
+                                switch (funct3) {
                                     case 0: rval = (is_reg && (ir & 0x40000000) != 0) ? (rs1 - rs2) : (rs1 + rs2); break;
                                     case 1: rval = rs1 << (rs2 & 0x1F); break;
                                     case 2: rval = rs1 < rs2 ? 1 : 0; break;
@@ -315,6 +335,16 @@ public class RV32IMACore {
                             int rs1 = state.regs[(ir >> 15) & 0x1f];
                             int rs2 = state.regs[(ir >> 20) & 0x1f];
                             int irmid = (ir >> 27) & 0x1f;
+                            int funct3 = (ir >> 12) & 7;
+
+                            boolean validAtomicOperation = switch (irmid) {
+                                case 0, 1, 2, 3, 4, 8, 12, 16, 20, 24, 28 -> true;
+                                default -> false;
+                            };
+                            if (funct3 != 2 || !validAtomicOperation) {
+                                trap = (2 + 1);
+                                break;
+                            }
 
                             boolean dowrite = true;
                             int accessFaultTrap = (irmid == 2) ? (5 + 1) : (7 + 1);

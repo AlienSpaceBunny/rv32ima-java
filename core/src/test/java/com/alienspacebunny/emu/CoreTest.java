@@ -30,6 +30,18 @@ public class CoreTest {
         return (csr << 20) | (rs1OrImmediate << 15) | (funct3 << 12) | (rd << 7) | 0x73;
     }
 
+    private static int opInstruction(int funct7, int funct3, int rd, int rs1, int rs2) {
+        return (funct7 << 25) | (rs2 << 20) | (rs1 << 15) | (funct3 << 12) | (rd << 7) | 0x33;
+    }
+
+    private static int opImmInstruction(int imm, int funct3, int rd, int rs1) {
+        return ((imm & 0xfff) << 20) | (rs1 << 15) | (funct3 << 12) | (rd << 7) | 0x13;
+    }
+
+    private static int amoInstruction(int funct5, int funct3, int rd, int rs1, int rs2) {
+        return (funct5 << 27) | (rs2 << 20) | (rs1 << 15) | (funct3 << 12) | (rd << 7) | 0x2f;
+    }
+
     private static final class RecordingCSRHook implements CSRHook {
         int readCount;
         int writeCount;
@@ -306,6 +318,75 @@ public class CoreTest {
             assertEquals(2, state.mcause);
             assertEquals(illegalInstruction, state.mtval);
             assertEquals(RAM_OFFSET, state.mepc);
+        }
+    }
+
+    @Test
+    public void invalidOpImmShiftEncodingTrapsWithoutCommittingDestination() {
+        assertIllegalInstructionDoesNotCommit(opImmInstruction(0x20, 1, 2, 1), 2);
+    }
+
+    @Test
+    public void invalidOpFunct7EncodingTrapsWithoutCommittingDestination() {
+        assertIllegalInstructionDoesNotCommit(opInstruction(0x10, 0, 2, 1, 1), 2);
+    }
+
+    @Test
+    public void invalidMExtensionLikeEncodingTrapsWithoutCommittingDestination() {
+        assertIllegalInstructionDoesNotCommit(opInstruction(0x03, 0, 2, 1, 1), 2);
+    }
+
+    @Test
+    public void invalidAtomicFunct3TrapsWithoutCommittingDestination() {
+        assertIllegalInstructionDoesNotCommit(amoInstruction(2, 0, 2, 1, 0), 2);
+    }
+
+    @Test
+    public void unsupportedAtomicOperationTrapsWithoutCommittingDestination() {
+        assertIllegalInstructionDoesNotCommit(amoInstruction(5, 2, 2, 1, 0), 2);
+    }
+
+    @Test
+    public void validNeighboringEncodingsStillExecute() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = RAM_OFFSET + 100;
+            state.regs[4] = 10;
+            state.regs[5] = 3;
+            state.regs[8] = 5;
+            ram.writeInt(RAM_OFFSET + 100, 7);
+            ram.writeInt(RAM_OFFSET, opImmInstruction(3, 1, 2, 5)); // slli x2, x5, 3
+            ram.writeInt(RAM_OFFSET + 4, opInstruction(0x20, 0, 3, 4, 5)); // sub x3, x4, x5
+            ram.writeInt(RAM_OFFSET + 8, opInstruction(0x01, 0, 6, 4, 5)); // mul x6, x4, x5
+            ram.writeInt(RAM_OFFSET + 12, amoInstruction(0, 2, 7, 1, 8)); // amoadd.w x7, x8, (x1)
+
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 4, null, null);
+
+            assertEquals(24, state.regs[2]);
+            assertEquals(7, state.regs[3]);
+            assertEquals(30, state.regs[6]);
+            assertEquals(7, state.regs[7]);
+            assertEquals(12, ram.readInt(RAM_OFFSET + 100));
+        }
+    }
+
+    private static void assertIllegalInstructionDoesNotCommit(int instruction, int destinationRegister) {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = RAM_OFFSET + 100;
+            state.regs[destinationRegister] = 0x13579bdf;
+            ram.writeInt(RAM_OFFSET + 100, 0x2468ace0);
+            ram.writeInt(RAM_OFFSET, instruction);
+
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(2, state.mcause);
+            assertEquals(instruction, state.mtval);
+            assertEquals(RAM_OFFSET, state.mepc);
+            assertEquals(0x13579bdf, state.regs[destinationRegister]);
+            assertEquals(0x2468ace0, ram.readInt(RAM_OFFSET + 100));
         }
     }
 }

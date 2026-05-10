@@ -7,6 +7,9 @@ package com.alienspacebunny.emu;
  * {@code int}. Implementations should throw {@link IndexOutOfBoundsException}
  * for unmapped or disallowed accesses so {@link RV32IMACore} can convert guest
  * data-access failures into RISC-V traps.
+ *
+ * <p>Multi-byte accesses ({@code short}, {@code int}) must use little-endian byte order,
+ * consistent with the RISC-V ISA. Big-endian hosts are not supported.
  */
 public interface MemoryBus {
     /**

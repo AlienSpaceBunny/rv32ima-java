@@ -3,10 +3,13 @@
 This directory contains a standalone baremetal test program for the RV32IMA emulator.
 
 ## Origin
-This code was originally part of the [mini-rv32ima](https://github.com/cnlohr/mini-rv32ima) project by Charles Lohr.
+This code was originally part of the
+[mini-rv32ima](https://github.com/cnlohr/mini-rv32ima) project by Charles
+Lohr.
 
 ## Changes for the Java Port
-To facilitate testing in environments without a dedicated RISC-V GCC toolchain, the following changes were made:
+To facilitate testing in environments without a dedicated RISC-V GCC
+toolchain, the following changes were made:
 
 1. **Clang/LLVM Support:** The `Makefile` was refactored to use `clang` with the `--target=riscv32-none-elf` triple and the `ld.lld` linker.
 2. **Freestanding Cleanup:** Removed unused standard library includes (`stdio.h`, `stdarg.h`) from `baremetal.c` to support standalone compilation without a libc.
@@ -14,7 +17,15 @@ To facilitate testing in environments without a dedicated RISC-V GCC toolchain, 
 4. **Code Model:** Configured for `medany` code model and disabled linker relaxation to match the fixed `0x80000000` memory map.
 
 ## How to Build
-Requires `clang` and `lld` with RISC-V support.
+
+Requires `clang` and `lld` with RISC-V 32-bit support.  Tested with clang
+22; any recent clang release (14+) with the `riscv32` target enabled should
+work.
+
+**GCC is not supported**: The upstream Makefile used a RISC-V GCC
+cross-compiler; this port switched to clang/LLVM including what are *likely*
+breaking changes.  A GCC build is expected to fail; please do not submit GCC
+fixes unless this maintains clang/LLVM compatibility..
 
 ```bash
 make clean

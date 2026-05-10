@@ -29,12 +29,17 @@ public class RV32IMAState {
     /**
      * Internal flags carried over from the mini-rv32ima state layout.
      *
-     * <p>Note: only a few bits are used. (Machine = 3, User = 0)
-     * Bits 0..1 = privilege.
-     * Bit 2 = WFI (Wait for interrupt)
-     * Bit 3+ = Load/Store reservation LSBs.
+     * <p>Only bits 0–2 are used:
+     * Bits 0..1 = privilege level (Machine = 3, User = 0).
+     * Bit 2 = WFI (Wait for interrupt).
      */
     public int extraflags;
+
+    /** Address held in the LR/SC reservation, valid only when {@link #reservationValid} is true. */
+    public int reservationAddr;
+
+    /** Whether this hart holds an active LR/SC reservation. */
+    public boolean reservationValid;
 
     /**
      * Returns the 64-bit cycle counter composed from {@link #cycleh} and

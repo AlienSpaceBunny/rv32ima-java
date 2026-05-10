@@ -87,7 +87,7 @@ public class RV32IMACore {
 
         // Handle Timer interrupt.
         long timerMatch = state.getTimerMatch();
-        if (timerMatch != 0 && Long.compareUnsigned(newTimer, timerMatch) > 0) {
+        if (timerMatch != 0 && Long.compareUnsigned(newTimer, timerMatch) >= 0) {
             state.extraflags &= ~4; // Clear WFI
             state.mip |= 1 << 7; // MTIP of MIP
         } else {
@@ -209,6 +209,9 @@ public class RV32IMACore {
                                     case 1: mem.writeShort(addr, (short) rs2); break; // SH
                                     case 2: mem.writeInt(addr, rs2); break; // SW
                                     default: trap = (2 + 1);
+                                }
+                                if (trap == 0) {
+                                    state.reservationValid = false;
                                 }
                             } catch (IndexOutOfBoundsException e) {
                                 trap = (7 + 1); // Store access fault
@@ -373,11 +376,18 @@ public class RV32IMACore {
                                 switch (irmid) {
                                 case 2: // LR.W
                                     dowrite = false;
-                                    state.extraflags = (state.extraflags & 0x07) | (rs1 << 3);
+                                    state.reservationAddr = rs1;
+                                    state.reservationValid = true;
                                     break;
                                 case 3: // SC.W
-                                    rval = ((state.extraflags >>> 3) != (rs1 & 0x1fffffff)) ? 1 : 0;
-                                    dowrite = (rval == 0);
+                                    if (state.reservationValid && state.reservationAddr == rs1) {
+                                        rval = 0;
+                                        dowrite = true;
+                                    } else {
+                                        rval = 1;
+                                        dowrite = false;
+                                    }
+                                    state.reservationValid = false;
                                     break;
                                 case 1: break; // AMOSWAP.W
                                 case 0: rs2 += rval; break; // AMOADD.W

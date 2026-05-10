@@ -9,6 +9,7 @@ import com.alienspacebunny.emu.RV32IMAState;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -36,7 +37,7 @@ public class IntegrationTest {
         // Capture stdout
         PrintStream oldOut = System.out;
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        System.setOut(new PrintStream(baos));
+        System.setOut(new PrintStream(baos, false, StandardCharsets.UTF_8));
 
         try (FFMMemoryBus ram = new FFMMemoryBus(ramAmt, ramOffset)) {
             ram.getSegment().copyFrom(java.lang.foreign.MemorySegment.ofArray(binaryData));
@@ -66,7 +67,7 @@ public class IntegrationTest {
             System.setOut(oldOut);
         }
 
-        String output = baos.toString();
+        String output = baos.toString(StandardCharsets.UTF_8);
         assertTrue(output.contains("Hello world from RV32 land."));
         assertTrue(output.contains("Assembly code: I'm an assembly function."));
     }

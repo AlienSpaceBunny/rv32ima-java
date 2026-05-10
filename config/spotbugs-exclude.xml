@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+    <!--
+        Suppressed SpotBugs findings. Each suppression must have a justification comment.
+        Prefer fixing real bugs; only suppress confirmed false positives or accepted risks.
+    -->
+
+    <!--
+        FFMMemoryBus.getSegment() intentionally exposes the underlying MemorySegment as an
+        escape hatch for bulk operations (e.g. loading a binary image via copyFrom). The method
+        is documented as an advanced-use API. Callers take ownership of aliasing consequences.
+    -->
+    <Match>
+        <Class name="com.alienspacebunny.emu.FFMMemoryBus"/>
+        <Bug pattern="EI_EXPOSE_REP"/>
+    </Match>
+
+    <!--
+        MMIOBus is a decorator that wraps a MemoryBus. Storing the reference is intentional:
+        the backing bus is shared between the MMIOBus and its caller by design (both must see
+        the same memory). Making a defensive copy of a MemoryBus would be wrong here.
+    -->
+    <Match>
+        <Class name="com.alienspacebunny.emu.MMIOBus"/>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+    </Match>
+
+    <!--
+        RV32IMAState is a C-struct-style object that mirrors the mini-rv32ima state layout.
+        The cycle/timer half-word fields (cyclel/cycleh, timerl/timerh, timermatchl/timermatchh)
+        must be public because CLINTHook reads and writes individual 32-bit MMIO registers at
+        distinct addresses — the CLINT memory map exposes each half-word as its own register.
+        The 64-bit getter/setter methods are convenience APIs for the emulator core. Both
+        access modes are intentional and cannot be collapsed without losing MMIO fidelity.
+    -->
+    <Match>
+        <Class name="com.alienspacebunny.emu.RV32IMAState"/>
+        <Bug pattern="PA_PUBLIC_PRIMITIVE_ATTRIBUTE"/>
+    </Match>
+
+
+    <!--
+        CLINTHook stores a RV32IMAState reference to read/write timer registers on each MMIO
+        access. Sharing the reference is intentional: the state must be the same object that
+        the emulator core updates each step. A defensive copy would be both wrong and impossible
+        (state has no copy constructor).
+    -->
+    <Match>
+        <Class name="com.alienspacebunny.cli.CLINTHook"/>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+    </Match>
+
+    <!--
+        MiniRV32IMACSRHook stores a MemoryBus reference to perform string reads on behalf of
+        CSR 0x138 (print-string debug CSR). The bus must be the same live object used by the
+        emulator. A defensive copy of a MemoryBus is not meaningful.
+    -->
+    <Match>
+        <Class name="com.alienspacebunny.cli.MiniRV32IMACSRHook"/>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+    </Match>
+
+</FindBugsFilter>

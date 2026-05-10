@@ -62,6 +62,7 @@ public class MiniRV32IMACSRHook implements CSRHook {
                 System.out.print((char) value);
                 System.out.flush();
             }
+            default -> {} // unrecognised CSR write — ignore
         }
     }
 }

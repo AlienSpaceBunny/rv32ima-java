@@ -340,6 +340,8 @@ public class RV32IMACore {
                                         if (rs2 == 0) rval = rs1;
                                         else rval = (int) (Integer.toUnsignedLong(rs1) % Integer.toUnsignedLong(rs2));
                                         break;
+                                    default:
+                                        break; // unreachable: funct7==1 validation above covers 0-7
                                 }
                             } else {
                                 switch (funct3) {
@@ -369,6 +371,8 @@ public class RV32IMACore {
                                     case 7:
                                         rval = rs1 & rs2;
                                         break;
+                                    default:
+                                        break; // unreachable: funct3 is 3 bits (0-7), all cases handled above
                                 }
                             }
                             break;
@@ -410,6 +414,8 @@ public class RV32IMACore {
                                     case 7:
                                         writeval = rval & ~rs1imm;
                                         break; // CSRRCI
+                                    default:
+                                        break; // unreachable: outer (microop & 3) != 0 excludes 0 and 4
                                 }
 
                                 if (shouldWrite) {

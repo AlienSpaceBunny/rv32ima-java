@@ -1,8 +1,6 @@
 package com.alienspacebunny.cli;
 
 import com.alienspacebunny.emu.HardwareHook;
-import com.alienspacebunny.emu.RV32IMAState;
-
 import java.io.IOException;
 
 /**

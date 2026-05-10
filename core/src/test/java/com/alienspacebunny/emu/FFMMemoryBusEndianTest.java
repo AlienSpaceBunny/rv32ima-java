@@ -1,7 +1,8 @@
 package com.alienspacebunny.emu;
 
-import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
+
+import org.junit.jupiter.api.Test;
 
 public class FFMMemoryBusEndianTest {
     private static final int BASE = 0x1000;
@@ -9,7 +10,7 @@ public class FFMMemoryBusEndianTest {
     @Test
     public void writeBytesReadAsIntIsLittleEndian() {
         try (FFMMemoryBus bus = new FFMMemoryBus(16, BASE)) {
-            bus.writeByte(BASE,     (byte) 0x01);
+            bus.writeByte(BASE, (byte) 0x01);
             bus.writeByte(BASE + 1, (byte) 0x02);
             bus.writeByte(BASE + 2, (byte) 0x03);
             bus.writeByte(BASE + 3, (byte) 0x04);
@@ -33,7 +34,7 @@ public class FFMMemoryBusEndianTest {
     @Test
     public void writeBytesReadAsShortIsLittleEndian() {
         try (FFMMemoryBus bus = new FFMMemoryBus(16, BASE)) {
-            bus.writeByte(BASE,     (byte) 0x01);
+            bus.writeByte(BASE, (byte) 0x01);
             bus.writeByte(BASE + 1, (byte) 0x02);
 
             assertEquals((short) 0x0201, bus.readShort(BASE));

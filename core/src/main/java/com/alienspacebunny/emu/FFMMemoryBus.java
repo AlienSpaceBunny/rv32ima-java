@@ -15,8 +15,7 @@ import java.nio.ByteOrder;
 public class FFMMemoryBus implements MemoryBus, AutoCloseable {
     private static final ValueLayout.OfShort LE_SHORT =
             ValueLayout.JAVA_SHORT_UNALIGNED.withOrder(ByteOrder.LITTLE_ENDIAN);
-    private static final ValueLayout.OfInt LE_INT =
-            ValueLayout.JAVA_INT_UNALIGNED.withOrder(ByteOrder.LITTLE_ENDIAN);
+    private static final ValueLayout.OfInt LE_INT = ValueLayout.JAVA_INT_UNALIGNED.withOrder(ByteOrder.LITTLE_ENDIAN);
 
     private final MemorySegment segment;
     private final Arena arena;

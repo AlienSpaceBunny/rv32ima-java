@@ -1,15 +1,15 @@
 package com.alienspacebunny.cli;
 
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import com.alienspacebunny.emu.*;
-import org.junit.jupiter.api.Test;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.junit.jupiter.api.Test;
 
 public class IntegrationTest {
 
@@ -17,7 +17,7 @@ public class IntegrationTest {
     public void testBaremetalBinary() throws Exception {
         int ramAmt = 64 * 1024 * 1024;
         int ramOffset = 0x80000000;
-        
+
         // Load the binary from resources
         byte[] binaryData;
         try (InputStream is = getClass().getResourceAsStream("/bin/baremetal.bin")) {

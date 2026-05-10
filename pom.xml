@@ -18,21 +18,43 @@
         <maven.compiler.source>25</maven.compiler.source>
         <maven.compiler.target>25</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <checkstyle.version>3.3.1</checkstyle.version>
+        <spotless.version>2.44.5</spotless.version>
+        <palantir.java.format.version>2.90.0</palantir.java.format.version>
     </properties>
 
     <build>
         <plugins>
+            <!--
+                Spotless enforces Palantir Java Format (4-space indent, IntelliJ-compatible style).
+                Run `mvn spotless:apply` to auto-format. `mvn verify` fails if formatting is dirty.
+
+                Wildcard imports (import foo.*) are not banned here; they will be rejected by
+                Checkstyle's AvoidStarImport rule when Checkstyle is configured (next step).
+
+                CI note: GitHub Actions should run `mvn verify`, which triggers spotless:check
+                at the verify phase and fails the build if any file needs reformatting.
+            -->
             <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-checkstyle-plugin</artifactId>
-                <version>${checkstyle.version}</version>
+                <groupId>com.diffplug.spotless</groupId>
+                <artifactId>spotless-maven-plugin</artifactId>
+                <version>${spotless.version}</version>
                 <configuration>
-                    <configLocation>google_checks.xml</configLocation>
-                    <consoleOutput>true</consoleOutput>
-                    <failsOnError>true</failsOnError>
-                    <linkXRef>false</linkXRef>
+                    <java>
+                        <palantirJavaFormat>
+                            <version>${palantir.java.format.version}</version>
+                        </palantirJavaFormat>
+                        <removeUnusedImports/>
+                    </java>
                 </configuration>
+                <executions>
+                    <execution>
+                        <id>spotless-check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

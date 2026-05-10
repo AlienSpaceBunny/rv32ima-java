@@ -2,7 +2,6 @@ package com.alienspacebunny.cli;
 
 import com.alienspacebunny.emu.CSRHook;
 import com.alienspacebunny.emu.MemoryBus;
-
 import java.io.IOException;
 
 /**

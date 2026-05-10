@@ -1,7 +1,8 @@
 package com.alienspacebunny.emu;
 
-import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
+
+import org.junit.jupiter.api.Test;
 
 public class CoreTest {
     private static final int RAM_OFFSET = 0x80000000;
@@ -18,12 +19,7 @@ public class CoreTest {
     }
 
     private static int storeInstruction(int funct3, int rs1, int rs2, int imm) {
-        return (((imm >> 5) & 0x7f) << 25)
-                | (rs2 << 20)
-                | (rs1 << 15)
-                | (funct3 << 12)
-                | ((imm & 0x1f) << 7)
-                | 0x23;
+        return (((imm >> 5) & 0x7f) << 25) | (rs2 << 20) | (rs1 << 15) | (funct3 << 12) | ((imm & 0x1f) << 7) | 0x23;
     }
 
     private static int csrInstruction(int csr, int funct3, int rd, int rs1OrImmediate) {
@@ -128,10 +124,10 @@ public class CoreTest {
         try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, ramOffset)) {
             ram.writeInt(0x1000, 0xCAFEBABE);
             ram.writeInt(0x1004, 0xDEADBEEF);
-            
+
             assertEquals(0xCAFEBABE, ram.readInt(0x1000));
             assertEquals(0xDEADBEEF, ram.readInt(0x1004));
-            
+
             assertThrows(IndexOutOfBoundsException.class, () -> ram.readInt(0x0000));
             assertThrows(IndexOutOfBoundsException.class, () -> ram.readInt(0x2000));
         }
@@ -383,7 +379,7 @@ public class CoreTest {
             RV32IMAState state = machineState();
             state.mtvec = RAM_OFFSET + 0x80;
             state.mstatus = 0x08; // MIE set
-            state.mie = 1 << 7;   // MTIE set
+            state.mie = 1 << 7; // MTIE set
             state.setTimer(10);
             state.setTimerMatch(10); // boundary: mtime == mtimecmp must fire
 
@@ -417,7 +413,7 @@ public class CoreTest {
             RV32IMAState state = machineState();
             state.mtvec = RAM_OFFSET + 0x80;
             state.mstatus = 0x08; // MIE set (WFI instruction sets this before suspending)
-            state.mie = 1 << 7;   // MTIE set
+            state.mie = 1 << 7; // MTIE set
             state.extraflags |= 4; // WFI active
             state.setTimer(11);
             state.setTimerMatch(10);
@@ -442,13 +438,13 @@ public class CoreTest {
             state.regs[1] = dataAddr;
             state.regs[2] = 0x12345678;
             ram.writeInt(dataAddr, 0xdeadbeef);
-            ram.writeInt(RAM_OFFSET,     amoInstruction(2, 2, 3, 1, 0)); // lr.w x3, (x1)
+            ram.writeInt(RAM_OFFSET, amoInstruction(2, 2, 3, 1, 0)); // lr.w x3, (x1)
             ram.writeInt(RAM_OFFSET + 4, amoInstruction(3, 2, 4, 1, 2)); // sc.w x4, x2, (x1)
 
             new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 2, null, null);
 
             assertEquals(0xdeadbeef, state.regs[3]); // lr.w returned original value
-            assertEquals(0, state.regs[4]);           // sc.w succeeded
+            assertEquals(0, state.regs[4]); // sc.w succeeded
             assertEquals(0x12345678, ram.readInt(dataAddr));
         }
     }
@@ -483,12 +479,12 @@ public class CoreTest {
             state.regs[3] = 0x12345678;
             ram.writeInt(addrA, 0xaaaaaaaa);
             ram.writeInt(addrB, 0xbbbbbbbb);
-            ram.writeInt(RAM_OFFSET,     amoInstruction(2, 2, 4, 1, 0)); // lr.w x4, (x1)
+            ram.writeInt(RAM_OFFSET, amoInstruction(2, 2, 4, 1, 0)); // lr.w x4, (x1)
             ram.writeInt(RAM_OFFSET + 4, amoInstruction(3, 2, 5, 2, 3)); // sc.w x5, x3, (x2)
 
             new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 2, null, null);
 
-            assertEquals(1, state.regs[5]);             // sc.w failed: address mismatch
+            assertEquals(1, state.regs[5]); // sc.w failed: address mismatch
             assertEquals(0xbbbbbbbb, ram.readInt(addrB)); // addrB not modified
         }
     }
@@ -503,14 +499,14 @@ public class CoreTest {
             state.regs[2] = 0x11111111;
             state.regs[3] = 0x22222222;
             ram.writeInt(dataAddr, 0xdeadbeef);
-            ram.writeInt(RAM_OFFSET,     amoInstruction(2, 2, 4, 1, 0)); // lr.w x4, (x1)
+            ram.writeInt(RAM_OFFSET, amoInstruction(2, 2, 4, 1, 0)); // lr.w x4, (x1)
             ram.writeInt(RAM_OFFSET + 4, amoInstruction(3, 2, 5, 1, 2)); // sc.w x5, x2, (x1)
             ram.writeInt(RAM_OFFSET + 8, amoInstruction(3, 2, 6, 1, 3)); // sc.w x6, x3, (x1)
 
             new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 3, null, null);
 
-            assertEquals(0, state.regs[5]);            // first sc.w succeeded
-            assertEquals(1, state.regs[6]);            // second sc.w failed: reservation cleared
+            assertEquals(0, state.regs[5]); // first sc.w succeeded
+            assertEquals(1, state.regs[6]); // second sc.w failed: reservation cleared
             assertEquals(0x11111111, ram.readInt(dataAddr)); // only first write committed
         }
     }
@@ -520,16 +516,16 @@ public class CoreTest {
         int ramSize = 1024;
         try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
             RV32IMAState state = machineState();
-            int lrAddr   = RAM_OFFSET + 0x100;
+            int lrAddr = RAM_OFFSET + 0x100;
             int storeAddr = RAM_OFFSET + 0x200;
             state.regs[1] = lrAddr;
             state.regs[2] = storeAddr;
             state.regs[3] = 0x99999999;
             state.regs[4] = 0x12345678;
             ram.writeInt(lrAddr, 0xdeadbeef);
-            ram.writeInt(RAM_OFFSET,      amoInstruction(2, 2, 5, 1, 0));  // lr.w x5, (x1)
-            ram.writeInt(RAM_OFFSET + 4,  storeInstruction(2, 2, 3, 0));   // sw x3, 0(x2)
-            ram.writeInt(RAM_OFFSET + 8,  amoInstruction(3, 2, 6, 1, 4)); // sc.w x6, x4, (x1)
+            ram.writeInt(RAM_OFFSET, amoInstruction(2, 2, 5, 1, 0)); // lr.w x5, (x1)
+            ram.writeInt(RAM_OFFSET + 4, storeInstruction(2, 2, 3, 0)); // sw x3, 0(x2)
+            ram.writeInt(RAM_OFFSET + 8, amoInstruction(3, 2, 6, 1, 4)); // sc.w x6, x4, (x1)
 
             new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 3, null, null);
 
@@ -552,8 +548,8 @@ public class CoreTest {
 
             new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
 
-            assertEquals(1, state.regs[3]);          // original value returned
-            assertEquals(-1, ram.readInt(dataAddr));  // smaller (-1) stored
+            assertEquals(1, state.regs[3]); // original value returned
+            assertEquals(-1, ram.readInt(dataAddr)); // smaller (-1) stored
         }
     }
 
@@ -570,7 +566,7 @@ public class CoreTest {
 
             new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
 
-            assertEquals(1, state.regs[3]);        // original value returned
+            assertEquals(1, state.regs[3]); // original value returned
             assertEquals(1, ram.readInt(dataAddr)); // larger (1) kept
         }
     }
@@ -588,7 +584,7 @@ public class CoreTest {
 
             new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
 
-            assertEquals(1, state.regs[3]);        // original value returned
+            assertEquals(1, state.regs[3]); // original value returned
             assertEquals(1, ram.readInt(dataAddr)); // smaller unsigned (1) kept
         }
     }
@@ -606,7 +602,7 @@ public class CoreTest {
 
             new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
 
-            assertEquals(1, state.regs[3]);              // original value returned
+            assertEquals(1, state.regs[3]); // original value returned
             assertEquals(0xffffffff, ram.readInt(dataAddr)); // larger unsigned stored
         }
     }

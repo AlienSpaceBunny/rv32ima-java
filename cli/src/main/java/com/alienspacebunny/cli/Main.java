@@ -1,7 +1,6 @@
 package com.alienspacebunny.cli;
 
 import com.alienspacebunny.emu.*;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -79,7 +78,7 @@ public class Main {
                     break;
                 }
             }
-            
+
             if (singleStep) {
                 dumpState(state, ram);
             }
@@ -89,14 +88,29 @@ public class Main {
     private static boolean parseArgs(String[] args) {
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
-                case "-m": if (++i < args.length) ramAmt = Integer.decode(args[i]); break;
-                case "-f": if (++i < args.length) imageFileName = args[i]; break;
-                case "-c": if (++i < args.length) instct = Long.decode(args[i]); break;
-                case "-t": if (++i < args.length) timeDivisor = Integer.decode(args[i]); break;
-                case "-l": fixedUpdate = true; break;
-                case "-p": doSleep = false; break;
-                case "-s": singleStep = true; break;
-                default: return false;
+                case "-m":
+                    if (++i < args.length) ramAmt = Integer.decode(args[i]);
+                    break;
+                case "-f":
+                    if (++i < args.length) imageFileName = args[i];
+                    break;
+                case "-c":
+                    if (++i < args.length) instct = Long.decode(args[i]);
+                    break;
+                case "-t":
+                    if (++i < args.length) timeDivisor = Integer.decode(args[i]);
+                    break;
+                case "-l":
+                    fixedUpdate = true;
+                    break;
+                case "-p":
+                    doSleep = false;
+                    break;
+                case "-s":
+                    singleStep = true;
+                    break;
+                default:
+                    return false;
             }
         }
         return imageFileName != null && timeDivisor > 0;

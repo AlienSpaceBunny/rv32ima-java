@@ -44,14 +44,30 @@ public class RV32IMACore {
 
     private void writeCsr(RV32IMAState state, CSRHook csrHook, int csrno, int writeval) {
         switch (csrno) {
-            case 0x340: state.mscratch = writeval; break;
-            case 0x305: state.mtvec = writeval; break;
-            case 0x304: state.mie = writeval; break;
-            case 0x344: state.mip = writeval; break;
-            case 0x341: state.mepc = writeval; break;
-            case 0x300: state.mstatus = writeval; break;
-            case 0x342: state.mcause = writeval; break;
-            case 0x343: state.mtval = writeval; break;
+            case 0x340:
+                state.mscratch = writeval;
+                break;
+            case 0x305:
+                state.mtvec = writeval;
+                break;
+            case 0x304:
+                state.mie = writeval;
+                break;
+            case 0x344:
+                state.mip = writeval;
+                break;
+            case 0x341:
+                state.mepc = writeval;
+                break;
+            case 0x300:
+                state.mstatus = writeval;
+                break;
+            case 0x342:
+                state.mcause = writeval;
+                break;
+            case 0x343:
+                state.mtval = writeval;
+                break;
             default:
                 if (csrHook != null) {
                     csrHook.handleWrite(csrno, writeval);
@@ -80,7 +96,15 @@ public class RV32IMACore {
      * @return 0 after normal execution or trap handling; 1 when the CPU remains
      *     in WFI and no instruction was executed.
      */
-    public int step(RV32IMAState state, MemoryBus mem, int ramOffset, int ramSize, int elapsedUs, int count, PostExecHook postExec, CSRHook csrHook) {
+    public int step(
+            RV32IMAState state,
+            MemoryBus mem,
+            int ramOffset,
+            int ramSize,
+            int elapsedUs,
+            int count,
+            PostExecHook postExec,
+            CSRHook csrHook) {
         long currentTimer = state.getTimer();
         long newTimer = currentTimer + elapsedUs;
         state.setTimer(newTimer);
@@ -138,7 +162,10 @@ public class RV32IMACore {
                             break;
                         case 0x6F: // JAL
                         {
-                            int reladdy = ((ir & 0x80000000) >> 11) | ((ir & 0x7fe00000) >> 20) | ((ir & 0x00100000) >> 9) | ((ir & 0x000ff000));
+                            int reladdy = ((ir & 0x80000000) >> 11)
+                                    | ((ir & 0x7fe00000) >> 20)
+                                    | ((ir & 0x00100000) >> 9)
+                                    | ((ir & 0x000ff000));
                             if ((reladdy & 0x00100000) != 0) reladdy |= 0xffe00000;
                             rval = pc + 4;
                             pc = pc + reladdy - 4;
@@ -154,20 +181,36 @@ public class RV32IMACore {
                         }
                         case 0x63: // Branch
                         {
-                            int immm4 = ((ir & 0xf00) >> 7) | ((ir & 0x7e000000) >> 20) | ((ir & 0x80) << 4) | ((ir >>> 31) << 12);
+                            int immm4 = ((ir & 0xf00) >> 7)
+                                    | ((ir & 0x7e000000) >> 20)
+                                    | ((ir & 0x80) << 4)
+                                    | ((ir >>> 31) << 12);
                             if ((immm4 & 0x1000) != 0) immm4 |= 0xffffe000;
                             int rs1 = state.regs[(ir >> 15) & 0x1f];
                             int rs2 = state.regs[(ir >> 20) & 0x1f];
                             immm4 = pc + immm4 - 4;
                             rdid = 0;
                             switch ((ir >> 12) & 0x7) {
-                                case 0: if (rs1 == rs2) pc = immm4; break; // BEQ
-                                case 1: if (rs1 != rs2) pc = immm4; break; // BNE
-                                case 4: if (rs1 < rs2) pc = immm4; break; // BLT
-                                case 5: if (rs1 >= rs2) pc = immm4; break; // BGE
-                                case 6: if (Integer.compareUnsigned(rs1, rs2) < 0) pc = immm4; break; // BLTU
-                                case 7: if (Integer.compareUnsigned(rs1, rs2) >= 0) pc = immm4; break; // BGEU
-                                default: trap = (2 + 1);
+                                case 0:
+                                    if (rs1 == rs2) pc = immm4;
+                                    break; // BEQ
+                                case 1:
+                                    if (rs1 != rs2) pc = immm4;
+                                    break; // BNE
+                                case 4:
+                                    if (rs1 < rs2) pc = immm4;
+                                    break; // BLT
+                                case 5:
+                                    if (rs1 >= rs2) pc = immm4;
+                                    break; // BGE
+                                case 6:
+                                    if (Integer.compareUnsigned(rs1, rs2) < 0) pc = immm4;
+                                    break; // BLTU
+                                case 7:
+                                    if (Integer.compareUnsigned(rs1, rs2) >= 0) pc = immm4;
+                                    break; // BGEU
+                                default:
+                                    trap = (2 + 1);
                             }
                             break;
                         }
@@ -180,12 +223,23 @@ public class RV32IMACore {
 
                             try {
                                 switch ((ir >> 12) & 0x7) {
-                                    case 0: rval = mem.readByteSigned(addr); break; // LB
-                                    case 1: rval = mem.readShortSigned(addr); break; // LH
-                                    case 2: rval = mem.readInt(addr); break; // LW
-                                    case 4: rval = mem.readByte(addr) & 0xFF; break; // LBU
-                                    case 5: rval = mem.readShort(addr) & 0xFFFF; break; // LHU
-                                    default: trap = (2 + 1);
+                                    case 0:
+                                        rval = mem.readByteSigned(addr);
+                                        break; // LB
+                                    case 1:
+                                        rval = mem.readShortSigned(addr);
+                                        break; // LH
+                                    case 2:
+                                        rval = mem.readInt(addr);
+                                        break; // LW
+                                    case 4:
+                                        rval = mem.readByte(addr) & 0xFF;
+                                        break; // LBU
+                                    case 5:
+                                        rval = mem.readShort(addr) & 0xFFFF;
+                                        break; // LHU
+                                    default:
+                                        trap = (2 + 1);
                                 }
                             } catch (IndexOutOfBoundsException e) {
                                 trap = (5 + 1); // Load access fault
@@ -205,10 +259,17 @@ public class RV32IMACore {
 
                             try {
                                 switch ((ir >> 12) & 0x7) {
-                                    case 0: mem.writeByte(addr, (byte) rs2); break; // SB
-                                    case 1: mem.writeShort(addr, (short) rs2); break; // SH
-                                    case 2: mem.writeInt(addr, rs2); break; // SW
-                                    default: trap = (2 + 1);
+                                    case 0:
+                                        mem.writeByte(addr, (byte) rs2);
+                                        break; // SB
+                                    case 1:
+                                        mem.writeShort(addr, (short) rs2);
+                                        break; // SH
+                                    case 2:
+                                        mem.writeInt(addr, rs2);
+                                        break; // SW
+                                    default:
+                                        trap = (2 + 1);
                                 }
                                 if (trap == 0) {
                                     state.reservationValid = false;
@@ -232,9 +293,8 @@ public class RV32IMACore {
                             boolean legalEncoding;
 
                             if (is_reg) {
-                                legalEncoding = funct7 == 0
-                                        || (funct7 == 0x20 && (funct3 == 0 || funct3 == 5))
-                                        || funct7 == 1;
+                                legalEncoding =
+                                        funct7 == 0 || (funct7 == 0x20 && (funct3 == 0 || funct3 == 5)) || funct7 == 1;
                             } else if (funct3 == 1) {
                                 legalEncoding = funct7 == 0;
                             } else if (funct3 == 5) {
@@ -251,10 +311,19 @@ public class RV32IMACore {
                             if (is_reg && funct7 == 1) {
                                 // RV32M
                                 switch (funct3) {
-                                    case 0: rval = rs1 * rs2; break; // MUL
-                                    case 1: rval = (int) (((long) rs1 * (long) rs2) >> 32); break; // MULH
-                                    case 2: rval = (int) (((long) rs1 * Integer.toUnsignedLong(rs2)) >> 32); break; // MULHSU
-                                    case 3: rval = (int) ((Integer.toUnsignedLong(rs1) * Integer.toUnsignedLong(rs2)) >> 32); break; // MULHU
+                                    case 0:
+                                        rval = rs1 * rs2;
+                                        break; // MUL
+                                    case 1:
+                                        rval = (int) (((long) rs1 * (long) rs2) >> 32);
+                                        break; // MULH
+                                    case 2:
+                                        rval = (int) (((long) rs1 * Integer.toUnsignedLong(rs2)) >> 32);
+                                        break; // MULHSU
+                                    case 3:
+                                        rval = (int)
+                                                ((Integer.toUnsignedLong(rs1) * Integer.toUnsignedLong(rs2)) >> 32);
+                                        break; // MULHU
                                     case 4: // DIV
                                         if (rs2 == 0) rval = -1;
                                         else rval = (rs1 == Integer.MIN_VALUE && rs2 == -1) ? rs1 : (rs1 / rs2);
@@ -274,14 +343,32 @@ public class RV32IMACore {
                                 }
                             } else {
                                 switch (funct3) {
-                                    case 0: rval = (is_reg && (ir & 0x40000000) != 0) ? (rs1 - rs2) : (rs1 + rs2); break;
-                                    case 1: rval = rs1 << (rs2 & 0x1F); break;
-                                    case 2: rval = rs1 < rs2 ? 1 : 0; break;
-                                    case 3: rval = Integer.compareUnsigned(rs1, rs2) < 0 ? 1 : 0; break;
-                                    case 4: rval = rs1 ^ rs2; break;
-                                    case 5: rval = ((ir & 0x40000000) != 0) ? (rs1 >> (rs2 & 0x1F)) : (rs1 >>> (rs2 & 0x1F)); break;
-                                    case 6: rval = rs1 | rs2; break;
-                                    case 7: rval = rs1 & rs2; break;
+                                    case 0:
+                                        rval = (is_reg && (ir & 0x40000000) != 0) ? (rs1 - rs2) : (rs1 + rs2);
+                                        break;
+                                    case 1:
+                                        rval = rs1 << (rs2 & 0x1F);
+                                        break;
+                                    case 2:
+                                        rval = rs1 < rs2 ? 1 : 0;
+                                        break;
+                                    case 3:
+                                        rval = Integer.compareUnsigned(rs1, rs2) < 0 ? 1 : 0;
+                                        break;
+                                    case 4:
+                                        rval = rs1 ^ rs2;
+                                        break;
+                                    case 5:
+                                        rval = ((ir & 0x40000000) != 0)
+                                                ? (rs1 >> (rs2 & 0x1F))
+                                                : (rs1 >>> (rs2 & 0x1F));
+                                        break;
+                                    case 6:
+                                        rval = rs1 | rs2;
+                                        break;
+                                    case 7:
+                                        rval = rs1 & rs2;
+                                        break;
                                 }
                             }
                             break;
@@ -305,12 +392,24 @@ public class RV32IMACore {
                                 int writeval = rs1;
 
                                 switch (microop) {
-                                    case 1: writeval = rs1; break; // CSRRW
-                                    case 2: writeval = rval | rs1; break; // CSRRS
-                                    case 3: writeval = rval & ~rs1; break; // CSRRC
-                                    case 5: writeval = rs1imm; break; // CSRRWI
-                                    case 6: writeval = rval | rs1imm; break; // CSRRSI
-                                    case 7: writeval = rval & ~rs1imm; break; // CSRRCI
+                                    case 1:
+                                        writeval = rs1;
+                                        break; // CSRRW
+                                    case 2:
+                                        writeval = rval | rs1;
+                                        break; // CSRRS
+                                    case 3:
+                                        writeval = rval & ~rs1;
+                                        break; // CSRRC
+                                    case 5:
+                                        writeval = rs1imm;
+                                        break; // CSRRWI
+                                    case 6:
+                                        writeval = rval | rs1imm;
+                                        break; // CSRRSI
+                                    case 7:
+                                        writeval = rval & ~rs1imm;
+                                        break; // CSRRCI
                                 }
 
                                 if (shouldWrite) {
@@ -359,10 +458,11 @@ public class RV32IMACore {
                             int irmid = (ir >> 27) & 0x1f;
                             int funct3 = (ir >> 12) & 7;
 
-                            boolean validAtomicOperation = switch (irmid) {
-                                case 0, 1, 2, 3, 4, 8, 12, 16, 20, 24, 28 -> true;
-                                default -> false;
-                            };
+                            boolean validAtomicOperation =
+                                    switch (irmid) {
+                                        case 0, 1, 2, 3, 4, 8, 12, 16, 20, 24, 28 -> true;
+                                        default -> false;
+                                    };
                             if (funct3 != 2 || !validAtomicOperation) {
                                 trap = (2 + 1);
                                 break;
@@ -374,31 +474,51 @@ public class RV32IMACore {
                                 // We'll assume the memory bus handles atomics or we just implement them simply
                                 rval = mem.readInt(rs1);
                                 switch (irmid) {
-                                case 2: // LR.W
-                                    dowrite = false;
-                                    state.reservationAddr = rs1;
-                                    state.reservationValid = true;
-                                    break;
-                                case 3: // SC.W
-                                    if (state.reservationValid && state.reservationAddr == rs1) {
-                                        rval = 0;
-                                        dowrite = true;
-                                    } else {
-                                        rval = 1;
+                                    case 2: // LR.W
                                         dowrite = false;
-                                    }
-                                    state.reservationValid = false;
-                                    break;
-                                case 1: break; // AMOSWAP.W
-                                case 0: rs2 += rval; break; // AMOADD.W
-                                case 4: rs2 ^= rval; break; // AMOXOR.W
-                                case 12: rs2 &= rval; break; // AMOAND.W
-                                case 8: rs2 |= rval; break; // AMOOR.W
-                                case 16: rs2 = (rs2 < rval) ? rs2 : rval; break; // AMOMIN.W
-                                case 20: rs2 = (rs2 > rval) ? rs2 : rval; break; // AMOMAX.W
-                                case 24: rs2 = Integer.compareUnsigned(rs2, rval) < 0 ? rs2 : rval; break; // AMOMINU.W
-                                case 28: rs2 = Integer.compareUnsigned(rs2, rval) > 0 ? rs2 : rval; break; // AMOMAXU.W
-                                default: trap = (2 + 1); dowrite = false; break;
+                                        state.reservationAddr = rs1;
+                                        state.reservationValid = true;
+                                        break;
+                                    case 3: // SC.W
+                                        if (state.reservationValid && state.reservationAddr == rs1) {
+                                            rval = 0;
+                                            dowrite = true;
+                                        } else {
+                                            rval = 1;
+                                            dowrite = false;
+                                        }
+                                        state.reservationValid = false;
+                                        break;
+                                    case 1:
+                                        break; // AMOSWAP.W
+                                    case 0:
+                                        rs2 += rval;
+                                        break; // AMOADD.W
+                                    case 4:
+                                        rs2 ^= rval;
+                                        break; // AMOXOR.W
+                                    case 12:
+                                        rs2 &= rval;
+                                        break; // AMOAND.W
+                                    case 8:
+                                        rs2 |= rval;
+                                        break; // AMOOR.W
+                                    case 16:
+                                        rs2 = (rs2 < rval) ? rs2 : rval;
+                                        break; // AMOMIN.W
+                                    case 20:
+                                        rs2 = (rs2 > rval) ? rs2 : rval;
+                                        break; // AMOMAX.W
+                                    case 24:
+                                        rs2 = Integer.compareUnsigned(rs2, rval) < 0 ? rs2 : rval;
+                                        break; // AMOMINU.W
+                                    case 28:
+                                        rs2 = Integer.compareUnsigned(rs2, rval) > 0 ? rs2 : rval;
+                                        break; // AMOMAXU.W
+                                    default:
+                                        trap = (2 + 1);
+                                        dowrite = false;
+                                        break;
                                 }
                                 if (dowrite) mem.writeInt(rs1, rs2);
                             } catch (IndexOutOfBoundsException e) {

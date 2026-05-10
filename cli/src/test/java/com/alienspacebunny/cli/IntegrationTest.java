@@ -2,7 +2,10 @@ package com.alienspacebunny.cli;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.alienspacebunny.emu.*;
+import com.alienspacebunny.emu.FFMMemoryBus;
+import com.alienspacebunny.emu.MMIOBus;
+import com.alienspacebunny.emu.RV32IMACore;
+import com.alienspacebunny.emu.RV32IMAState;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.PrintStream;

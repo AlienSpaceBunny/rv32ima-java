@@ -20,6 +20,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <spotless.version>2.44.5</spotless.version>
         <palantir.java.format.version>2.90.0</palantir.java.format.version>
+        <checkstyle.plugin.version>3.6.0</checkstyle.plugin.version>
     </properties>
 
     <build>
@@ -49,6 +50,32 @@
                 <executions>
                     <execution>
                         <id>spotless-check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        <!--
+            Checkstyle enforces import and correctness rules that Spotless does not cover.
+            Key rule: AvoidStarImport bans wildcard imports (import foo.*).
+            Config: config/checkstyle.xml in the project root.
+            CI note: `mvn verify` runs both Spotless and Checkstyle.
+        -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-checkstyle-plugin</artifactId>
+                <version>${checkstyle.plugin.version}</version>
+                <configuration>
+                    <configLocation>${maven.multiModuleProjectDirectory}/config/checkstyle.xml</configLocation>
+                    <consoleOutput>true</consoleOutput>
+                    <failsOnError>true</failsOnError>
+                    <includeTestSourceDirectory>true</includeTestSourceDirectory>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>checkstyle-check</id>
                         <phase>verify</phase>
                         <goals>
                             <goal>check</goal>

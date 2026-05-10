@@ -1,6 +1,9 @@
 package com.alienspacebunny.cli;
 
-import com.alienspacebunny.emu.*;
+import com.alienspacebunny.emu.FFMMemoryBus;
+import com.alienspacebunny.emu.MMIOBus;
+import com.alienspacebunny.emu.RV32IMACore;
+import com.alienspacebunny.emu.RV32IMAState;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;

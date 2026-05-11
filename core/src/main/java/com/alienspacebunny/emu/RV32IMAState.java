@@ -114,16 +114,22 @@ public class RV32IMAState {
     /** Whether this hart currently holds an active LR/SC reservation. */
     public boolean reservationValid;
 
+    /** Creates a new {@code RV32IMAState} with all fields at their default values (zero/false). */
+    public RV32IMAState() {}
+
     /**
      * Returns the 64-bit cycle counter composed from {@link #cycleh} and {@link #cyclel}.
+     *
+     * @return the 64-bit cycle count.
      */
     public long getCycle() {
         return (Integer.toUnsignedLong(cycleh) << 32) | Integer.toUnsignedLong(cyclel);
     }
 
     /**
-     * Sets the 64-bit cycle counter split across {@link #cycleh} and
-     * {@link #cyclel}.
+     * Sets the 64-bit cycle counter split across {@link #cycleh} and {@link #cyclel}.
+     *
+     * @param cycle the new 64-bit cycle count.
      */
     public void setCycle(long cycle) {
         this.cyclel = (int) cycle;
@@ -133,6 +139,8 @@ public class RV32IMAState {
     /**
      * Returns the 64-bit machine timer ({@code mtime}) composed from {@link #timerh} and {@link
      * #timerl}.
+     *
+     * @return the 64-bit {@code mtime} value.
      */
     public long getTimer() {
         return (Integer.toUnsignedLong(timerh) << 32) | Integer.toUnsignedLong(timerl);
@@ -141,6 +149,8 @@ public class RV32IMAState {
     /**
      * Sets the 64-bit machine timer ({@code mtime}) split across {@link #timerh} and {@link
      * #timerl}.
+     *
+     * @param timer the new 64-bit {@code mtime} value.
      */
     public void setTimer(long timer) {
         this.timerl = (int) timer;
@@ -150,6 +160,8 @@ public class RV32IMAState {
     /**
      * Returns the 64-bit timer compare value ({@code mtimecmp}) composed from {@link #timermatchh}
      * and {@link #timermatchl}.
+     *
+     * @return the 64-bit {@code mtimecmp} value.
      */
     public long getTimerMatch() {
         return (Integer.toUnsignedLong(timermatchh) << 32) | Integer.toUnsignedLong(timermatchl);
@@ -158,6 +170,8 @@ public class RV32IMAState {
     /**
      * Sets the 64-bit timer compare value ({@code mtimecmp}) split across {@link #timermatchh}
      * and {@link #timermatchl}.
+     *
+     * @param timerMatch the new 64-bit {@code mtimecmp} value.
      */
     public void setTimerMatch(long timerMatch) {
         this.timermatchl = (int) timerMatch;

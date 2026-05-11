@@ -22,6 +22,8 @@
         <palantir.java.format.version>2.90.0</palantir.java.format.version>
         <checkstyle.plugin.version>3.6.0</checkstyle.plugin.version>
         <spotbugs.plugin.version>4.9.8.3</spotbugs.plugin.version>
+        <javadoc.plugin.version>3.11.2</javadoc.plugin.version>
+        <source.plugin.version>3.3.1</source.plugin.version>
     </properties>
 
     <build>
@@ -100,6 +102,46 @@
                         <phase>verify</phase>
                         <goals>
                             <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <!--
+                maven-javadoc-plugin: generates Javadoc HTML and packages it as a -javadoc.jar.
+                failOnError=true ensures CI fails if public API Javadoc has errors or warnings.
+                Required for Maven Central publication alongside the source jar below.
+                Run `mvn javadoc:aggregate` to generate combined multi-module Javadoc locally.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-javadoc-plugin</artifactId>
+                <version>${javadoc.plugin.version}</version>
+                <configuration>
+                    <failOnError>true</failOnError>
+                    <quiet>true</quiet>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>attach-javadocs</id>
+                        <goals>
+                            <goal>jar</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <!--
+                maven-source-plugin: packages source files as a -sources.jar.
+                Required for Maven Central publication.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-source-plugin</artifactId>
+                <version>${source.plugin.version}</version>
+                <executions>
+                    <execution>
+                        <id>attach-sources</id>
+                        <goals>
+                            <goal>jar-no-fork</goal>
                         </goals>
                     </execution>
                 </executions>

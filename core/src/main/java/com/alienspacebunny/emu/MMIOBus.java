@@ -27,6 +27,11 @@ public class MMIOBus implements MemoryBus {
         }
     }
 
+    /**
+     * Creates an MMIO bus that delegates non-MMIO accesses to {@code ram}.
+     *
+     * @param ram the backing memory bus for addresses not claimed by any registered hook.
+     */
     public MMIOBus(MemoryBus ram) {
         this.ram = ram;
     }

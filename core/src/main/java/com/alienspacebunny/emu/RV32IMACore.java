@@ -25,6 +25,9 @@ package com.alienspacebunny.emu;
  * </ul>
  */
 public class RV32IMACore {
+    /** Creates a new {@code RV32IMACore} execution engine. */
+    public RV32IMACore() {}
+
     private static final int MSTATUS_MIE = 0x08;
     private static final int MSTATUS_MPIE = 0x80;
     private static final int MSTATUS_MPP = 0x1800;

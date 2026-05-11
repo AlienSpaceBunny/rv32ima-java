@@ -6,11 +6,11 @@ import java.lang.foreign.ValueLayout;
 import java.nio.ByteOrder;
 
 /**
- * Implementation of MemoryBus using Java 25 Foreign Function & Memory API.
- * Provides high-performance off-heap memory access.
+ * {@link MemoryBus} implementation backed by Java 25 Foreign Function &amp; Memory (FFM) API
+ * off-heap memory.
  *
- * <p>Multi-byte accesses ({@code short}, {@code int}) are explicitly little-endian,
- * consistent with the RISC-V ISA. Big-endian hosts are not supported.
+ * <p>Multi-byte accesses ({@code short}, {@code int}) are explicitly little-endian, consistent
+ * with the RISC-V ISA. Big-endian hosts are not supported.
  */
 public class FFMMemoryBus implements MemoryBus, AutoCloseable {
     private static final ValueLayout.OfShort LE_SHORT =
@@ -22,6 +22,13 @@ public class FFMMemoryBus implements MemoryBus, AutoCloseable {
     private final int size;
     private final int offset;
 
+    /**
+     * Allocates {@code size} bytes of off-heap memory mapped to guest addresses starting at {@code
+     * offset}.
+     *
+     * @param size the number of bytes to allocate.
+     * @param offset the unsigned 32-bit guest base address for this memory region.
+     */
     public FFMMemoryBus(int size, int offset) {
         this.size = size;
         this.offset = offset;
@@ -72,16 +79,23 @@ public class FFMMemoryBus implements MemoryBus, AutoCloseable {
         arena.close();
     }
 
+    /** Returns the size of this memory region in bytes. */
     public int getSize() {
         return size;
     }
 
+    /** Returns the unsigned 32-bit guest base address of this memory region. */
     public int getOffset() {
         return offset;
     }
 
     /**
-     * Returns the underlying MemorySegment for advanced use.
+     * Returns the underlying {@link MemorySegment} for bulk I/O or direct access.
+     *
+     * <p>The returned segment is the live backing store; modifications through it are immediately
+     * visible to the emulator.
+     *
+     * @return the off-heap memory segment.
      */
     public MemorySegment getSegment() {
         return segment;

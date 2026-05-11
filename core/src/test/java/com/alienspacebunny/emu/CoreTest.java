@@ -40,6 +40,38 @@ public class CoreTest {
         return (funct5 << 27) | (rs2 << 20) | (rs1 << 15) | (funct3 << 12) | (rd << 7) | 0x2f;
     }
 
+    private static int luiInstruction(int rd, int imm20) {
+        return ((imm20 & 0xfffff) << 12) | (rd << 7) | 0x37;
+    }
+
+    private static int auipcInstruction(int rd, int imm20) {
+        return ((imm20 & 0xfffff) << 12) | (rd << 7) | 0x17;
+    }
+
+    private static int jalInstruction(int rd, int relImm) {
+        return ((relImm & 0x100000) << 11)
+                | ((relImm & 0x7fe) << 20)
+                | ((relImm & 0x800) << 9)
+                | (relImm & 0xff000)
+                | (rd << 7)
+                | 0x6f;
+    }
+
+    private static int jalrInstruction(int rd, int rs1, int imm12) {
+        return ((imm12 & 0xfff) << 20) | (rs1 << 15) | (rd << 7) | 0x67;
+    }
+
+    private static int branchInstruction(int funct3, int rs1, int rs2, int relImm) {
+        return ((relImm & 0x1000) << 19)
+                | ((relImm & 0x7e0) << 20)
+                | (rs2 << 20)
+                | (rs1 << 15)
+                | (funct3 << 12)
+                | ((relImm & 0x1e) << 7)
+                | ((relImm & 0x800) >> 4)
+                | 0x63;
+    }
+
     private static final class RecordingCSRHook implements CSRHook {
         int readCount;
         int writeCount;
@@ -535,6 +567,378 @@ public class CoreTest {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // OP — register-register (remaining funct3 / funct7 combinations)
+    // -------------------------------------------------------------------------
+
+    @Test
+    public void subSubtracts() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = 10;
+            state.regs[2] = 3;
+            ram.writeInt(RAM_OFFSET, opInstruction(0x20, 0, 3, 1, 2)); // sub x3, x1, x2
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(7, state.regs[3]);
+        }
+    }
+
+    @Test
+    public void sllShiftsLeftByRegister() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = 1;
+            state.regs[2] = 4;
+            ram.writeInt(RAM_OFFSET, opInstruction(0, 1, 3, 1, 2)); // sll x3, x1, x2
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(16, state.regs[3]);
+        }
+    }
+
+    @Test
+    public void sltSignedComparison() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = -1; // -1 < 0 signed
+            state.regs[2] = 0;
+            ram.writeInt(RAM_OFFSET, opInstruction(0, 2, 3, 1, 2)); // slt x3, x1, x2
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(1, state.regs[3]);
+        }
+    }
+
+    @Test
+    public void sltuUnsignedComparison() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = 0; // 0 < 0xFFFFFFFF unsigned
+            state.regs[2] = 0xffffffff;
+            ram.writeInt(RAM_OFFSET, opInstruction(0, 3, 3, 1, 2)); // sltu x3, x1, x2
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(1, state.regs[3]);
+        }
+    }
+
+    @Test
+    public void xorXorsBits() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = 0x0f0f0f0f;
+            state.regs[2] = 0xffffffff;
+            ram.writeInt(RAM_OFFSET, opInstruction(0, 4, 3, 1, 2)); // xor x3, x1, x2
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(0xf0f0f0f0, state.regs[3]);
+        }
+    }
+
+    @Test
+    public void srlShiftsRightLogical() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = 0x80000010;
+            state.regs[2] = 4;
+            ram.writeInt(RAM_OFFSET, opInstruction(0, 5, 3, 1, 2)); // srl x3, x1, x2
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(0x08000001, state.regs[3]);
+        }
+    }
+
+    @Test
+    public void sraShiftsRightArithmetic() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = 0x80000010;
+            state.regs[2] = 4;
+            ram.writeInt(RAM_OFFSET, opInstruction(0x20, 5, 3, 1, 2)); // sra x3, x1, x2
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(0xf8000001, state.regs[3]); // sign-filled
+        }
+    }
+
+    @Test
+    public void orOrsBits() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = 0x00ff0000;
+            state.regs[2] = 0x0000ff00;
+            ram.writeInt(RAM_OFFSET, opInstruction(0, 6, 3, 1, 2)); // or x3, x1, x2
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(0x00ffff00, state.regs[3]);
+        }
+    }
+
+    @Test
+    public void andAndsBits() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = 0x0f0f0f0f;
+            state.regs[2] = 0x00ff00ff;
+            ram.writeInt(RAM_OFFSET, opInstruction(0, 7, 3, 1, 2)); // and x3, x1, x2
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(0x000f000f, state.regs[3]);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Misc
+    // -------------------------------------------------------------------------
+
+    @Test
+    public void writeToX0IsDiscarded() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = 42;
+            ram.writeInt(RAM_OFFSET, opImmInstruction(1, 0, 0, 1)); // addi x0, x1, 1
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(0, state.regs[0]);
+        }
+    }
+
+    @Test
+    public void fenceIsNoOp() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            ram.writeInt(RAM_OFFSET, 0x0ff0000f); // fence iorw, iorw
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(0, state.mcause);
+            assertEquals(RAM_OFFSET + 4, state.pc);
+        }
+    }
+
+    @Test
+    public void ebreakRaisesBreakpointTrap() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            ram.writeInt(RAM_OFFSET, 0x00100073); // ebreak
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(3, state.mcause);
+            assertEquals(RAM_OFFSET, state.mepc);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // RV32M — edge cases
+    // -------------------------------------------------------------------------
+
+    @Test
+    public void mulhSignedUpperHalf() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = 0x80000000; // Integer.MIN_VALUE
+            state.regs[2] = 2;
+            // mulh x3, x1, x2 — signed * signed upper 32 bits
+            ram.writeInt(RAM_OFFSET, opInstruction(1, 1, 3, 1, 2));
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            long expected = ((long) 0x80000000 * 2L) >> 32;
+            assertEquals((int) expected, state.regs[3]);
+        }
+    }
+
+    @Test
+    public void mulhsuMixedSignUpperHalf() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = -1; // signed -1
+            state.regs[2] = 0xffffffff; // unsigned max
+            // mulhsu x3, x1, x2 — signed * unsigned upper 32 bits
+            ram.writeInt(RAM_OFFSET, opInstruction(1, 2, 3, 1, 2));
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            long expected = ((long) -1 * Integer.toUnsignedLong(0xffffffff)) >> 32;
+            assertEquals((int) expected, state.regs[3]);
+        }
+    }
+
+    @Test
+    public void mulhuUnsignedUpperHalf() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = 0xffffffff;
+            state.regs[2] = 0xffffffff;
+            // mulhu x3, x1, x2 — unsigned * unsigned upper 32 bits
+            ram.writeInt(RAM_OFFSET, opInstruction(1, 3, 3, 1, 2));
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            long expected = (Integer.toUnsignedLong(0xffffffff) * Integer.toUnsignedLong(0xffffffff)) >>> 32;
+            assertEquals((int) expected, state.regs[3]);
+        }
+    }
+
+    @Test
+    public void divByZeroReturnsMinusOne() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = 42;
+            state.regs[2] = 0;
+            ram.writeInt(RAM_OFFSET, opInstruction(1, 4, 3, 1, 2)); // div x3, x1, x2
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(-1, state.regs[3]);
+        }
+    }
+
+    @Test
+    public void divuByZeroReturnsMaxUnsigned() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = 42;
+            state.regs[2] = 0;
+            ram.writeInt(RAM_OFFSET, opInstruction(1, 5, 3, 1, 2)); // divu x3, x1, x2
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(0xffffffff, state.regs[3]);
+        }
+    }
+
+    @Test
+    public void divSignedOverflowMinValueByMinusOne() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = Integer.MIN_VALUE;
+            state.regs[2] = -1;
+            ram.writeInt(RAM_OFFSET, opInstruction(1, 4, 3, 1, 2)); // div x3, x1, x2
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(Integer.MIN_VALUE, state.regs[3]); // overflow result = dividend
+        }
+    }
+
+    @Test
+    public void remByZeroReturnsDividend() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = 42;
+            state.regs[2] = 0;
+            ram.writeInt(RAM_OFFSET, opInstruction(1, 6, 3, 1, 2)); // rem x3, x1, x2
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(42, state.regs[3]);
+        }
+    }
+
+    @Test
+    public void remuByZeroReturnsDividend() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = 42;
+            state.regs[2] = 0;
+            ram.writeInt(RAM_OFFSET, opInstruction(1, 7, 3, 1, 2)); // remu x3, x1, x2
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(42, state.regs[3]);
+        }
+    }
+
+    @Test
+    public void remSignedOverflowMinValueByMinusOne() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = Integer.MIN_VALUE;
+            state.regs[2] = -1;
+            ram.writeInt(RAM_OFFSET, opInstruction(1, 6, 3, 1, 2)); // rem x3, x1, x2
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(0, state.regs[3]); // overflow result = 0
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // RV32A — basic correctness for remaining AMO operations
+    // -------------------------------------------------------------------------
+
+    @Test
+    public void amoswapWritesNewValueAndReturnsOld() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            int dataAddr = RAM_OFFSET + 0x100;
+            state.regs[1] = dataAddr;
+            state.regs[2] = 0xdeadbeef;
+            ram.writeInt(dataAddr, 0x12345678);
+            ram.writeInt(RAM_OFFSET, amoInstruction(1, 2, 3, 1, 2)); // amoswap.w x3,x2,(x1)
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(0x12345678, state.regs[3]);
+            assertEquals(0xdeadbeef, ram.readInt(dataAddr));
+        }
+    }
+
+    @Test
+    public void amoadd_addsAndReturnsOld() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            int dataAddr = RAM_OFFSET + 0x100;
+            state.regs[1] = dataAddr;
+            state.regs[2] = 10;
+            ram.writeInt(dataAddr, 5);
+            ram.writeInt(RAM_OFFSET, amoInstruction(0, 2, 3, 1, 2)); // amoadd.w x3,x2,(x1)
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(5, state.regs[3]);
+            assertEquals(15, ram.readInt(dataAddr));
+        }
+    }
+
+    @Test
+    public void amoxorXorsAndReturnsOld() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            int dataAddr = RAM_OFFSET + 0x100;
+            state.regs[1] = dataAddr;
+            state.regs[2] = 0x0f0f0f0f;
+            ram.writeInt(dataAddr, 0xff00ff00);
+            ram.writeInt(RAM_OFFSET, amoInstruction(4, 2, 3, 1, 2)); // amoxor.w x3,x2,(x1)
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(0xff00ff00, state.regs[3]);
+            assertEquals(0xf00ff00f, ram.readInt(dataAddr));
+        }
+    }
+
+    @Test
+    public void amoandAndsAndReturnsOld() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            int dataAddr = RAM_OFFSET + 0x100;
+            state.regs[1] = dataAddr;
+            state.regs[2] = 0x0f0f0f0f;
+            ram.writeInt(dataAddr, 0xff00ff00);
+            ram.writeInt(RAM_OFFSET, amoInstruction(12, 2, 3, 1, 2)); // amoand.w x3,x2,(x1)
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(0xff00ff00, state.regs[3]);
+            assertEquals(0x0f000f00, ram.readInt(dataAddr));
+        }
+    }
+
+    @Test
+    public void amoorOrsAndReturnsOld() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            int dataAddr = RAM_OFFSET + 0x100;
+            state.regs[1] = dataAddr;
+            state.regs[2] = 0x0f0f0f0f;
+            ram.writeInt(dataAddr, 0xff00ff00);
+            ram.writeInt(RAM_OFFSET, amoInstruction(8, 2, 3, 1, 2)); // amoor.w x3,x2,(x1)
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(0xff00ff00, state.regs[3]);
+            assertEquals(0xff0fff0f, ram.readInt(dataAddr));
+        }
+    }
+
     // AMO min/max edge-case tests
 
     @Test
@@ -672,6 +1076,407 @@ public class CoreTest {
             assertEquals(30, state.regs[6]);
             assertEquals(7, state.regs[7]);
             assertEquals(12, ram.readInt(RAM_OFFSET + 100));
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Loads — sign/zero extension
+    // -------------------------------------------------------------------------
+
+    @Test
+    public void lbSignExtendsNegativeByte() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            int dataAddr = RAM_OFFSET + 0x100;
+            state.regs[1] = dataAddr;
+            ram.writeByte(dataAddr, (byte) 0xff);
+            ram.writeInt(RAM_OFFSET, loadInstruction(0, 2, 1, 0)); // lb x2, 0(x1)
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(-1, state.regs[2]);
+        }
+    }
+
+    @Test
+    public void lbuZeroExtendsByte() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            int dataAddr = RAM_OFFSET + 0x100;
+            state.regs[1] = dataAddr;
+            ram.writeByte(dataAddr, (byte) 0xff);
+            ram.writeInt(RAM_OFFSET, loadInstruction(4, 2, 1, 0)); // lbu x2, 0(x1)
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(0xff, state.regs[2]);
+        }
+    }
+
+    @Test
+    public void lhSignExtendsNegativeHalfword() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            int dataAddr = RAM_OFFSET + 0x100;
+            state.regs[1] = dataAddr;
+            ram.writeShort(dataAddr, (short) 0x8000);
+            ram.writeInt(RAM_OFFSET, loadInstruction(1, 2, 1, 0)); // lh x2, 0(x1)
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(0xffff8000, state.regs[2]);
+        }
+    }
+
+    @Test
+    public void lhuZeroExtendsHalfword() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            int dataAddr = RAM_OFFSET + 0x100;
+            state.regs[1] = dataAddr;
+            ram.writeShort(dataAddr, (short) 0x8000);
+            ram.writeInt(RAM_OFFSET, loadInstruction(5, 2, 1, 0)); // lhu x2, 0(x1)
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(0x8000, state.regs[2]);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Stores — byte/halfword
+    // -------------------------------------------------------------------------
+
+    @Test
+    public void sbWritesLowByte() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            int dataAddr = RAM_OFFSET + 0x100;
+            state.regs[1] = dataAddr;
+            state.regs[2] = 0xdeadbeab;
+            ram.writeInt(dataAddr, 0x12345678);
+            ram.writeInt(RAM_OFFSET, storeInstruction(0, 1, 2, 0)); // sb x2, 0(x1)
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals((byte) 0xab, ram.readByte(dataAddr));
+            assertEquals((byte) 0x56, ram.readByte(dataAddr + 1)); // untouched
+        }
+    }
+
+    @Test
+    public void shWritesLowHalfword() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            int dataAddr = RAM_OFFSET + 0x100;
+            state.regs[1] = dataAddr;
+            state.regs[2] = 0xdeadabcd;
+            ram.writeInt(dataAddr, 0x12345678);
+            ram.writeInt(RAM_OFFSET, storeInstruction(1, 1, 2, 0)); // sh x2, 0(x1)
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals((short) 0xabcd, ram.readShort(dataAddr));
+            assertEquals((short) 0x1234, ram.readShort(dataAddr + 2)); // untouched
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // OP-IMM — remaining funct3 values
+    // -------------------------------------------------------------------------
+
+    @Test
+    public void addiNegativeImmediate() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = 10;
+            ram.writeInt(RAM_OFFSET, opImmInstruction(-3, 0, 2, 1)); // addi x2, x1, -3
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(7, state.regs[2]);
+        }
+    }
+
+    @Test
+    public void sltiSignedComparison() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = -1; // -1 < 0 signed → rd = 1
+            ram.writeInt(RAM_OFFSET, opImmInstruction(0, 2, 2, 1)); // slti x2, x1, 0
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(1, state.regs[2]);
+        }
+    }
+
+    @Test
+    public void sltiuUnsignedComparison() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = 0; // 0 < 1 unsigned → rd = 1
+            ram.writeInt(RAM_OFFSET, opImmInstruction(1, 3, 2, 1)); // sltiu x2, x1, 1
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(1, state.regs[2]);
+        }
+    }
+
+    @Test
+    public void xoriFlipsBits() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = 0x0f0f0f0f;
+            // xori x2, x1, -1  (imm = 0xFFF sign-extended = all ones → NOT operation)
+            ram.writeInt(RAM_OFFSET, opImmInstruction(-1, 4, 2, 1));
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(0xf0f0f0f0, state.regs[2]);
+        }
+    }
+
+    @Test
+    public void oriSetsBits() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = 0x00ff00ff;
+            ram.writeInt(RAM_OFFSET, opImmInstruction(0x0f0, 6, 2, 1)); // ori x2, x1, 0xf0
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(0x00ff00ff | 0xf0, state.regs[2]);
+        }
+    }
+
+    @Test
+    public void andiClearsBits() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = 0xffffffff;
+            ram.writeInt(RAM_OFFSET, opImmInstruction(0x0ff, 7, 2, 1)); // andi x2, x1, 0xff
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(0xff, state.regs[2]);
+        }
+    }
+
+    @Test
+    public void slliShiftsLeft() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = 1;
+            ram.writeInt(RAM_OFFSET, opImmInstruction(3, 1, 2, 1)); // slli x2, x1, 3
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(8, state.regs[2]);
+        }
+    }
+
+    @Test
+    public void srliShiftsRightLogical() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = 0x80000008;
+            ram.writeInt(RAM_OFFSET, opImmInstruction(3, 5, 2, 1)); // srli x2, x1, 3
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(0x10000001, state.regs[2]); // zero-fills from left
+        }
+    }
+
+    @Test
+    public void sraiShiftsRightArithmetic() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = 0x80000008;
+            ram.writeInt(RAM_OFFSET, opImmInstruction(0x403, 5, 2, 1)); // srai x2, x1, 3
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(0xf0000001, state.regs[2]); // sign-fills from left
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // LUI / AUIPC
+    // -------------------------------------------------------------------------
+
+    @Test
+    public void luiLoadsUpperImmediate() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            ram.writeInt(RAM_OFFSET, luiInstruction(1, 0xabcde)); // lui x1, 0xabcde
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(0xabcde000, state.regs[1]);
+        }
+    }
+
+    @Test
+    public void auipcAddsUpperImmediateToPC() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.pc = RAM_OFFSET + 8;
+            ram.writeInt(RAM_OFFSET + 8, auipcInstruction(1, 1)); // auipc x1, 1
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(RAM_OFFSET + 8 + 0x1000, state.regs[1]);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // JAL / JALR
+    // -------------------------------------------------------------------------
+
+    @Test
+    public void jalLinksAndJumpsForward() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            // jal x1, +12  (skip two slots, land at RAM_OFFSET+12)
+            ram.writeInt(RAM_OFFSET, jalInstruction(1, 12));
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(RAM_OFFSET + 4, state.regs[1]); // return address
+            assertEquals(RAM_OFFSET + 12, state.pc);
+        }
+    }
+
+    @Test
+    public void jalLinksAndJumpsBackward() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.pc = RAM_OFFSET + 8;
+            // jal x1, -4  (jump back 4 bytes to RAM_OFFSET+4)
+            ram.writeInt(RAM_OFFSET + 8, jalInstruction(1, -4));
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(RAM_OFFSET + 12, state.regs[1]);
+            assertEquals(RAM_OFFSET + 4, state.pc);
+        }
+    }
+
+    @Test
+    public void jalrJumpsToRegisterPlusOffset() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[2] = RAM_OFFSET + 0x100;
+            // jalr x1, x2, 8
+            ram.writeInt(RAM_OFFSET, jalrInstruction(1, 2, 8));
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(RAM_OFFSET + 4, state.regs[1]);
+            assertEquals(RAM_OFFSET + 0x108, state.pc);
+        }
+    }
+
+    @Test
+    public void jalrClearsLowBitOfTarget() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[2] = RAM_OFFSET + 0x101; // odd address
+            ram.writeInt(RAM_OFFSET, jalrInstruction(1, 2, 0));
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(RAM_OFFSET + 0x100, state.pc); // low bit cleared
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Branches
+    // -------------------------------------------------------------------------
+
+    @Test
+    public void beqTakenWhenEqual() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = 5;
+            state.regs[2] = 5;
+            ram.writeInt(RAM_OFFSET, branchInstruction(0, 1, 2, 8)); // beq x1,x2,+8
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(RAM_OFFSET + 8, state.pc);
+        }
+    }
+
+    @Test
+    public void beqNotTakenWhenNotEqual() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = 5;
+            state.regs[2] = 6;
+            ram.writeInt(RAM_OFFSET, branchInstruction(0, 1, 2, 8));
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(RAM_OFFSET + 4, state.pc); // fall-through
+        }
+    }
+
+    @Test
+    public void bneTakenWhenNotEqual() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = 5;
+            state.regs[2] = 6;
+            ram.writeInt(RAM_OFFSET, branchInstruction(1, 1, 2, 8)); // bne
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(RAM_OFFSET + 8, state.pc);
+        }
+    }
+
+    @Test
+    public void bltTakenWhenLessThanSigned() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = -1; // -1 < 1 signed
+            state.regs[2] = 1;
+            ram.writeInt(RAM_OFFSET, branchInstruction(4, 1, 2, 8)); // blt
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(RAM_OFFSET + 8, state.pc);
+        }
+    }
+
+    @Test
+    public void bltNotTakenWhenGreaterSigned() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = 1;
+            state.regs[2] = -1; // 1 > -1 signed, blt not taken
+            ram.writeInt(RAM_OFFSET, branchInstruction(4, 1, 2, 8));
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(RAM_OFFSET + 4, state.pc);
+        }
+    }
+
+    @Test
+    public void bgeTakenWhenGreaterOrEqualSigned() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = 5;
+            state.regs[2] = 5;
+            ram.writeInt(RAM_OFFSET, branchInstruction(5, 1, 2, 8)); // bge
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(RAM_OFFSET + 8, state.pc);
+        }
+    }
+
+    @Test
+    public void bltuTakenWhenLessThanUnsigned() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = 1; // 1 < 0xFFFFFFFF unsigned
+            state.regs[2] = 0xffffffff;
+            ram.writeInt(RAM_OFFSET, branchInstruction(6, 1, 2, 8)); // bltu
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(RAM_OFFSET + 8, state.pc);
+        }
+    }
+
+    @Test
+    public void bgeuTakenWhenGreaterOrEqualUnsigned() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = 0xffffffff; // 0xFFFFFFFF >= 1 unsigned
+            state.regs[2] = 1;
+            ram.writeInt(RAM_OFFSET, branchInstruction(7, 1, 2, 8)); // bgeu
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(RAM_OFFSET + 8, state.pc);
         }
     }
 

@@ -137,29 +137,25 @@ private static int branchInstruction(int funct3, int rs1, int rs2, int relImm)
 
 ## Layer 2 — Compliance-Style Per-Instruction Tests
 
-**Status: NOT STARTED — begin after Layer 1 is committed**
+**Status: DONE**
 
-A new test class `RV32IComplianceTest.java` modeled on riscv-tests but written entirely in Java
-(no toolchain dependency). The approach:
+`RV32IComplianceTest.java` — 158 test invocations across 27 parameterized methods + 8 flat `@Test`
+methods. Uses `@ParameterizedTest` / `@MethodSource` (JUnit 5.10). One method per mnemonic;
+multiple sign-boundary and overflow vectors per method. Vectors derived from the riscv-tests
+reference suite, adapted to 32-bit. Requires `junit-jupiter-params` dependency (added to
+`core/pom.xml`).
 
-- One test method per defined encoding variant in RV32I/M/A.
-- A private helper `runOne(int instruction, int[] regInit, int[] memInit, int expectedRd,
-  int... expectedMem)` sets up a minimal state, runs one instruction, and asserts.
-- Alternatively, a parameterized JUnit 5 test with `@MethodSource` feeding `(label, ir, rs1, rs2,
-  expectedRd)` tuples for pure ALU instructions.
-
-Target: ~100 tests covering every defined instruction encoding with at least one representative
-value set and one edge case (boundary values, sign boundaries, zero operands).
-
-The riscv-tests reference in `/home/nate/work/riscv-tests` can be consulted for canonical test
-vectors; the Java tests will not build or link the C/assembler suite — only use it as a reference
-for expected results.
+Coverage:
+- RV32I OP: ADD, SUB, SLL, SLT, SLTU, XOR, SRL, SRA, OR, AND
+- RV32I OP-IMM: ADDI, SLTI, SLTIU, XORI, ORI, ANDI, SLLI, SRLI, SRAI
+- RV32M: MUL, MULH, MULHSU, MULHU, DIV, DIVU, REM, REMU
+- Flat: LUI (2 cases), AUIPC (2 cases), LB boundary, LH boundary, LB with offset, SB partial write
 
 ---
 
 ## Layer 3 — System-Level Scenario Tests
 
-**Status: NOT STARTED — begin after Layer 2 is committed**
+**Status: NOT STARTED — begin after Layer 2 is committed** (Layer 2 is now committed)
 
 New test class or methods in `CoreTest.java` covering full system flows:
 

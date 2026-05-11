@@ -138,11 +138,6 @@ The `privilege` field in `AccessContext` is the hart's current privilege level (
 `extraflags & 3`). The `atomicOp` field is the `funct5` encoding for AMOs, or 0 for
 non-atomic accesses.
 
-The `atomicOp` field is also the signal a multi-hart bus uses to register LR.W reservations:
-`ctx.kind == AMO && ctx.atomicOp == 2` identifies a load-reserve, allowing the bus override
-of `readInt(addr, ctx)` to record `(ctx.hartId, addr)` in its private cross-hart table without
-any additional parameter on the call.
-
 ### 4. AMO Atomicity — `atomicRmw` Bus Primitive
 
 The current AMO implementation in `RV32IMACore` (lines 529–579) calls `mem.readInt` then
@@ -154,61 +149,61 @@ Add an optional bus primitive:
 
 ```java
 // On MemoryBus — default is non-atomic, existing implementations unaffected:
-default int atomicRmw(int addr, int funct5, int operand, AccessContext ctx) {
+default int atomicRmw(int addr, int funct5, int operand, ReservationTable table,
+                      AccessContext ctx) {
     int old = readInt(addr, ctx);
     int result = computeAmo(funct5, old, operand); // extracted helper
     writeInt(addr, result, ctx);
+    if (table != null) table.invalidateOverlapping(addr, 4);
     return old;
 }
 ```
 
-The core calls `mem.atomicRmw(...)` for all AMO instructions. A multi-hart-aware bus
-implementation overrides `atomicRmw` to hold a per-granule lock around the read-modify-write
-AND the invalidation of any overlapping LR/SC reservations in its internal reservation table
-(see §5). The default preserves today's single-hart behavior; no `ReservationTable` parameter
-is needed because cross-hart coordination is owned by the bus, not exposed through `step()`.
+The core calls `mem.atomicRmw(...)` for all AMO instructions. AMOs are writes and must
+invalidate overlapping LR/SC reservations; the `ReservationTable` parameter gives the bus
+implementation the information to do so under the same granule lock in the multi-hart override.
+A multi-hart-aware bus implementation overrides `atomicRmw` to hold a per-granule lock around
+the read-modify-write AND the reservation invalidation atomically. The default preserves
+today's single-hart behavior (table is passed as `null` by callers that don't use multi-hart).
 
 ### 5. Cross-Hart LR/SC Reservations
 
 LR/SC reservations currently live in `RV32IMAState.reservationAddr/reservationValid`. For
 cross-hart correctness, a store from Hart 1 must invalidate Hart 2's reservation. The approach:
 
-The reservation state in `RV32IMAState` (`reservationAddr`/`reservationValid`) remains as the
-per-hart architectural state. Cross-hart coordination is owned entirely by the bus implementation
-and requires no new parameter on `step()`.
-
-**How this works:**
-
-- `LR.W`: the core reads through the bus with `ctx.kind == AMO && ctx.atomicOp == 2` (LR's
-  funct5). The core records the reservation locally in `state`. A multi-hart bus override also
-  records `(ctx.hartId, addr)` in its own private `ReservationTable` on this same call, keyed
-  by the context it already receives.
-- `SC.W`: the core checks `state.reservationValid` as a fast-path local pre-check. If false,
-  returns failure immediately (no bus call). If true, calls
-  `mem.tryScAndStore(hartId, addr, value, ctx)` — the bus makes the final atomic decision,
-  checking its private table under a granule lock. The bus may reject even if the local state
-  says valid (cross-hart invalidation happened between the LR and SC). After a successful store,
-  the core clears `state.reservationValid`.
-- `AMO`: core calls `mem.atomicRmw(...)`. The bus override holds the granule lock, performs the
-  RMW, and invalidates any overlapping reservation entries in its private table atomically.
-- **Plain stores**: the bus's `writeInt(addr, value, ctx)` override (with `ctx.kind == STORE`)
-  automatically invalidates matching entries in its private table. The core requires no explicit
-  invalidation call for plain stores.
-- Single-hart use: `tryScAndStore` default just writes; bus does not override; behavior is
-  identical to today.
+- The reservation state remains in `RV32IMAState` for ownership simplicity.
+- Add an optional `ReservationTable` — a shared mutable object that both harts hold a reference
+  to — passed as a new optional parameter to `step()`.
+- `LR.W`: registers `(hartId, addr)` in the shared table.
+- `SC.W`: the reservation check, conditional write, and reservation invalidation must all occur
+  inside one atomic critical section. SC.W is therefore expressed as a single call to
+  `mem.tryScAndStore(hartId, addr, value, table, ctx)` — a new `MemoryBus` default method.
+  Splitting the reservation check from the actual write leaves a TOCTOU window where a competing
+  hart can execute LR.W between the two steps and see an inconsistent memory state. `atomicRmw`
+  and `tryScAndStore` share the same granule lock in any multi-hart bus implementation.
+- Any `writeInt`, `writeByte`, `writeShort` in the core (plain stores): the core calls
+  `table.invalidateOverlapping(addr, width)` after the write. This is correct for plain stores
+  since no lock is needed — the invalidation races only matter for LR/SC pairs, not for
+  arbitrary stores which the spec allows to invalidate reservations at any time.
+- The `ReservationTable` is thread-safe internally (uses `synchronized` or `AtomicReference`).
+- Single-hart callers pass `null` for the table; behavior is identical to today.
 
 ```java
-// On MemoryBus — default provides single-hart correctness:
-default int tryScAndStore(int hartId, int addr, int value, AccessContext ctx) {
+// On MemoryBus — valid ONLY for single-hart / null-table use.
+// Multi-hart correctness REQUIRES overriding this method: the default is not atomic
+// even when table is non-null, and passing a non-null table to the default does not
+// provide cross-hart safety.
+default int tryScAndStore(int hartId, int addr, int value, ReservationTable table,
+                          AccessContext ctx) {
+    if (table != null && !table.isValid(hartId, addr)) return 1; // failure
     writeInt(addr, value, ctx);
-    return 0; // success; local reservation check already done by core before this call
+    if (table != null) table.invalidateOverlapping(addr, 4);
+    return 0; // success
 }
-// Multi-hart override holds a granule lock covering: private table check + conditional
-// write + reservation invalidation — all as one critical section.
 ```
 
-`step()` gains no new parameter for this mechanism. Cross-hart reservation management is
-entirely encapsulated in the bus implementation.
+This keeps the cross-hart mechanism entirely in the library without requiring the embedder to
+implement it, while making it opt-in.
 
 ### 6. Interrupt Injection API
 
@@ -397,11 +392,9 @@ The following order is recommended. Each step is independently committable and t
    `MemoryBus`; plumb context through all core load/store/fetch calls.
 7. Add `injectInterrupt` helper; document MSIP/MEIP bit assignments.
 8. Add `atomicRmw` default method to `MemoryBus`; route all AMO instructions through it.
-9. Add `tryScAndStore` default method to `MemoryBus`; route SC.W through it (core retains
-   local fast-path reservation check in state; bus makes final atomic decision for multi-hart).
-10. Define `ReservationTable` as a bus-internal type; document how a multi-hart bus override
-    manages it privately via `readInt` (LR detection), `tryScAndStore`, `atomicRmw`, and
-    `writeInt` overrides. `step()` gains no new parameter.
+9. Add `tryScAndStore` default method to `MemoryBus`; route SC.W through it.
+10. Add `ReservationTable`; pass as optional parameter to `step()`; implement cross-hart
+    LR/SC invalidation on store via `invalidateOverlapping`.
 
 At the end of Phase 2, interrupt-capable synchronized MMIO mailboxes are fully supported
 (covering the mailbox v1 path from the feature request's "Current Workaround"). Cross-hart
@@ -470,13 +463,6 @@ Each phase should be verified before the next begins:
   verification items to Phase 2. Correction 1 of the review (trap cause numbering) identified an
   ambiguity in wording rather than a semantic error — the codebase's `+1` internal encoding was
   correct throughout.
-- **r5** — Architectural boundary review: removed `ReservationTable` from `step()` and from
-  `atomicRmw`/`tryScAndStore` signatures. Cross-hart LR/SC coordination is now entirely
-  bus-internal; the bus detects LR.W via `ctx.kind==AMO && ctx.atomicOp==2` in its `readInt`
-  override and manages its own private reservation table. The core retains its per-hart
-  `state.reservationValid` as a fast-path pre-check for SC.W. `ramOffset`/`ramSize` noted as
-  a legacy wart but retained for backward compatibility. All other proposed APIs confirmed as
-  correctly scoped to the processor layer.
 - **r4** — Third review: tightened `tryScAndStore` default contract to be explicit that it is
   valid only for single-hart/null-table use and that multi-hart correctness requires the bus
   override; added `ReservationTable` parameter to `atomicRmw` so AMO reservation invalidation
@@ -492,47 +478,27 @@ Each phase should be verified before the next begins:
 
 ---
 
-## Combined Review Notes
+## Latest Review Notes
 
-v5 fixes the major architectural-boundary issue from the prior plan: `ReservationTable` should not
-be threaded through `step()` or exposed as a core-level coordination parameter. Cross-hart LR/SC
-coordination belongs in the shared bus implementation, using `AccessContext` to identify hart,
-access kind, and atomic operation. The plan now correctly makes the core responsible for local
-per-hart reservation state and makes the bus responsible for final cross-hart arbitration.
+The plan is now directionally solid: it has the right P1/P2/P3 priority model, concrete
+privilege-mode semantics, correct mailbox-v1 wording, `RMM` naming for floating-point rounding,
+and AMO reservation invalidation via the `ReservationTable` parameter on `atomicRmw`.
 
-The `ramOffset`/`ramSize` fetch window remains a borderline system-level concern, but keeping it as
-a legacy coarse compatibility precheck is acceptable. Fine-grained fetch/load/store authorization
-still belongs in the context-aware bus path.
+Before treating it as implementation-ready, address these remaining points:
 
-Before treating v5 as implementation-ready, address these remaining items:
-
-1. **Remove stale `step()`/`ReservationTable` compatibility text.** The Backward Compatibility
-   section still says `step()` gains a `ReservationTable` parameter and existing callers use an
-   overload passing `null`. That contradicts v5's core design, which says `step()` gains no new
-   reservation parameter. Replace it with: `step()` remains source-compatible; cross-hart
-   reservation coordination is implemented by bus overrides.
-2. **Update verification to match bus-owned reservations.** The Phase 2 test still describes two
-   states "sharing a `ReservationTable`." That should become two states sharing a multi-hart-aware
-   `MemoryBus` with private reservation tracking. The test should explicitly cover
-   `atomicRmw`, `tryScAndStore`, LR.W detection via `ctx.kind == AMO && ctx.atomicOp == 2`, and a
-   plain-store-vs-`SC.W` race.
-3. **Make plain-store ordering explicit.** v5 says a bus `writeInt(..., ctx)` override with
-   `ctx.kind == STORE` automatically invalidates matching reservations. It should also state that
-   multi-hart bus implementations must order plain store write + reservation invalidation against
-   `tryScAndStore` using the same reservation/granule lock. Otherwise this invalid interleaving is
-   still possible: Hart A has a valid LR reservation; Hart B performs a plain store but has not yet
-   invalidated; Hart A executes `SC.W` and succeeds; Hart B invalidates. The store happened before
-   the `SC.W`, so the `SC.W` should have failed.
-4. **Clarify default methods are single-hart only for atomic correctness.** The `atomicRmw` and
-   `tryScAndStore` defaults preserve current single-hart behavior, but they must not be presented as
-   multi-hart safe. Multi-hart correctness requires bus overrides that lock RMW/check/store/
-   invalidation as one critical section for the relevant granule.
-5. **Clean up stale priority wording if desired.** The summary still says P1 includes
-   `tryScAndStore`/`ReservationTable`; this is acceptable if `ReservationTable` is understood as a
-   bus-internal implementation detail, but clearer wording would be "`tryScAndStore` plus
-   bus-internal reservation tracking."
-6. **Clean up revision ordering.** The revision history lists `r5`, then `r4`, then `r3`; this is
+1. **Fix the plain-store vs `SC.W` race.** The current text says plain stores can write first and
+   invalidate reservations afterward without a lock. That can allow this invalid interleaving:
+   Hart A has a valid LR reservation; Hart B performs a plain store but has not yet invalidated;
+   Hart A executes `SC.W` and succeeds; Hart B then invalidates. The plain store happened before
+   the `SC.W`, so the `SC.W` should have failed. Plain stores need to coordinate with the same
+   reservation/granule lock used by `tryScAndStore`, or invalidation needs to be part of a bus-level
+   store primitive ordered against `SC.W`.
+2. **Add the same default-method warning to `atomicRmw` that `tryScAndStore` has.** The default
+   `atomicRmw` implementation accepts a non-null `ReservationTable` but is still non-atomic.
+   State explicitly that the default is valid only for single-hart/null-table use, and multi-hart
+   correctness requires an override that locks read-modify-write plus reservation invalidation.
+3. **Strengthen verification wording.** Phase 2 verification should require an
+   `atomicRmw`/`tryScAndStore`-aware `MemoryBus`, and it should include a plain-store-vs-`SC.W`
+   race test.
+4. **Clean up revision ordering.** The revision history currently lists `r4` before `r3`; this is
    editorial only.
-
-Net assessment: v5 is the best shape so far. The public API boundary is now right, and the remaining
-work is mostly consistency cleanup plus making the plain-store/SC ordering contract unambiguous.

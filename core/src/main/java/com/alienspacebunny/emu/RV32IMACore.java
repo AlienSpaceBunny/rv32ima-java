@@ -1,8 +1,28 @@
 package com.alienspacebunny.emu;
 
 /**
- * Core execution logic for the RV32IMA RISC-V processor.
- * Ported from mini-rv32ima.c.
+ * Core execution engine for a single RV32IMA RISC-V hart.
+ *
+ * <p>Ported from <a href="https://github.com/cnlohr/mini-rv32ima">mini-rv32ima</a> (MIT licence).
+ * Supports the RV32I base integer instruction set, the RV32M integer multiplication extension, the
+ * RV32A atomic extension (LR/SC and ten AMO operations), and machine-mode CSR instructions
+ * (Zicsr).
+ *
+ * <p><b>Intentional deviations from the RISC-V specification.</b> Two behaviours are inherited
+ * from the upstream C implementation and preserved intentionally:
+ *
+ * <ul>
+ *   <li><b>WFI sets {@code mstatus.MIE} before suspending.</b> The RISC-V specification treats
+ *       {@code WFI} as a hint and does not mandate privilege-state changes. This implementation
+ *       unconditionally sets bit 3 ({@code MIE}) in {@code mstatus} before entering the WFI stall
+ *       so that a pending timer interrupt can wake the hart even if the guest had not enabled
+ *       interrupts. Do not remove this behaviour without also adjusting the interrupt-enable check
+ *       in {@link #step}.
+ *   <li><b>Timer interrupt gated by {@code timerMatch != 0}.</b> {@code MTIP} is raised only when
+ *       {@code mtimecmp} is non-zero and {@code mtime >= mtimecmp}. When both are zero (reset
+ *       state), no interrupt fires. This prevents a spurious timer interrupt before the guest
+ *       configures {@code mtimecmp}.
+ * </ul>
  */
 public class RV32IMACore {
     private static final int MSTATUS_MIE = 0x08;
@@ -10,17 +30,27 @@ public class RV32IMACore {
     private static final int MSTATUS_MPP = 0x1800;
 
     /**
-     * Optional instruction callback invoked after instruction execution, or
-     * before trap handling for an instruction that raises a trap.
+     * Optional callback invoked after each instruction execution or trap.
+     *
+     * <p>The hook is called once per instruction cycle:
+     *
+     * <ul>
+     *   <li>For instructions that complete without a trap: called after the result is committed to
+     *       the destination register but before the PC is advanced to the next instruction.
+     *   <li>For instructions that raise a trap: called before the trap is committed to the machine
+     *       CSRs ({@code mepc}, {@code mcause}, {@code mtval}, {@code mstatus}).
+     *   <li>For instruction-fetch failures (PC out of the executable range, or misaligned): the
+     *       hook is <em>not</em> called.
+     * </ul>
      */
     public interface PostExecHook {
         /**
-         * Observes the instruction that just executed or trapped.
+         * Observes an instruction that just executed or is about to trap.
          *
-         * @param pc The guest PC of the instruction.
-         * @param ir The raw instruction word.
-         * @param trap Zero for normal execution, otherwise the internal trap
-         *     marker before it is committed to machine CSRs.
+         * @param pc the guest PC of the instruction, not yet advanced by 4.
+         * @param ir the raw 32-bit instruction word; zero if fetch failed before decoding.
+         * @param trap zero for normal execution; otherwise the trap cause (internal encoding,
+         *     before being committed to {@code mcause}).
          */
         void onPostExec(int pc, int ir, int trap);
     }
@@ -77,23 +107,40 @@ public class RV32IMACore {
     }
 
     /**
-     * Executes a number of instructions.
+     * Executes up to {@code count} instructions on the given hart.
      *
-     * <p>The instruction-fetch window is defined by {@code ramOffset} and
-     * {@code ramSize}. Data accesses are delegated to {@code mem}; an
-     * {@link IndexOutOfBoundsException} from the memory bus is converted into a
-     * guest load or store access-fault trap.
+     * <p><b>Timer.</b> Before executing any instructions, the machine timer ({@code mtime}) is
+     * advanced by {@code elapsedUs} microseconds. If the updated timer meets or exceeds {@code
+     * mtimecmp} and {@code mtimecmp != 0}, {@code MTIP} in {@code mip} is set; otherwise it is
+     * cleared. See the class-level note on the startup timer guard.
      *
-     * @param state The mutable processor state to execute.
-     * @param mem The memory bus used for instruction fetch and data access.
-     * @param ramOffset The base address of executable RAM.
-     * @param ramSize The executable RAM size in bytes.
-     * @param elapsedUs Microseconds elapsed since the previous call, used to
-     *     advance the machine timer before instruction execution.
-     * @param count Maximum number of instructions to execute.
-     * @param postExec Optional hook called after each instruction or trap.
-     * @param csrHook Optional hook for custom CSRs.
-     * @return 0 after normal execution or trap handling; 1 when the CPU remains
+     * <p><b>WFI.</b> If the hart is in the WFI stall state and no interrupt is pending, no
+     * instructions are executed and this method returns {@code 1} immediately. The caller should
+     * sleep or yield before calling again.
+     *
+     * <p><b>Trap handling.</b> If an interrupt or exception occurs, the core commits trap state to
+     * {@code mepc}, {@code mcause}, {@code mtval}, and {@code mstatus}, then redirects the PC to
+     * {@code mtvec}. The trap is resolved within this call; the next call will fetch from {@code
+     * mtvec}. Fewer than {@code count} instructions may be executed when a trap fires.
+     *
+     * <p><b>Instruction fetch.</b> Instructions are fetched from the window defined by {@code
+     * ramOffset} and {@code ramSize}; a PC outside that range causes an instruction access-fault
+     * trap. Data accesses are delegated to {@code mem}; an {@link IndexOutOfBoundsException} from
+     * the memory bus is converted into a load or store access-fault trap with {@code mtval} set
+     * to the faulting address.
+     *
+     * @param state the mutable processor state to execute.
+     * @param mem the memory bus for instruction fetch and data access.
+     * @param ramOffset base address of executable RAM (unsigned 32-bit guest address).
+     * @param ramSize size of executable RAM in bytes.
+     * @param elapsedUs microseconds elapsed since the previous call; added to {@code mtime} before
+     *     any instructions run.
+     * @param count maximum number of instructions to execute; may execute fewer if a trap fires.
+     * @param postExec optional callback invoked after each instruction or trap; may be {@code
+     *     null}.
+     * @param csrHook optional hook for custom CSR accesses; may be {@code null}, in which case
+     *     reads of non-built-in CSRs return {@code 0} and writes are silently discarded.
+     * @return {@code 0} after executing instructions or handling a trap; {@code 1} if the hart is
      *     in WFI and no instruction was executed.
      */
     public int step(

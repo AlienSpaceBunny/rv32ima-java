@@ -24,10 +24,39 @@
         <spotbugs.plugin.version>4.9.8.3</spotbugs.plugin.version>
         <javadoc.plugin.version>3.11.2</javadoc.plugin.version>
         <source.plugin.version>3.3.1</source.plugin.version>
+        <junit.version>6.1.3</junit.version>
+        <surefire.plugin.version>3.5.4</surefire.plugin.version>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!--
+                JUnit BOM: single source of truth for all JUnit Platform, Jupiter, and
+                Vintage artifact versions (unified versioning since JUnit 6). Module poms
+                declare the individual artifacts without a <version>.
+            -->
+            <dependency>
+                <groupId>org.junit</groupId>
+                <artifactId>junit-bom</artifactId>
+                <version>${junit.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <build>
         <plugins>
+            <!--
+                Surefire is pinned explicitly: the Maven-bundled default lags the JUnit
+                Platform release train, and the Platform artifacts jumped to 6.x under
+                unified versioning. A recent Surefire ensures correct test-engine discovery.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>${surefire.plugin.version}</version>
+            </plugin>
             <!--
                 Spotless enforces Palantir Java Format (4-space indent, IntelliJ-compatible style).
                 Run `mvn spotless:apply` to auto-format. `mvn verify` fails if formatting is dirty.

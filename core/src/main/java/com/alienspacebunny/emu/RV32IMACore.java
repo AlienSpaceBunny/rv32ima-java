@@ -32,6 +32,48 @@ public class RV32IMACore {
     private static final int MSTATUS_MPIE = 0x80;
     private static final int MSTATUS_MPP = 0x1800;
 
+    /** Bit position of the low end of {@code mstatus.MPP} (bits 12–11). */
+    private static final int MSTATUS_MPP_SHIFT = 11;
+
+    /** {@code mip}/{@code mie} bit 7: machine timer interrupt pending/enable (MTIP/MTIE). */
+    private static final int MIP_MTIP = 1 << 7;
+
+    /** {@code extraflags} bits 0–1: current privilege level ({@link #PRIV_MACHINE}/{@link #PRIV_USER}). */
+    private static final int EXTRAFLAG_PRIV_MASK = 0x3;
+
+    /** {@code extraflags} bit 2: WFI stall flag. Set on {@code WFI}; cleared when an interrupt arrives. */
+    private static final int EXTRAFLAG_WFI = 0x4;
+
+    private static final int PRIV_USER = 0;
+    private static final int PRIV_MACHINE = 3;
+
+    /*
+     * Trap dispatch uses a "+1" internal encoding on the local {@code trap} variable so that
+     * {@code trap == 0} unambiguously means "no trap". A synchronous exception is held as
+     * {@code cause + 1} (see {@link #exceptionTrap}); the trap handler writes {@code trap - 1}
+     * to {@code mcause}. An interrupt is held with the high bit set and written to {@code mcause}
+     * verbatim.
+     */
+    private static final int EXC_INSTRUCTION_MISALIGNED = 0;
+    private static final int EXC_INSTRUCTION_ACCESS_FAULT = 1;
+    private static final int EXC_ILLEGAL_INSTRUCTION = 2;
+    private static final int EXC_BREAKPOINT = 3;
+    private static final int EXC_LOAD_ACCESS_FAULT = 5;
+    private static final int EXC_STORE_ACCESS_FAULT = 7;
+    private static final int EXC_ECALL_FROM_U = 8;
+    private static final int EXC_ECALL_FROM_M = 11;
+
+    /** {@code mcause} high bit: set for an interrupt, clear for a synchronous exception. */
+    private static final int INTERRUPT_FLAG = 0x80000000;
+
+    /** Machine timer interrupt, already in {@code mcause} form (interrupt bit set, code 7). */
+    private static final int INT_MACHINE_TIMER = INTERRUPT_FLAG | 7;
+
+    /** Encodes a synchronous exception cause into the local {@code trap} variable's "+1" form. */
+    private static int exceptionTrap(int cause) {
+        return cause + 1;
+    }
+
     /**
      * Optional callback invoked after each instruction execution or trap.
      *
@@ -162,14 +204,14 @@ public class RV32IMACore {
         // Handle Timer interrupt.
         long timerMatch = state.getTimerMatch();
         if (timerMatch != 0 && Long.compareUnsigned(newTimer, timerMatch) >= 0) {
-            state.extraflags &= ~4; // Clear WFI
-            state.mip |= 1 << 7; // MTIP of MIP
+            state.extraflags &= ~EXTRAFLAG_WFI;
+            state.mip |= MIP_MTIP;
         } else {
-            state.mip &= ~(1 << 7);
+            state.mip &= ~MIP_MTIP;
         }
 
         // If WFI, don't run processor.
-        if ((state.extraflags & 4) != 0) {
+        if ((state.extraflags & EXTRAFLAG_WFI) != 0) {
             return 1;
         }
 
@@ -180,8 +222,8 @@ public class RV32IMACore {
         long cycle = state.getCycle();
 
         // Check for timer interrupt before starting loop
-        if ((state.mip & (1 << 7)) != 0 && (state.mie & (1 << 7)) != 0 && (state.mstatus & 0x8) != 0) {
-            trap = 0x80000007;
+        if ((state.mip & MIP_MTIP) != 0 && (state.mie & MIP_MTIP) != 0 && (state.mstatus & MSTATUS_MIE) != 0) {
+            trap = INT_MACHINE_TIMER;
             pc -= 4; // Will be incremented back to original PC in the interrupt handler
         } else {
             for (int icount = 0; icount < count; icount++) {
@@ -191,11 +233,11 @@ public class RV32IMACore {
                 int ofsPc = pc - ramOffset;
 
                 if (Integer.compareUnsigned(ofsPc, ramSize) >= 0) {
-                    trap = 1 + 1; // Access violation on instruction read
+                    trap = exceptionTrap(EXC_INSTRUCTION_ACCESS_FAULT);
                     rval = pc;
                     break;
                 } else if ((ofsPc & 3) != 0) {
-                    trap = 1 + 0; // PC-misaligned access
+                    trap = exceptionTrap(EXC_INSTRUCTION_MISALIGNED);
                     rval = pc;
                     break;
                 } else {
@@ -260,7 +302,7 @@ public class RV32IMACore {
                                     if (Integer.compareUnsigned(rs1, rs2) >= 0) pc = branchOffset;
                                     break; // BGEU
                                 default:
-                                    trap = (2 + 1);
+                                    trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
                             }
                             break;
                         }
@@ -289,10 +331,10 @@ public class RV32IMACore {
                                         rval = mem.readShort(addr) & 0xFFFF;
                                         break; // LHU
                                     default:
-                                        trap = (2 + 1);
+                                        trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
                                 }
                             } catch (IndexOutOfBoundsException e) {
-                                trap = (5 + 1); // Load access fault
+                                trap = exceptionTrap(EXC_LOAD_ACCESS_FAULT);
                                 rval = addr;
                             }
                             // Note: C code had some MMIO checks here, but our MemoryBus handles it via MMIOBus
@@ -319,13 +361,13 @@ public class RV32IMACore {
                                         mem.writeInt(addr, rs2);
                                         break; // SW
                                     default:
-                                        trap = (2 + 1);
+                                        trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
                                 }
                                 if (trap == 0) {
                                     state.reservationValid = false;
                                 }
                             } catch (IndexOutOfBoundsException e) {
-                                trap = (7 + 1); // Store access fault
+                                trap = exceptionTrap(EXC_STORE_ACCESS_FAULT);
                                 rval = addr;
                             }
                             break;
@@ -354,7 +396,7 @@ public class RV32IMACore {
                             }
 
                             if (!legalEncoding) {
-                                trap = (2 + 1);
+                                trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
                                 break;
                             }
 
@@ -481,29 +523,34 @@ public class RV32IMACore {
                                     state.mstatus = (startmstatus & ~(MSTATUS_MIE | MSTATUS_MPIE | MSTATUS_MPP))
                                             | ((startmstatus & MSTATUS_MPIE) >> 4)
                                             | MSTATUS_MPIE;
-                                    state.extraflags = (startextraflags & ~3) | ((startmstatus >> 11) & 3);
+                                    state.extraflags = (startextraflags & ~EXTRAFLAG_PRIV_MASK)
+                                            | ((startmstatus & MSTATUS_MPP) >> MSTATUS_MPP_SHIFT);
                                     pc = state.mepc - 4;
                                 } else {
                                     switch (csrno) {
                                         case 0: // ECALL
-                                            trap = ((state.extraflags & 3) != 0) ? (11 + 1) : (8 + 1);
+                                            // Only M-mode (3) and U-mode (0) are modelled; any
+                                            // non-user privilege is treated as machine here.
+                                            trap = ((state.extraflags & EXTRAFLAG_PRIV_MASK) != PRIV_USER)
+                                                    ? exceptionTrap(EXC_ECALL_FROM_M)
+                                                    : exceptionTrap(EXC_ECALL_FROM_U);
                                             break;
                                         case 1: // EBREAK
-                                            trap = (3 + 1);
+                                            trap = exceptionTrap(EXC_BREAKPOINT);
                                             break;
                                         case 0x105: // WFI
-                                            state.mstatus |= 8;
-                                            state.extraflags |= 4;
+                                            state.mstatus |= MSTATUS_MIE;
+                                            state.extraflags |= EXTRAFLAG_WFI;
                                             state.setCycle(cycle);
                                             state.pc = pc + 4;
                                             return 1;
                                         default:
-                                            trap = (2 + 1);
+                                            trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
                                             break;
                                     }
                                 }
                             } else {
-                                trap = (2 + 1);
+                                trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
                             }
                             break;
                         }
@@ -520,12 +567,14 @@ public class RV32IMACore {
                                         default -> false;
                                     };
                             if (funct3 != 2 || !validAtomicOperation) {
-                                trap = (2 + 1);
+                                trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
                                 break;
                             }
 
                             boolean doWrite = true;
-                            int accessFaultTrap = (irmid == 2) ? (5 + 1) : (7 + 1);
+                            int accessFaultTrap = (irmid == 2)
+                                    ? exceptionTrap(EXC_LOAD_ACCESS_FAULT)
+                                    : exceptionTrap(EXC_STORE_ACCESS_FAULT);
                             try {
                                 // We'll assume the memory bus handles atomics or we just implement them simply
                                 rval = mem.readInt(rs1);
@@ -572,7 +621,7 @@ public class RV32IMACore {
                                         rs2 = Integer.compareUnsigned(rs2, rval) > 0 ? rs2 : rval;
                                         break; // AMOMAXU.W
                                     default:
-                                        trap = (2 + 1);
+                                        trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
                                         doWrite = false;
                                         break;
                                 }
@@ -584,7 +633,7 @@ public class RV32IMACore {
                             break;
                         }
                         default:
-                            trap = (2 + 1);
+                            trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
                             break;
                     }
 
@@ -605,20 +654,20 @@ public class RV32IMACore {
 
         // Handle traps and interrupts.
         if (trap != 0) {
-            if ((trap & 0x80000000) != 0) {
+            if ((trap & INTERRUPT_FLAG) != 0) {
                 state.mcause = trap;
                 state.mtval = 0;
                 pc += 4;
             } else {
-                state.mcause = trap - 1;
-                state.mtval = state.mcause == 2 ? ir : rval;
+                state.mcause = trap - 1; // undo the "+1" internal encoding
+                state.mtval = state.mcause == EXC_ILLEGAL_INSTRUCTION ? ir : rval;
             }
             state.mepc = pc;
             state.mstatus = (state.mstatus & ~(MSTATUS_MIE | MSTATUS_MPIE | MSTATUS_MPP))
                     | ((state.mstatus & MSTATUS_MIE) << 4)
-                    | ((state.extraflags & 3) << 11);
+                    | ((state.extraflags & EXTRAFLAG_PRIV_MASK) << MSTATUS_MPP_SHIFT);
             pc = state.mtvec;
-            state.extraflags |= 3; // Enter machine mode
+            state.extraflags |= PRIV_MACHINE; // Enter machine mode
             trap = 0;
         }
 

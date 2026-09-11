@@ -25,6 +25,12 @@ for how this file is updated as part of cutting a release.
   standard RISC-V encoding). Applies uniformly to hook-routed custom CSR numbers too —
   see `CSRHook`'s updated Javadoc if you have a custom CSR meant to be reachable from
   user-mode guest code.
+- `AccessContext` and `AccessKind` (multi-hart Phase 2): every `MemoryBus` read/write
+  method gained a context-bearing overload (hart id, privilege, access kind, width,
+  atomic op), which `RV32IMACore` now calls for every fetch, load, store, and AMO.
+  Existing `MemoryBus` implementations are unaffected — the context-bearing overloads
+  default to delegating to the no-context ones. `MMIOBus` does not forward
+  `AccessContext` to `HardwareHook`; see its updated Javadoc.
 - `RV32IMAState.hartId`, identifying a hart among others sharing a `MemoryBus`.
   Defaults to `0`; not yet read or written by the core itself.
 - Instruction fetch now catches `IndexOutOfBoundsException` from the memory bus (not

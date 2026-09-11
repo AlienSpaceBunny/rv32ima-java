@@ -181,6 +181,20 @@ as atomic queue metadata. A sufficiently stronger ordering implementation permit
 record shape. Per-granule exclusion alone is not a payload-publication guarantee; if stronger
 ordering is not supplied, the ordering interface must be extended before that milestone.
 
+**Landed (`<pending>`):** `AccessContext` (record) and `AccessKind` (enum: `FETCH`, `LOAD`,
+`STORE`, `AMO`) as specified. All 6 base methods plus `readByteSigned`/`readShortSigned` gained
+context-bearing overloads (the signed pair wasn't in the original sketch — added so a bus
+overriding the 1-arg signed defaults keeps working, matching the stated compatibility
+guarantee). `RV32IMACore` builds the context once per instruction (`hartId`, `privilege` from
+`extraflags & 3`) and passes it to fetch, every load/store width, and both the AMO read and
+write. `AccessContextTest` covers all of it, including an explicit `ContextlessBus` regression
+guard for the default-delegation compatibility promise. `MMIOBus` — the one bus implementation
+in this repo — does not forward `AccessContext` to `HardwareHook`; flagged in its Javadoc,
+since it's the bus a first AP implementation would most likely start from.
+The AMO block now carries `AccessContext` (`kind=AMO`, `atomicOp=funct5`) on its `readInt`/
+`writeInt` calls, but **is not yet atomic across harts** — it's still two separate bus
+transactions, same as before. That's item 8 (`atomicRmw`).
+
 ### 4. AMO Atomicity — `atomicRmw` Bus Primitive
 
 The current AMO implementation in `RV32IMACore` (lines 529–579) calls `mem.readInt` then
@@ -486,8 +500,14 @@ behavior on `RV32IMFC_ZBA_ZBB_ZICSR` is confirmed acceptable for now (Nate).
 
 5. ~~Add U-mode CSR access privilege check (Design Decision §7): `((csrno >> 8) & 3) > privilege`
    → illegal-instruction trap.~~ **Done (`d9298a3`)**.
-6. Add `AccessContext` record and `AccessKind` enum; add default-method overloads to
-   `MemoryBus`; plumb context through all core load/store/fetch calls.
+6. ~~Add `AccessContext` record and `AccessKind` enum; add default-method overloads to
+   `MemoryBus`; plumb context through all core load/store/fetch calls.~~ **Done
+   (`<pending>`)**. Also added context-bearing `readByteSigned`/`readShortSigned` overloads
+   (not in the original sketch) so LB/LH preserve the compatibility guarantee for any bus
+   that overrode the 1-arg signed defaults. `MMIOBus` (the one in-repo bus) does not forward
+   `AccessContext` to `HardwareHook` — flagged in its Javadoc; a context-aware bus should
+   implement `MemoryBus` directly. AMO reads/writes carry `AccessContext` now but still go
+   through separate `readInt`/`writeInt` calls, **not yet atomic across harts** — that's item 8.
 7. ~~Add `injectInterrupt`, MSIP/MEIP delivery, and the privilege-dependent interrupt gating
    fix (§6–§7).~~ **Done (`5620de0`)**, landed ahead of the rest of this phase as a standalone
    correctness fix. Acknowledgement against a real mailbox device is still open (§6).

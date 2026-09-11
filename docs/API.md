@@ -94,6 +94,21 @@ instruction fetch after the core's instruction-fetch window check.
   enforces this explicitly and `FFMMemoryBusEndianTest` covers it. Big-endian
   hosts are not supported.
 
+Access context (multi-hart Phase 2): every read/write method has a
+context-bearing overload taking an `AccessContext` (`hartId`, `privilege`,
+`AccessKind` — `FETCH`/`LOAD`/`STORE`/`AMO`, `width` in bytes, and `atomicOp`,
+the AMO/LR/SC `funct5` or `0`). `RV32IMACore` calls only the context-bearing
+overloads. Each has a default that delegates to the no-context version, so
+implementing just the six original methods (plus the two signed-load defaults)
+continues to work unmodified — `ContextlessBus` in `AccessContextTest` is a
+regression guard for this. A bus needing the metadata (per-hart MPU
+enforcement, cross-hart LR/SC/AMO coordination) overrides the context-bearing
+methods instead. `MMIOBus` does **not** forward `AccessContext` to
+`HardwareHook` — a context-aware bus should implement `MemoryBus` directly
+rather than wrap or extend `MMIOBus`. `AccessContext` does not carry `aq`/`rl`
+ordering bits; per-access exclusion alone is not a payload-publication
+guarantee for shared-memory IPC — see `AccessContext`'s Javadoc.
+
 ## MMIOBus and HardwareHook
 
 `MMIOBus` composes a backing RAM bus with registered `HardwareHook` ranges.

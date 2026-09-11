@@ -9,6 +9,14 @@ import java.util.List;
  *
  * <p>Registered ranges are device-owned: once an access matches a hook range,
  * it is routed to the hook and does not fall through to the backing RAM bus.
+ *
+ * <p><b>Does not forward {@link AccessContext}.</b> This class implements only the six
+ * no-context {@link MemoryBus} methods, so every context-bearing call it receives falls to
+ * {@code MemoryBus}'s default implementation and the {@link AccessContext} is discarded before
+ * reaching either the backing bus or {@link HardwareHook}. That is the correct behavior for a
+ * bus that doesn't need per-access metadata, but a bus that does — for example, per-hart MPU
+ * enforcement — should implement {@link MemoryBus} directly rather than extend or wrap this
+ * class, since wrapping it would silently drop context at this boundary.
  */
 public class MMIOBus implements MemoryBus {
     private static final long ADDRESS_SPACE_SIZE = 1L << 32;

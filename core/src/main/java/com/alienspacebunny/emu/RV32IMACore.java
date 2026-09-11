@@ -325,6 +325,9 @@ public class RV32IMACore {
                 ir = 0;
                 rval = 0;
                 cycle++;
+                // Privilege is stable for the duration of one instruction: nothing a load, store,
+                // or AMO does can change it before the AccessContext below is built.
+                int privilege = state.extraflags & EXTRAFLAG_PRIV_MASK;
                 int ofsPc = pc - ramOffset;
 
                 if (Integer.compareUnsigned(ofsPc, ramSize) >= 0) {
@@ -336,8 +339,9 @@ public class RV32IMACore {
                     rval = pc;
                     break;
                 } else {
+                    AccessContext fetchCtx = new AccessContext(state.hartId, privilege, AccessKind.FETCH, 4, 0);
                     try {
-                        ir = mem.readInt(pc);
+                        ir = mem.readInt(pc, fetchCtx);
                     } catch (IndexOutOfBoundsException e) {
                         // The ramOffset/ramSize check above is only a coarse precheck; a bus can
                         // still reject a fetch within that window (for example, fine-grained MPU
@@ -422,19 +426,33 @@ public class RV32IMACore {
                             try {
                                 switch ((ir >> 12) & 0x7) {
                                     case 0:
-                                        rval = mem.readByteSigned(addr);
+                                        rval = mem.readByteSigned(
+                                                addr,
+                                                new AccessContext(state.hartId, privilege, AccessKind.LOAD, 1, 0));
                                         break; // LB
                                     case 1:
-                                        rval = mem.readShortSigned(addr);
+                                        rval = mem.readShortSigned(
+                                                addr,
+                                                new AccessContext(state.hartId, privilege, AccessKind.LOAD, 2, 0));
                                         break; // LH
                                     case 2:
-                                        rval = mem.readInt(addr);
+                                        rval = mem.readInt(
+                                                addr,
+                                                new AccessContext(state.hartId, privilege, AccessKind.LOAD, 4, 0));
                                         break; // LW
                                     case 4:
-                                        rval = mem.readByte(addr) & 0xFF;
+                                        rval = mem.readByte(
+                                                        addr,
+                                                        new AccessContext(
+                                                                state.hartId, privilege, AccessKind.LOAD, 1, 0))
+                                                & 0xFF;
                                         break; // LBU
                                     case 5:
-                                        rval = mem.readShort(addr) & 0xFFFF;
+                                        rval = mem.readShort(
+                                                        addr,
+                                                        new AccessContext(
+                                                                state.hartId, privilege, AccessKind.LOAD, 2, 0))
+                                                & 0xFFFF;
                                         break; // LHU
                                     default:
                                         trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
@@ -458,13 +476,22 @@ public class RV32IMACore {
                             try {
                                 switch ((ir >> 12) & 0x7) {
                                     case 0:
-                                        mem.writeByte(addr, (byte) rs2);
+                                        mem.writeByte(
+                                                addr,
+                                                (byte) rs2,
+                                                new AccessContext(state.hartId, privilege, AccessKind.STORE, 1, 0));
                                         break; // SB
                                     case 1:
-                                        mem.writeShort(addr, (short) rs2);
+                                        mem.writeShort(
+                                                addr,
+                                                (short) rs2,
+                                                new AccessContext(state.hartId, privilege, AccessKind.STORE, 2, 0));
                                         break; // SH
                                     case 2:
-                                        mem.writeInt(addr, rs2);
+                                        mem.writeInt(
+                                                addr,
+                                                rs2,
+                                                new AccessContext(state.hartId, privilege, AccessKind.STORE, 4, 0));
                                         break; // SW
                                     default:
                                         trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
@@ -687,9 +714,13 @@ public class RV32IMACore {
                             int accessFaultTrap = (irmid == 2)
                                     ? exceptionTrap(EXC_LOAD_ACCESS_FAULT)
                                     : exceptionTrap(EXC_STORE_ACCESS_FAULT);
+                            // irmid is the funct5 encoding; also AccessContext.atomicOp. LR.W is irmid 2 --
+                            // a multi-hart bus detects it via ctx.kind() == AMO && ctx.atomicOp() == 2 on
+                            // this readInt override, per AccessContext's Javadoc.
+                            AccessContext amoCtx = new AccessContext(state.hartId, privilege, AccessKind.AMO, 4, irmid);
                             try {
                                 // We'll assume the memory bus handles atomics or we just implement them simply
-                                rval = mem.readInt(rs1);
+                                rval = mem.readInt(rs1, amoCtx);
                                 switch (irmid) {
                                     case 2: // LR.W
                                         doWrite = false;
@@ -737,7 +768,7 @@ public class RV32IMACore {
                                         doWrite = false;
                                         break;
                                 }
-                                if (doWrite) mem.writeInt(rs1, rs2);
+                                if (doWrite) mem.writeInt(rs1, rs2, amoCtx);
                             } catch (IndexOutOfBoundsException e) {
                                 trap = accessFaultTrap;
                                 rval = rs1;

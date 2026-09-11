@@ -302,7 +302,7 @@ This section specifies the intended behavior for AP (U-mode) and IOP (M-mode) pr
 handling. Items marked **existing** are already implemented correctly; only items marked
 **new fix** require code changes.
 
-**U-mode CSR access restriction — done (`<pending>`).** The current CSR decode path in
+**U-mode CSR access restriction — done (`d9298a3`).** The current CSR decode path in
 `RV32IMACore` (line 437) has no privilege check — any privilege level can read or write any CSR.
 The RISC-V spec encodes the minimum required privilege in CSR bits[9:8]: M-mode CSRs have `0b11`,
 and U-mode-accessible CSRs (cycle/time/instret, `0xC00`–`0xCFF`) have `0b00`. Add before the CSR
@@ -485,7 +485,7 @@ behavior on `RV32IMFC_ZBA_ZBB_ZICSR` is confirmed acceptable for now (Nate).
 ### Phase 2 — Multi-Hart Infrastructure (P1 continued)
 
 5. ~~Add U-mode CSR access privilege check (Design Decision §7): `((csrno >> 8) & 3) > privilege`
-   → illegal-instruction trap.~~ **Done (`<pending>`)**.
+   → illegal-instruction trap.~~ **Done (`d9298a3`)**.
 6. Add `AccessContext` record and `AccessKind` enum; add default-method overloads to
    `MemoryBus`; plumb context through all core load/store/fetch calls.
 7. ~~Add `injectInterrupt`, MSIP/MEIP delivery, and the privilege-dependent interrupt gating

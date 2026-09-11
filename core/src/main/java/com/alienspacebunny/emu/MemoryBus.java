@@ -243,39 +243,69 @@ public interface MemoryBus {
      * #tryScAndStore} instead).
      *
      * <p>The default implementation reads, computes the new value, and writes it back as two
-     * separate calls to {@link #readInt(int, AccessContext)} and {@link #writeInt(int, int,
-     * AccessContext)} — correct for a single hart, but <b>not atomic with respect to a concurrent
-     * hart sharing this bus</b>, even if each call individually holds a lock. A multi-hart-aware
-     * override must hold one lock over the granule for the read, the computation, the write, and
-     * the invalidation of any overlapping LR/SC reservations in its own tracking (see {@link
-     * #tryScAndStore}), so no other hart's access can be interleaved with any part of this
-     * operation.
+     * separate calls at the width given by {@code ctx.width()} — correct for a single hart, but
+     * <b>not atomic with respect to a concurrent hart sharing this bus</b>, even if each call
+     * individually holds a lock. A multi-hart-aware override must hold one lock over the granule
+     * for the read, the computation, the write, and the invalidation of any overlapping LR/SC
+     * reservations in its own tracking (see {@link #tryScAndStore}), so no other hart's access can
+     * be interleaved with any part of this operation.
      *
-     * @param address the unsigned 32-bit guest address. Word-aligned; there is no sub-word AMO
-     *     support yet (Zabha, byte/halfword AMOs, is a later phase).
+     * <p><b>Sub-word width (Zabha).</b> {@code ctx.width()} is {@code 1} or {@code 2} for a
+     * byte/halfword AMO, {@code 4} for the original word-only AMOs. The default implementation
+     * reads and writes at that width ({@link #readByte}/{@link #writeByte} or {@link
+     * #readShort}/{@link #writeShort} instead of {@link #readInt}/{@link #writeInt}), sign-extends
+     * the loaded value before computing (so signed and unsigned comparisons at the reduced width
+     * behave correctly — see {@code RV32IComplianceTest}/{@code ZabhaTest} for why sign-extending a
+     * value preserves its relative order under {@link Integer#compareUnsigned} within that width),
+     * truncates {@code operand}'s bits above the width (the RISC-V Zabha spec says these must be
+     * ignored, not folded in), and writes back only the low {@code width} bytes of the result.
+     * There is no byte/halfword {@code LR}/{@code SC} — Zabha omits them.
+     *
+     * @param address the unsigned 32-bit guest address. Naturally aligned to {@code ctx.width()}.
      * @param funct5 the RV32A {@code funct5} encoding identifying the operation (for example,
      *     {@code 0} for {@code AMOADD.W}, {@code 1} for {@code AMOSWAP.W}); equal to {@link
      *     AccessContext#atomicOp()} on {@code ctx}. Must be one of the values {@link RV32IMACore}
      *     validates before calling this method: {@code 0, 1, 4, 8, 12, 16, 20, 24, 28}.
      * @param operand the AMO's second operand (the value from {@code rs2}).
-     * @param ctx metadata describing this access. See {@link AccessContext}.
-     * @return the value at {@code address} <em>before</em> the write — this becomes the
-     *     destination register's value.
+     * @param ctx metadata describing this access, including the access width. See {@link
+     *     AccessContext}.
+     * @return the value at {@code address} <em>before</em> the write, sign-extended to 32 bits at
+     *     sub-word widths — this becomes the destination register's value.
      * @throws IndexOutOfBoundsException if the address is not mapped or otherwise disallowed.
      * @throws IllegalArgumentException if {@code funct5} is not one of the values documented above.
      *     {@link RV32IMACore} never triggers this; it applies only to a caller invoking this method
      *     directly with an unsupported encoding.
      */
     default int atomicRmw(int address, int funct5, int operand, AccessContext ctx) {
-        int old = readInt(address, ctx);
-        int result = computeAmo(funct5, old, operand);
-        writeInt(address, result, ctx);
+        int width = ctx.width();
+        int old =
+                switch (width) {
+                    case 1 -> readByte(address, ctx);
+                    case 2 -> readShort(address, ctx);
+                    default -> readInt(address, ctx);
+                };
+        int truncatedOperand =
+                switch (width) {
+                    case 1 -> (byte) operand;
+                    case 2 -> (short) operand;
+                    default -> operand;
+                };
+        int result = computeAmo(funct5, old, truncatedOperand);
+        switch (width) {
+            case 1 -> writeByte(address, (byte) result, ctx);
+            case 2 -> writeShort(address, (short) result, ctx);
+            default -> writeInt(address, result, ctx);
+        }
         return old;
     }
 
     /**
      * Computes an AMO's new value from its {@code funct5} encoding, the value currently at the
-     * address, and the operand. Shared by {@link #atomicRmw}'s default implementation.
+     * address, and the operand. Shared by {@link #atomicRmw}'s default implementation. Operates on
+     * plain {@code int}s regardless of the AMO's width — the caller sign-extends the loaded value
+     * and the operand to the same width beforehand, which is sufficient for both the signed
+     * comparisons ({@code Math.min}/{@code Math.max}) and the unsigned ones ({@link
+     * Integer#compareUnsigned}) to agree with the narrower-width semantics.
      */
     private static int computeAmo(int funct5, int old, int operand) {
         return switch (funct5) {

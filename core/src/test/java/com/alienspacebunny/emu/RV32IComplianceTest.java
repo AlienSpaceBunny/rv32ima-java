@@ -19,6 +19,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 public class RV32IComplianceTest {
     private static final int RAM_OFFSET = 0x80000000;
     private static final int RAM_SIZE = 256;
+    private static final IsaConfig ZBA_ZBB = new IsaConfig(false, false, true, true, false);
 
     // --- Instruction encoding helpers ---
 
@@ -69,12 +70,60 @@ public class RV32IComplianceTest {
 
     /** Runs one OP-IMM instruction with rd=x3, rs1=x1 and returns the result. */
     private static int runOpImm(int funct3, int imm12, int rs1Val) {
+        return runOpImm(new RV32IMACore(), funct3, imm12, rs1Val);
+    }
+
+    /** Runs one OP-type instruction with rd=x3, rs1=x1, rs2=x2 under a given {@link IsaConfig}. */
+    private static int runOp(IsaConfig config, int funct7, int funct3, int rs1Val, int rs2Val) {
+        return runOp(new RV32IMACore(config), funct7, funct3, rs1Val, rs2Val);
+    }
+
+    private static int runOp(RV32IMACore core, int funct7, int funct3, int rs1Val, int rs2Val) {
+        try (FFMMemoryBus ram = new FFMMemoryBus(RAM_SIZE, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = rs1Val;
+            state.regs[2] = rs2Val;
+            ram.writeInt(RAM_OFFSET, op(funct7, funct3, 3, 1, 2));
+            core.step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            return state.regs[3];
+        }
+    }
+
+    /** Runs one OP-IMM instruction with rd=x3, rs1=x1 under a given {@link IsaConfig}. */
+    private static int runOpImm(IsaConfig config, int funct3, int imm12, int rs1Val) {
+        return runOpImm(new RV32IMACore(config), funct3, imm12, rs1Val);
+    }
+
+    private static int runOpImm(RV32IMACore core, int funct3, int imm12, int rs1Val) {
         try (FFMMemoryBus ram = new FFMMemoryBus(RAM_SIZE, RAM_OFFSET)) {
             RV32IMAState state = machineState();
             state.regs[1] = rs1Val;
             ram.writeInt(RAM_OFFSET, opImm(imm12, funct3, 3, 1));
-            new RV32IMACore().step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            core.step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
             return state.regs[3];
+        }
+    }
+
+    /** Returns the trap cause after running one OP-type instruction under a given config. */
+    private static int runOpTrapCause(IsaConfig config, int funct7, int funct3, int rs1Val, int rs2Val) {
+        try (FFMMemoryBus ram = new FFMMemoryBus(RAM_SIZE, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = rs1Val;
+            state.regs[2] = rs2Val;
+            ram.writeInt(RAM_OFFSET, op(funct7, funct3, 3, 1, 2));
+            new RV32IMACore(config).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            return state.mcause;
+        }
+    }
+
+    /** Returns the trap cause after running one OP-IMM instruction under a given config. */
+    private static int runOpImmTrapCause(IsaConfig config, int funct3, int imm12, int rs1Val) {
+        try (FFMMemoryBus ram = new FFMMemoryBus(RAM_SIZE, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = rs1Val;
+            ram.writeInt(RAM_OFFSET, opImm(imm12, funct3, 3, 1));
+            new RV32IMACore(config).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            return state.mcause;
         }
     }
 
@@ -611,5 +660,268 @@ public class RV32IComplianceTest {
             assertEquals(0xef, Byte.toUnsignedInt(ram.readByte(RAM_OFFSET + 8)));
             assertEquals(0xad, Byte.toUnsignedInt(ram.readByte(RAM_OFFSET + 10)));
         }
+    }
+
+    // ==========================================================================
+    // Zba — address generation (Phase 3)
+    // ==========================================================================
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource
+    void sh1add(String label, int rs1, int rs2, int expected) {
+        assertEquals(expected, runOp(ZBA_ZBB, 0x10, 2, rs1, rs2), label);
+    }
+
+    static Stream<Arguments> sh1add() {
+        return Stream.of(
+                Arguments.of("basic", 3, 10, (3 << 1) + 10),
+                Arguments.of("overflow wraps", 0x7fffffff, 2, (0x7fffffff << 1) + 2),
+                Arguments.of("negative rs2", 1, 0xffffffff, (1 << 1) + 0xffffffff));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource
+    void sh2add(String label, int rs1, int rs2, int expected) {
+        assertEquals(expected, runOp(ZBA_ZBB, 0x10, 4, rs1, rs2), label);
+    }
+
+    static Stream<Arguments> sh2add() {
+        return Stream.of(Arguments.of("basic", 3, 10, (3 << 2) + 10), Arguments.of("zero rs1", 0, 5, 5));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource
+    void sh3add(String label, int rs1, int rs2, int expected) {
+        assertEquals(expected, runOp(ZBA_ZBB, 0x10, 6, rs1, rs2), label);
+    }
+
+    static Stream<Arguments> sh3add() {
+        return Stream.of(Arguments.of("basic", 3, 10, (3 << 3) + 10), Arguments.of("zero rs2", 4, 0, 4 << 3));
+    }
+
+    @Test
+    public void zbaGatedByIsaConfig() {
+        // Without hasZba, SH1ADD's encoding (OP, funct7=0x10) is illegal.
+        assertEquals(2, runOpTrapCause(IsaConfig.RV32IMA_ZICSR, 0x10, 2, 3, 10));
+    }
+
+    // ==========================================================================
+    // Zbb — basic bit manipulation (Phase 3)
+    // ==========================================================================
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource
+    void andn(String label, int rs1, int rs2, int expected) {
+        assertEquals(expected, runOp(ZBA_ZBB, 0x20, 7, rs1, rs2), label);
+    }
+
+    static Stream<Arguments> andn() {
+        return Stream.of(
+                Arguments.of("basic", 0xff00ff00, 0x0000ffff, 0xff000000),
+                Arguments.of("all ones rs2 clears result", 0xdeadbeef, 0xffffffff, 0));
+    }
+
+    @Test
+    public void zextH() {
+        // ZEXT.H is OP-encoded with rs2 fixed to x0, so it can't use the generic runOp helper.
+        try (FFMMemoryBus ram = new FFMMemoryBus(RAM_SIZE, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[1] = 0xdeadffff;
+            ram.writeInt(RAM_OFFSET, op(0x04, 4, 3, 1, 0)); // zext.h x3, x1
+            new RV32IMACore(ZBA_ZBB).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            assertEquals(0x0000ffff, state.regs[3]);
+        }
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource
+    void orn(String label, int rs1, int rs2, int expected) {
+        assertEquals(expected, runOp(ZBA_ZBB, 0x20, 6, rs1, rs2), label);
+    }
+
+    static Stream<Arguments> orn() {
+        return Stream.of(Arguments.of("basic", 0x0000ff00, 0x00ffff00, 0xff00ffff));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource
+    void xnor(String label, int rs1, int rs2, int expected) {
+        assertEquals(expected, runOp(ZBA_ZBB, 0x20, 4, rs1, rs2), label);
+    }
+
+    static Stream<Arguments> xnor() {
+        return Stream.of(
+                Arguments.of("equal operands => all ones", 0x12345678, 0x12345678, 0xffffffff),
+                Arguments.of("bitwise complement of xor", 0xf0f0f0f0, 0x0f0f0f0f, 0));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource
+    void min(String label, int rs1, int rs2, int expected) {
+        assertEquals(expected, runOp(ZBA_ZBB, 0x05, 4, rs1, rs2), label);
+    }
+
+    static Stream<Arguments> min() {
+        return Stream.of(
+                Arguments.of("positive operands", 3, 7, 3),
+                Arguments.of("negative beats positive (signed)", 0x80000000, 1, 0x80000000));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource
+    void minu(String label, int rs1, int rs2, int expected) {
+        assertEquals(expected, runOp(ZBA_ZBB, 0x05, 5, rs1, rs2), label);
+    }
+
+    static Stream<Arguments> minu() {
+        return Stream.of(
+                Arguments.of("positive operands", 3, 7, 3),
+                Arguments.of("1 is unsigned-smaller than 0x80000000 (opposite of signed min)", 0x80000000, 1, 1));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource
+    void max(String label, int rs1, int rs2, int expected) {
+        assertEquals(expected, runOp(ZBA_ZBB, 0x05, 6, rs1, rs2), label);
+    }
+
+    static Stream<Arguments> max() {
+        return Stream.of(Arguments.of("1 is signed-larger than 0x80000000", 0x80000000, 1, 1));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource
+    void maxu(String label, int rs1, int rs2, int expected) {
+        assertEquals(expected, runOp(ZBA_ZBB, 0x05, 7, rs1, rs2), label);
+    }
+
+    static Stream<Arguments> maxu() {
+        return Stream.of(
+                Arguments.of("0x80000000 beats 1 unsigned (opposite of signed max)", 0x80000000, 1, 0x80000000));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource
+    void rol(String label, int rs1, int rs2, int expected) {
+        assertEquals(expected, runOp(ZBA_ZBB, 0x30, 1, rs1, rs2), label);
+    }
+
+    static Stream<Arguments> rol() {
+        return Stream.of(
+                Arguments.of("rotate by 4", 0x12345678, 4, 0x23456781),
+                Arguments.of("rotate by 0 is identity", 0xdeadbeef, 0, 0xdeadbeef),
+                Arguments.of("shift amount masked to 5 bits", 0x00000001, 32, 0x00000001));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource
+    void ror(String label, int rs1, int rs2, int expected) {
+        assertEquals(expected, runOp(ZBA_ZBB, 0x30, 5, rs1, rs2), label);
+    }
+
+    static Stream<Arguments> ror() {
+        return Stream.of(
+                Arguments.of("rotate by 4", 0x12345678, 4, 0x81234567),
+                Arguments.of("rotate by 0 is identity", 0xdeadbeef, 0, 0xdeadbeef));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource
+    void clz(String label, int rs1, int expected) {
+        assertEquals(expected, runOpImm(ZBA_ZBB, 1, 0x600, rs1), label);
+    }
+
+    static Stream<Arguments> clz() {
+        return Stream.of(
+                Arguments.of("zero has 32 leading zeros", 0, 32),
+                Arguments.of("all-ones has none", 0xffffffff, 0),
+                Arguments.of("MSB set has none", 0x80000000, 0),
+                Arguments.of("one leading zero", 0x40000000, 1));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource
+    void ctz(String label, int rs1, int expected) {
+        assertEquals(expected, runOpImm(ZBA_ZBB, 1, 0x601, rs1), label);
+    }
+
+    static Stream<Arguments> ctz() {
+        return Stream.of(
+                Arguments.of("zero has 32 trailing zeros", 0, 32),
+                Arguments.of("LSB set has none", 1, 0),
+                Arguments.of("one trailing zero", 2, 1));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource
+    void cpop(String label, int rs1, int expected) {
+        assertEquals(expected, runOpImm(ZBA_ZBB, 1, 0x602, rs1), label);
+    }
+
+    static Stream<Arguments> cpop() {
+        return Stream.of(
+                Arguments.of("zero has no bits set", 0, 0),
+                Arguments.of("all-ones has 32 bits set", 0xffffffff, 32),
+                Arguments.of("one bit set", 0x100, 1));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource
+    void sextB(String label, int rs1, int expected) {
+        assertEquals(expected, runOpImm(ZBA_ZBB, 1, 0x604, rs1), label);
+    }
+
+    static Stream<Arguments> sextB() {
+        return Stream.of(
+                Arguments.of("positive byte stays positive", 0x7f, 0x7f),
+                Arguments.of("negative byte sign-extends", 0xff, 0xffffffff),
+                Arguments.of("upper bits of source ignored", 0xdeadbe80, 0xffffff80));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource
+    void sextH(String label, int rs1, int expected) {
+        assertEquals(expected, runOpImm(ZBA_ZBB, 1, 0x605, rs1), label);
+    }
+
+    static Stream<Arguments> sextH() {
+        return Stream.of(
+                Arguments.of("positive halfword stays positive", 0x7fff, 0x7fff),
+                Arguments.of("negative halfword sign-extends", 0xffff, 0xffffffff));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource
+    void rori(String label, int rs1, int shamt, int expected) {
+        assertEquals(expected, runOpImm(ZBA_ZBB, 5, 0x600 | shamt, rs1), label);
+    }
+
+    static Stream<Arguments> rori() {
+        return Stream.of(
+                Arguments.of("rotate by 4", 0x12345678, 4, 0x81234567),
+                Arguments.of("rotate by 0 is identity", 0xdeadbeef, 0, 0xdeadbeef));
+    }
+
+    @Test
+    public void orcb() {
+        // Each result byte is all-ones if the source byte is nonzero, else zero.
+        assertEquals(0xff00ff00, runOpImm(ZBA_ZBB, 5, 0x287, 0x0a00bb00));
+        assertEquals(0, runOpImm(ZBA_ZBB, 5, 0x287, 0));
+        assertEquals(0xffffffff, runOpImm(ZBA_ZBB, 5, 0x287, 0x01010101));
+    }
+
+    @Test
+    public void rev8() {
+        assertEquals(0x78563412, runOpImm(ZBA_ZBB, 5, 0x698, 0x12345678));
+    }
+
+    @Test
+    public void zbbGatedByIsaConfig() {
+        // Without hasZbb, MIN's encoding (OP, funct7=0x05) is illegal.
+        assertEquals(2, runOpTrapCause(IsaConfig.RV32IMA_ZICSR, 0x05, 4, 3, 7));
+        // Without hasZbb, CLZ's encoding (OP-IMM, funct7=0x30/rs2=0) is illegal.
+        assertEquals(2, runOpImmTrapCause(IsaConfig.RV32IMA_ZICSR, 1, 0x600, 0));
+        // Without hasZbb, ZEXT.H's encoding (OP, funct7=0x04) is illegal.
+        assertEquals(2, runOpTrapCause(IsaConfig.RV32IMA_ZICSR, 0x04, 4, 3, 0));
     }
 }

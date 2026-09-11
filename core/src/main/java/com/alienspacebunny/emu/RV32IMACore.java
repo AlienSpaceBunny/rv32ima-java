@@ -10,9 +10,10 @@ import java.util.Objects;
  * RV32A atomic extension (LR/SC and ten AMO operations), and machine-mode CSR instructions
  * (Zicsr). The zero-argument constructor configures exactly this base ISA; the {@link
  * #RV32IMACore(IsaConfig)} constructor accepts an {@link IsaConfig} for the additional optional
- * extensions being layered on for the V-32 AP/IOP multi-hart feature work — as of this writing,
- * only the {@code misa} CSR value reflects that configuration; none of the optional extensions
- * are decoded yet.
+ * extensions being layered on for the V-32 AP/IOP multi-hart feature work. As of the Phase 3 work,
+ * {@code Zba}, {@code Zbb}, and {@code Zabha} (byte/halfword AMOs) are decoded when enabled; {@code
+ * C} and {@code F} are not decoded yet and only affect the {@code misa} CSR value the guest reads
+ * back.
  *
  * <p><b>Intentional deviations from the RISC-V specification.</b> Two behaviours are inherited
  * from the upstream C implementation and preserved intentionally:
@@ -147,6 +148,67 @@ public class RV32IMACore {
     public static void injectInterrupt(RV32IMAState state, int interruptBit) {
         state.mip |= 1 << interruptBit;
         state.extraflags &= ~EXTRAFLAG_WFI;
+    }
+
+    /**
+     * Computes a Zba/Zbb bit-manipulation instruction's result. Shared by the OP/OP-IMM decode
+     * block's bitmanip branch; the caller has already validated that the {@code (isReg, funct7,
+     * funct3, rs2Field)} combination is one of the encodings below.
+     */
+    private static int computeBitmanip(boolean isReg, int funct7, int funct3, int rs1, int rs2, int rs2Field) {
+        if (isReg) {
+            if (funct7 == 0x04) {
+                return rs1 & 0xffff; // ZEXT.H
+            }
+            if (funct7 == 0x10) {
+                return switch (funct3) {
+                    case 2 -> (rs1 << 1) + rs2; // SH1ADD
+                    case 4 -> (rs1 << 2) + rs2; // SH2ADD
+                    default -> (rs1 << 3) + rs2; // SH3ADD (funct3 == 6)
+                };
+            }
+            if (funct7 == 0x20) {
+                return switch (funct3) {
+                    case 4 -> ~(rs1 ^ rs2); // XNOR
+                    case 6 -> rs1 | ~rs2; // ORN
+                    default -> rs1 & ~rs2; // ANDN (funct3 == 7)
+                };
+            }
+            if (funct7 == 0x05) {
+                return switch (funct3) {
+                    case 4 -> Math.min(rs1, rs2); // MIN
+                    case 5 -> Integer.compareUnsigned(rs1, rs2) < 0 ? rs1 : rs2; // MINU
+                    case 6 -> Math.max(rs1, rs2); // MAX
+                    default -> Integer.compareUnsigned(rs1, rs2) > 0 ? rs1 : rs2; // MAXU (funct3 == 7)
+                };
+            }
+            // funct7 == 0x30: ROL (funct3 == 1) / ROR (funct3 == 5)
+            return funct3 == 1 ? Integer.rotateLeft(rs1, rs2 & 0x1f) : Integer.rotateRight(rs1, rs2 & 0x1f);
+        }
+        if (funct3 == 1) {
+            return switch (rs2Field) {
+                case 0 -> Integer.numberOfLeadingZeros(rs1); // CLZ
+                case 1 -> Integer.numberOfTrailingZeros(rs1); // CTZ
+                case 2 -> Integer.bitCount(rs1); // CPOP
+                case 4 -> (byte) rs1; // SEXT.B
+                default -> (short) rs1; // SEXT.H (rs2Field == 5)
+            };
+        }
+        if (funct7 == 0x14) {
+            // ORC.B: each result byte is all-ones if the corresponding source byte is nonzero, else 0.
+            int result = 0;
+            for (int byteIndex = 0; byteIndex < 4; byteIndex++) {
+                int shift = byteIndex * 8;
+                if (((rs1 >>> shift) & 0xff) != 0) {
+                    result |= 0xff << shift;
+                }
+            }
+            return result;
+        }
+        if (funct7 == 0x34) {
+            return Integer.reverseBytes(rs1); // REV8
+        }
+        return Integer.rotateRight(rs1, rs2Field); // RORI (funct7 == 0x30)
     }
 
     /**
@@ -515,9 +577,43 @@ public class RV32IMACore {
                             int rs2 = isReg ? state.regs[imm & 0x1f] : imm;
                             int funct3 = (ir >> 12) & 7;
                             int funct7 = (ir >>> 25) & 0x7f;
-                            boolean legalEncoding;
+                            int rs2Field = imm & 0x1f;
 
-                            if (isReg) {
+                            boolean zba = isaConfig.hasZba();
+                            boolean zbb = isaConfig.hasZbb();
+                            boolean zbaShAdd =
+                                    isReg && zba && funct7 == 0x10 && (funct3 == 2 || funct3 == 4 || funct3 == 6);
+                            boolean zbbLogicNegate =
+                                    isReg && zbb && funct7 == 0x20 && (funct3 == 4 || funct3 == 6 || funct3 == 7);
+                            boolean zbbMinMax = isReg && zbb && funct7 == 0x05 && funct3 >= 4;
+                            boolean zbbRotateReg = isReg && zbb && funct7 == 0x30 && (funct3 == 1 || funct3 == 5);
+                            boolean zbbZextH = isReg && zbb && funct7 == 0x04 && funct3 == 4 && rs2Field == 0;
+                            boolean zbbCountOrSext = !isReg
+                                    && zbb
+                                    && funct3 == 1
+                                    && funct7 == 0x30
+                                    && (rs2Field == 0
+                                            || rs2Field == 1
+                                            || rs2Field == 2
+                                            || rs2Field == 4
+                                            || rs2Field == 5);
+                            boolean zbbRori = !isReg && zbb && funct3 == 5 && funct7 == 0x30;
+                            boolean zbbOrcb = !isReg && zbb && funct3 == 5 && funct7 == 0x14 && rs2Field == 0x07;
+                            boolean zbbRev8 = !isReg && zbb && funct3 == 5 && funct7 == 0x34 && rs2Field == 0x18;
+                            boolean isBitmanip = zbaShAdd
+                                    || zbbLogicNegate
+                                    || zbbMinMax
+                                    || zbbRotateReg
+                                    || zbbZextH
+                                    || zbbCountOrSext
+                                    || zbbRori
+                                    || zbbOrcb
+                                    || zbbRev8;
+
+                            boolean legalEncoding;
+                            if (isBitmanip) {
+                                legalEncoding = true;
+                            } else if (isReg) {
                                 legalEncoding =
                                         funct7 == 0 || (funct7 == 0x20 && (funct3 == 0 || funct3 == 5)) || funct7 == 1;
                             } else if (funct3 == 1) {
@@ -533,7 +629,9 @@ public class RV32IMACore {
                                 break;
                             }
 
-                            if (isReg && funct7 == 1) {
+                            if (isBitmanip) {
+                                rval = computeBitmanip(isReg, funct7, funct3, rs1, rs2, rs2Field);
+                            } else if (isReg && funct7 == 1) {
                                 // RV32M
                                 switch (funct3) {
                                     case 0:
@@ -705,18 +803,25 @@ public class RV32IMACore {
                                         case 0, 1, 2, 3, 4, 8, 12, 16, 20, 24, 28 -> true;
                                         default -> false;
                                     };
-                            if (funct3 != 2 || !validAtomicOperation) {
+                            boolean isWordWidth = funct3 == 2;
+                            boolean isSubWordWidth = isaConfig.hasZabha() && (funct3 == 0 || funct3 == 1);
+                            // Zabha omits byte/halfword LR.W/SC.W (irmid 2, 3) -- only the nine RMW ops
+                            // get sub-word width.
+                            boolean subWordOperationAllowed = isSubWordWidth && irmid != 2 && irmid != 3;
+                            if (!validAtomicOperation || !(isWordWidth || subWordOperationAllowed)) {
                                 trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
                                 break;
                             }
 
+                            int width = isWordWidth ? 4 : (funct3 == 1 ? 2 : 1);
                             int accessFaultTrap = (irmid == 2)
                                     ? exceptionTrap(EXC_LOAD_ACCESS_FAULT)
                                     : exceptionTrap(EXC_STORE_ACCESS_FAULT);
                             // irmid is the funct5 encoding; also AccessContext.atomicOp. LR.W is irmid 2 --
                             // a multi-hart bus detects it via ctx.kind() == AMO && ctx.atomicOp() == 2 on
                             // this readInt override, per AccessContext's Javadoc.
-                            AccessContext amoCtx = new AccessContext(state.hartId, privilege, AccessKind.AMO, 4, irmid);
+                            AccessContext amoCtx =
+                                    new AccessContext(state.hartId, privilege, AccessKind.AMO, width, irmid);
                             try {
                                 switch (irmid) {
                                     case 2: // LR.W

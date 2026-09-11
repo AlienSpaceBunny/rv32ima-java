@@ -10,12 +10,15 @@ package com.alienspacebunny.emu;
  * existed. The flags below toggle optional extensions layered on top, added for the V-32 AP/IOP
  * multi-hart feature work (see {@code docs/FEATURE_REQUEST_PLAN.md}).
  *
- * <p><b>Decode support.</b> As of the Phase 1 foundation work, none of {@link #hasC}, {@link
- * #hasF}, {@link #hasZba}, {@link #hasZbb}, or {@link #hasZabha} are decoded yet: setting one only
- * changes the {@link #misa()} value the guest observes. The corresponding instructions still
- * raise an illegal-instruction trap until the phase that implements them lands (Zba/Zbb/Zabha:
- * Phase 3; C: Phase 4; F: Phase 5). Enabling a flag ahead of its phase does not unlock any
- * instructions early — it only changes what the guest reads back from {@code misa}.
+ * <p><b>Decode support.</b> {@link #hasZba}, {@link #hasZbb}, and {@link #hasZabha} are decoded as
+ * of the Phase 3 work: {@link #hasZba} unlocks {@code SH1ADD}/{@code SH2ADD}/{@code SH3ADD}; {@link
+ * #hasZbb} unlocks the ~18 basic bit-manipulation instructions; {@link #hasZabha} unlocks
+ * byte/halfword AMOs (the RV32A opcode's {@code funct3} field admitting {@code 0}/{@code 1} in
+ * addition to {@code 2}). {@link #hasC} and {@link #hasF} are not decoded yet: setting one only
+ * changes the {@link #misa()} value the guest observes, and the corresponding instructions still
+ * raise an illegal-instruction trap until the phase that implements them lands (C: Phase 4; F:
+ * Phase 5). Enabling a flag ahead of its phase does not unlock any instructions early — it only
+ * changes what the guest reads back from {@code misa}.
  *
  * <p><b>{@code misa}'s U-mode bit.</b> The value {@code RV32IMACore} hardcoded before this type
  * existed ({@code 0x40401101}) does not set the standard "U" bit (bit 20) that advertises

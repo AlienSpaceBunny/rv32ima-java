@@ -75,35 +75,35 @@ public class RV32IMACore {
         };
     }
 
-    private void writeCsr(RV32IMAState state, CSRHook csrHook, int csrno, int writeval) {
+    private void writeCsr(RV32IMAState state, CSRHook csrHook, int csrno, int writeValue) {
         switch (csrno) {
             case 0x340:
-                state.mscratch = writeval;
+                state.mscratch = writeValue;
                 break;
             case 0x305:
-                state.mtvec = writeval;
+                state.mtvec = writeValue;
                 break;
             case 0x304:
-                state.mie = writeval;
+                state.mie = writeValue;
                 break;
             case 0x344:
-                state.mip = writeval;
+                state.mip = writeValue;
                 break;
             case 0x341:
-                state.mepc = writeval;
+                state.mepc = writeValue;
                 break;
             case 0x300:
-                state.mstatus = writeval;
+                state.mstatus = writeValue;
                 break;
             case 0x342:
-                state.mcause = writeval;
+                state.mcause = writeValue;
                 break;
             case 0x343:
-                state.mtval = writeval;
+                state.mtval = writeValue;
                 break;
             default:
                 if (csrHook != null) {
-                    csrHook.handleWrite(csrno, writeval);
+                    csrHook.handleWrite(csrno, writeValue);
                 }
                 break;
         }
@@ -188,13 +188,13 @@ public class RV32IMACore {
                 ir = 0;
                 rval = 0;
                 cycle++;
-                int ofs_pc = pc - ramOffset;
+                int ofsPc = pc - ramOffset;
 
-                if (Integer.compareUnsigned(ofs_pc, ramSize) >= 0) {
+                if (Integer.compareUnsigned(ofsPc, ramSize) >= 0) {
                     trap = 1 + 1; // Access violation on instruction read
                     rval = pc;
                     break;
-                } else if ((ofs_pc & 3) != 0) {
+                } else if ((ofsPc & 3) != 0) {
                     trap = 1 + 0; // PC-misaligned access
                     rval = pc;
                     break;
@@ -212,52 +212,52 @@ public class RV32IMACore {
                             break;
                         case 0x6F: // JAL
                         {
-                            int reladdy = ((ir & 0x80000000) >> 11)
+                            int jumpOffset = ((ir & 0x80000000) >> 11)
                                     | ((ir & 0x7fe00000) >> 20)
                                     | ((ir & 0x00100000) >> 9)
                                     | ((ir & 0x000ff000));
-                            if ((reladdy & 0x00100000) != 0) reladdy |= 0xffe00000;
+                            if ((jumpOffset & 0x00100000) != 0) jumpOffset |= 0xffe00000;
                             rval = pc + 4;
-                            pc = pc + reladdy - 4;
+                            pc = pc + jumpOffset - 4;
                             break;
                         }
                         case 0x67: // JALR
                         {
                             int imm = ir >>> 20;
-                            int imm_se = imm | (((imm & 0x800) != 0) ? 0xfffff000 : 0);
+                            int immSext = imm | (((imm & 0x800) != 0) ? 0xfffff000 : 0);
                             rval = pc + 4;
-                            pc = ((state.regs[(ir >> 15) & 0x1f] + imm_se) & ~1) - 4;
+                            pc = ((state.regs[(ir >> 15) & 0x1f] + immSext) & ~1) - 4;
                             break;
                         }
                         case 0x63: // Branch
                         {
-                            int immm4 = ((ir & 0xf00) >> 7)
+                            int branchOffset = ((ir & 0xf00) >> 7)
                                     | ((ir & 0x7e000000) >> 20)
                                     | ((ir & 0x80) << 4)
                                     | ((ir >>> 31) << 12);
-                            if ((immm4 & 0x1000) != 0) immm4 |= 0xffffe000;
+                            if ((branchOffset & 0x1000) != 0) branchOffset |= 0xffffe000;
                             int rs1 = state.regs[(ir >> 15) & 0x1f];
                             int rs2 = state.regs[(ir >> 20) & 0x1f];
-                            immm4 = pc + immm4 - 4;
+                            branchOffset = pc + branchOffset - 4;
                             rdid = 0;
                             switch ((ir >> 12) & 0x7) {
                                 case 0:
-                                    if (rs1 == rs2) pc = immm4;
+                                    if (rs1 == rs2) pc = branchOffset;
                                     break; // BEQ
                                 case 1:
-                                    if (rs1 != rs2) pc = immm4;
+                                    if (rs1 != rs2) pc = branchOffset;
                                     break; // BNE
                                 case 4:
-                                    if (rs1 < rs2) pc = immm4;
+                                    if (rs1 < rs2) pc = branchOffset;
                                     break; // BLT
                                 case 5:
-                                    if (rs1 >= rs2) pc = immm4;
+                                    if (rs1 >= rs2) pc = branchOffset;
                                     break; // BGE
                                 case 6:
-                                    if (Integer.compareUnsigned(rs1, rs2) < 0) pc = immm4;
+                                    if (Integer.compareUnsigned(rs1, rs2) < 0) pc = branchOffset;
                                     break; // BLTU
                                 case 7:
-                                    if (Integer.compareUnsigned(rs1, rs2) >= 0) pc = immm4;
+                                    if (Integer.compareUnsigned(rs1, rs2) >= 0) pc = branchOffset;
                                     break; // BGEU
                                 default:
                                     trap = (2 + 1);
@@ -268,8 +268,8 @@ public class RV32IMACore {
                         {
                             int rs1 = state.regs[(ir >> 15) & 0x1f];
                             int imm = ir >>> 20;
-                            int imm_se = imm | (((imm & 0x800) != 0) ? 0xfffff000 : 0);
-                            int addr = rs1 + imm_se;
+                            int immSext = imm | (((imm & 0x800) != 0) ? 0xfffff000 : 0);
+                            int addr = rs1 + immSext;
 
                             try {
                                 switch ((ir >> 12) & 0x7) {
@@ -336,13 +336,13 @@ public class RV32IMACore {
                             int imm = ir >>> 20;
                             imm = imm | (((imm & 0x800) != 0) ? 0xfffff000 : 0);
                             int rs1 = state.regs[(ir >> 15) & 0x1f];
-                            boolean is_reg = (opcode & 0x20) != 0;
-                            int rs2 = is_reg ? state.regs[imm & 0x1f] : imm;
+                            boolean isReg = (opcode & 0x20) != 0;
+                            int rs2 = isReg ? state.regs[imm & 0x1f] : imm;
                             int funct3 = (ir >> 12) & 7;
                             int funct7 = (ir >>> 25) & 0x7f;
                             boolean legalEncoding;
 
-                            if (is_reg) {
+                            if (isReg) {
                                 legalEncoding =
                                         funct7 == 0 || (funct7 == 0x20 && (funct3 == 0 || funct3 == 5)) || funct7 == 1;
                             } else if (funct3 == 1) {
@@ -358,7 +358,7 @@ public class RV32IMACore {
                                 break;
                             }
 
-                            if (is_reg && funct7 == 1) {
+                            if (isReg && funct7 == 1) {
                                 // RV32M
                                 switch (funct3) {
                                     case 0:
@@ -396,7 +396,7 @@ public class RV32IMACore {
                             } else {
                                 switch (funct3) {
                                     case 0:
-                                        rval = (is_reg && (ir & 0x40000000) != 0) ? (rs1 - rs2) : (rs1 + rs2);
+                                        rval = (isReg && (ir & 0x40000000) != 0) ? (rs1 - rs2) : (rs1 + rs2);
                                         break;
                                     case 1:
                                         rval = rs1 << (rs2 & 0x1F);
@@ -436,40 +436,40 @@ public class RV32IMACore {
                             int microop = (ir >> 12) & 0x7;
                             if ((microop & 3) != 0) {
                                 // Zicsr
-                                int rs1imm = (ir >> 15) & 0x1f;
-                                int rs1 = state.regs[rs1imm];
+                                int rs1Index = (ir >> 15) & 0x1f;
+                                int rs1 = state.regs[rs1Index];
                                 boolean isWrite = microop == 1 || microop == 5;
                                 boolean shouldRead = !(isWrite && rdid == 0);
-                                boolean shouldWrite = isWrite || rs1imm != 0;
+                                boolean shouldWrite = isWrite || rs1Index != 0;
 
                                 rval = shouldRead ? readCsr(state, csrHook, csrno, cycle) : 0;
-                                int writeval = rs1;
+                                int writeValue = rs1;
 
                                 switch (microop) {
                                     case 1:
-                                        writeval = rs1;
+                                        writeValue = rs1;
                                         break; // CSRRW
                                     case 2:
-                                        writeval = rval | rs1;
+                                        writeValue = rval | rs1;
                                         break; // CSRRS
                                     case 3:
-                                        writeval = rval & ~rs1;
+                                        writeValue = rval & ~rs1;
                                         break; // CSRRC
                                     case 5:
-                                        writeval = rs1imm;
+                                        writeValue = rs1Index;
                                         break; // CSRRWI
                                     case 6:
-                                        writeval = rval | rs1imm;
+                                        writeValue = rval | rs1Index;
                                         break; // CSRRSI
                                     case 7:
-                                        writeval = rval & ~rs1imm;
+                                        writeValue = rval & ~rs1Index;
                                         break; // CSRRCI
                                     default:
                                         break; // unreachable: outer (microop & 3) != 0 excludes 0 and 4
                                 }
 
                                 if (shouldWrite) {
-                                    writeCsr(state, csrHook, csrno, writeval);
+                                    writeCsr(state, csrHook, csrno, writeValue);
                                 }
                             } else if (microop == 0) {
                                 // SYSTEM (MRET, ECALL, etc.)
@@ -524,24 +524,24 @@ public class RV32IMACore {
                                 break;
                             }
 
-                            boolean dowrite = true;
+                            boolean doWrite = true;
                             int accessFaultTrap = (irmid == 2) ? (5 + 1) : (7 + 1);
                             try {
                                 // We'll assume the memory bus handles atomics or we just implement them simply
                                 rval = mem.readInt(rs1);
                                 switch (irmid) {
                                     case 2: // LR.W
-                                        dowrite = false;
+                                        doWrite = false;
                                         state.reservationAddr = rs1;
                                         state.reservationValid = true;
                                         break;
                                     case 3: // SC.W
                                         if (state.reservationValid && state.reservationAddr == rs1) {
                                             rval = 0;
-                                            dowrite = true;
+                                            doWrite = true;
                                         } else {
                                             rval = 1;
-                                            dowrite = false;
+                                            doWrite = false;
                                         }
                                         state.reservationValid = false;
                                         break;
@@ -573,10 +573,10 @@ public class RV32IMACore {
                                         break; // AMOMAXU.W
                                     default:
                                         trap = (2 + 1);
-                                        dowrite = false;
+                                        doWrite = false;
                                         break;
                                 }
-                                if (dowrite) mem.writeInt(rs1, rs2);
+                                if (doWrite) mem.writeInt(rs1, rs2);
                             } catch (IndexOutOfBoundsException e) {
                                 trap = accessFaultTrap;
                                 rval = rs1;

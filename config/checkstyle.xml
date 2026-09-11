@@ -19,5 +19,21 @@
         <!-- Style: unnecessary complexity -->
         <module name="SimplifyBooleanExpression"/>
         <module name="SimplifyBooleanReturn"/>
+
+        <!--
+            Naming conventions. All use Checkstyle's default patterns:
+            camelCase for identifiers, UPPER_SNAKE_CASE for constants,
+            lower.dotted for packages. This is the enforcement point for the
+            "no C-carryover snake_case locals" convention.
+        -->
+        <module name="PackageName"/>
+        <module name="TypeName"/>
+        <module name="MethodName"/>
+        <module name="MemberName"/>
+        <module name="ParameterName"/>
+        <module name="LocalVariableName"/>
+        <module name="LocalFinalVariableName"/>
+        <module name="StaticVariableName"/>
+        <module name="ConstantName"/>
     </module>
 </module>

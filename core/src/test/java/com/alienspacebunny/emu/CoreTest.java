@@ -876,7 +876,7 @@ public class CoreTest {
     }
 
     @Test
-    public void amoadd_addsAndReturnsOld() {
+    public void amoaddAddsAndReturnsOld() {
         int ramSize = 1024;
         try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
             RV32IMAState state = machineState();

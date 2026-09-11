@@ -15,6 +15,10 @@ for how this file is updated as part of cutting a release.
   constructor is unaffected (`IsaConfig.RV32IMA_ZICSR`, identical `misa` value).
   Optional-extension instructions are not decoded yet — only `misa` reflects the
   configuration so far (multi-hart Phase 1 foundation work).
+- `IsaConfig.hasU`: picks whether `misa()` reports the standard U-mode bit (20) or
+  reproduces the previously-hardcoded value's non-standard bit 22. Defaults to `false`
+  (bit 22, matching the original mini-rv32ima-derived value exactly) via a 5-argument
+  compatibility constructor; the V-32 presets set it `true`.
 - `RV32IMAState.hartId`, identifying a hart among others sharing a `MemoryBus`.
   Defaults to `0`; not yet read or written by the core itself.
 - Instruction fetch now catches `IndexOutOfBoundsException` from the memory bus (not

@@ -108,17 +108,19 @@ When an instruction belonging to a disabled extension is decoded, the core raise
 illegal-instruction trap — the same path it uses today for reserved encodings. No behavior change
 for base configs.
 
-**Landed:** `IsaConfig` is a record (`hasC`, `hasF`, `hasZba`, `hasZbb`, `hasZabha`) with
+**Landed:** `IsaConfig` is a record (`hasC`, `hasF`, `hasZba`, `hasZbb`, `hasZabha`, `hasU`) with
 `RV32IMA_ZICSR`/`RV32IMFC_ZBA_ZBB_ZICSR`/`RV32IMC_ZBB_ZICSR` presets and an `misa()` method;
-`misa` (CSR `0x301`) is now derived from it. Two notes for the next phase and for Nate:
-- The previously-hardcoded `misa` value (`0x40401101`) sets bits {0, 8, 12, 22, 30} — **not**
-  bit 20, the standard "U" (user-mode support) bit. Preserved exactly, per this section's "no
-  behavior change for base configs," but flagging it: this core does implement U-mode, and the
-  V-32 AP runs guests in it, yet a guest probing `misa` won't see U-mode advertised. Bit 22 has
-  no standard single-letter meaning.
+`misa` (CSR `0x301`) is now derived from it.
+- **U-mode bit — resolved (Nate).** The previously-hardcoded `misa` value (`0x40401101`) set bits
+  {0, 8, 12, 22, 30}, not bit 20 (the standard "U" bit), even though this core implements U-mode.
+  Nate's call: make it configurable rather than picking one. `IsaConfig.hasU` (default `false` via
+  a 5-arg compatibility constructor) reproduces the exact original value including its
+  non-standard bit 22 when `false`; `RV32IMFC_ZBA_ZBB_ZICSR`/`RV32IMC_ZBB_ZICSR` set it `true`
+  (standard U bit, no legacy bit). `RV32IMA_ZICSR`'s `misa()` is unchanged (`0x40401101`).
 - `RV32IMFC_ZBA_ZBB_ZICSR` sets the C and F `misa` bits even though those instructions aren't
   decoded until Phase 4/5 — a guest that probes `misa` on that config and trusts it will find
-  F-extension instructions illegal-trap instead of executing.
+  F-extension instructions illegal-trap instead of executing. **Confirmed acceptable for now
+  (Nate).**
 - No decode-time gating exists yet because there is nothing to gate: none of Zba/Zbb/Zabha/C/F
   are decoded before their respective phases land.
 
@@ -466,9 +468,10 @@ The following order is recommended. Each step is independently committable and t
 3. ~~Fix the instruction-fetch exception gap (wrap `mem.readInt(pc)` in try/catch).~~ Done.
 4. ~~Derive `misa` from `IsaConfig` instead of hardcoded constant.~~ Done (folded into item 1).
 
-281 core + 1 cli tests green (`./mvnw clean verify`). See notes on Design Decisions §1–§2 above
-for the `misa` bit-22/no-U caveats and the F-before-it's-decoded caveat on
-`RV32IMFC_ZBA_ZBB_ZICSR` — worth Nate's attention before Phase 2 wires up a real AP/IOP core pair.
+283 core + 1 cli tests green (`./mvnw clean verify`). `IsaConfig.hasU` added afterward to resolve
+the `misa` U-bit question (Nate: make it configurable, default to the original legacy value,
+V-32 presets opt into the standard bit) — see Design Decision §1 above. The F-before-it's-decoded
+behavior on `RV32IMFC_ZBA_ZBB_ZICSR` is confirmed acceptable for now (Nate).
 
 ### Phase 2 — Multi-Hart Infrastructure (P1 continued)
 

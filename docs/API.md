@@ -19,7 +19,12 @@ changes the `misa` CSR value the guest reads back — no optional-extension
 instructions are decoded yet; they still raise an illegal-instruction trap
 until the phase that implements them lands. `misa` is derived from the config
 (`IsaConfig.misa()`); `Zba`/`Zbb`/`Zabha` have no bit of their own in `misa` and
-don't affect it.
+don't affect it. `hasU` picks which of two mutually exclusive bits `misa`
+reports: `false` (the default, `RV32IMA_ZICSR`) reproduces the exact value this
+core hardcoded before `IsaConfig` existed, including a non-standard bit 22 with
+no architected meaning; `true` (both V-32 presets) reports the standard U-mode
+bit (20) instead. Use `true` for any config whose guest code actually runs in
+user mode.
 
 `RV32IMACore.step(...)` executes up to `count` guest instructions against the
 provided mutable `RV32IMAState` and `MemoryBus`.

@@ -104,16 +104,14 @@ existing callers — `RV32IMACore()`'s zero-arg constructor is untouched in effe
 - Instruction fetch (`mem.readInt(pc)`) now catches `IndexOutOfBoundsException` within
   the `ramOffset`/`ramSize` window and converts it to an instruction access-fault trap,
   matching data load/store behavior.
-- **Two things flagged for Nate, not acted on** (see the commit message and
-  `docs/FEATURE_REQUEST_PLAN.md` §1/§2 for detail):
-  - The previously-hardcoded `misa` value doesn't set the standard "U" (bit 20) bit,
-    even though this core does implement U-mode and V-32's AP runs guests in it.
-    Preserved unchanged (required for backward compatibility); worth a decision before
-    Phase 2 wires up a real AP core with an `IsaConfig`.
-  - `RV32IMFC_ZBA_ZBB_ZICSR` (the V-32 AP preset) sets the F bit in `misa` even though F
-    isn't decoded until Phase 5 — a guest that trusts `misa` and probes for it will find
-    F instructions illegal-trap instead of executing.
-- 281 core + 1 cli tests (`./mvnw clean verify` green), up from 267 + 1.
+- Two things flagged for Nate; both resolved (see `docs/FEATURE_REQUEST_PLAN.md` §1):
+  - **`misa` U-bit — resolved, `IsaConfig.hasU` added.** Nate: make it configurable. `false`
+    (default, via a 5-arg compatibility constructor) reproduces the exact original hardcoded
+    value including its non-standard bit 22; `true` (both V-32 presets) reports the standard
+    U bit (20) instead. `RV32IMA_ZICSR.misa()` unchanged (`0x40401101`).
+  - **F advertised before decoded on `RV32IMFC_ZBA_ZBB_ZICSR` — confirmed acceptable for now
+    (Nate).** No change needed.
+- 283 core + 1 cli tests (`./mvnw clean verify` green), up from 267 + 1.
 
 ---
 

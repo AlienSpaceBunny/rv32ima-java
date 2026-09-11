@@ -11,8 +11,10 @@ pushed. Release readiness is documented but deliberately paused (`RELEASE_TODO.m
 Central publish until after multi-hart Phase 1–2. `docs/FEATURE_REQUEST_PLAN.md` r6 has
 been reviewed and conditionally signed off by the originating LLM (`docs/PLAN_REVIEW_RESPONSE.md`);
 the one condition (real MSIP/MEIP interrupt delivery, not just injection) is done (`5620de0`).
-**Phase 1 (foundation) is now done (`c92045e`)** — see below. Next up: Phase 2 (multi-hart
-infrastructure: U-mode CSR privilege check, `AccessContext`, `atomicRmw`, `tryScAndStore`).
+**Phase 1 (foundation) is done (`c92045e`)** — see below. **Phase 2 is in progress**: item 5
+(U-mode CSR privilege check, `d9298a3`) and item 6 (`AccessContext`/`AccessKind`, `d9e93da`) are
+done. Remaining: item 8 (`atomicRmw`), item 9 (`tryScAndStore`), item 10 (`ReservationTable`
+doc-only, bus-internal).
 
 ---
 
@@ -112,6 +114,30 @@ existing callers — `RV32IMACore()`'s zero-arg constructor is untouched in effe
   - **F advertised before decoded on `RV32IMFC_ZBA_ZBB_ZICSR` — confirmed acceptable for now
     (Nate).** No change needed.
 - 283 core + 1 cli tests (`./mvnw clean verify` green), up from 267 + 1.
+
+---
+
+## Phase 2 Progress — items 5 and 6 done
+
+**Item 5 (`d9298a3`) — U-mode CSR access privilege check.** A CSR access now traps
+illegal-instruction if the hart's privilege is below the CSR address's minimum-privilege
+field (bits 9–8). Applies uniformly to hook-routed custom CSRs too — flagged in `CSRHook`'s
+Javadoc, since mini-rv32ima's `0x136`–`0x140` console CSRs happen to fall in a
+privilege-restricted range by coincidence of address, not intent. 287 core + 1 cli tests.
+
+**Item 6 (`d9e93da`) — `AccessContext`/`AccessKind`, plumbed through every access.** New
+context-bearing overloads on `MemoryBus` (all defaulting to delegate to the no-context
+version — existing buses unaffected); `RV32IMACore` now passes context to fetch, every
+load/store width, and both AMO read+write. Added `readByteSigned`/`readShortSigned`
+context overloads beyond the plan's sketch, for full compatibility fidelity. **`MMIOBus`
+doesn't forward context to `HardwareHook`** — flagged in its Javadoc, since it's the bus a
+first AP implementation would most likely start from; a context-aware bus (AP MPU) should
+implement `MemoryBus` directly instead. AMO accesses carry context now but the AMO block is
+**still not cross-hart atomic** (two separate bus calls) — that's item 8. 301 core + 1 cli
+tests.
+
+**Still open in Phase 2:** item 8 (`atomicRmw`), item 9 (`tryScAndStore`), item 10
+(`ReservationTable`, doc-only/bus-internal — no core code expected).
 
 ---
 

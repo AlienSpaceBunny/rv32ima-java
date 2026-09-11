@@ -37,7 +37,7 @@ Estimated relative effort (rough):
 | Instruction-fetch fault via bus | P1 | XS |
 | U-mode CSR access privilege check | P1 | XS |
 | Interrupt injection and MSIP/MEIP delivery | P1 | S — **done** (`5620de0`) |
-| Bus access metadata (AccessContext) | P1 | S |
+| Bus access metadata (AccessContext) | P1 | S — **done** (`d9e93da`) |
 | `atomicRmw` + `tryScAndStore` / bus-internal tracking | P1 | M |
 | Zba (3 instructions) | P2 | XS |
 | Zbb (~18 instructions) | P2 | S |
@@ -134,7 +134,7 @@ Embedders must assign distinct, stable IDs to concurrently participating harts.
 **Landed:** `RV32IMAState.hartId`, default `0`. Not yet read or written by the core itself — that
 starts in Phase 2 once `AccessContext` plumbing exists (§3).
 
-### 3. Bus Access Metadata — `AccessContext` via Default Method Overloads
+### 3. Bus Access Metadata — `AccessContext` via Default Method Overloads — done (`d9e93da`)
 
 Rather than a separate observer interface (which would split enforcement between two objects),
 add `AccessContext` as an optional second parameter via default method overloads on `MemoryBus`:
@@ -181,7 +181,7 @@ as atomic queue metadata. A sufficiently stronger ordering implementation permit
 record shape. Per-granule exclusion alone is not a payload-publication guarantee; if stronger
 ordering is not supplied, the ordering interface must be extended before that milestone.
 
-**Landed (`<pending>`):** `AccessContext` (record) and `AccessKind` (enum: `FETCH`, `LOAD`,
+**Landed (`d9e93da`):** `AccessContext` (record) and `AccessKind` (enum: `FETCH`, `LOAD`,
 `STORE`, `AMO`) as specified. All 6 base methods plus `readByteSigned`/`readShortSigned` gained
 context-bearing overloads (the signed pair wasn't in the original sketch — added so a bus
 overriding the 1-arg signed defaults keeps working, matching the stated compatibility
@@ -502,7 +502,7 @@ behavior on `RV32IMFC_ZBA_ZBB_ZICSR` is confirmed acceptable for now (Nate).
    → illegal-instruction trap.~~ **Done (`d9298a3`)**.
 6. ~~Add `AccessContext` record and `AccessKind` enum; add default-method overloads to
    `MemoryBus`; plumb context through all core load/store/fetch calls.~~ **Done
-   (`<pending>`)**. Also added context-bearing `readByteSigned`/`readShortSigned` overloads
+   (`d9e93da`)**. Also added context-bearing `readByteSigned`/`readShortSigned` overloads
    (not in the original sketch) so LB/LH preserve the compatibility guarantee for any bus
    that overrode the 1-arg signed defaults. `MMIOBus` (the one in-repo bus) does not forward
    `AccessContext` to `HardwareHook` — flagged in its Javadoc; a context-aware bus should

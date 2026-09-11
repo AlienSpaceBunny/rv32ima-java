@@ -1,12 +1,18 @@
 package com.alienspacebunny.emu;
 
+import java.util.Objects;
+
 /**
  * Core execution engine for a single RV32IMA RISC-V hart.
  *
  * <p>Ported from <a href="https://github.com/cnlohr/mini-rv32ima">mini-rv32ima</a> (MIT licence).
  * Supports the RV32I base integer instruction set, the RV32M integer multiplication extension, the
  * RV32A atomic extension (LR/SC and ten AMO operations), and machine-mode CSR instructions
- * (Zicsr).
+ * (Zicsr). The zero-argument constructor configures exactly this base ISA; the {@link
+ * #RV32IMACore(IsaConfig)} constructor accepts an {@link IsaConfig} for the additional optional
+ * extensions being layered on for the V-32 AP/IOP multi-hart feature work — as of this writing,
+ * only the {@code misa} CSR value reflects that configuration; none of the optional extensions
+ * are decoded yet.
  *
  * <p><b>Intentional deviations from the RISC-V specification.</b> Two behaviours are inherited
  * from the upstream C implementation and preserved intentionally:
@@ -33,8 +39,27 @@ package com.alienspacebunny.emu;
  * pending and enabled, external takes priority over software, which takes priority over timer.
  */
 public class RV32IMACore {
-    /** Creates a new {@code RV32IMACore} execution engine. */
-    public RV32IMACore() {}
+    private final IsaConfig isaConfig;
+
+    /**
+     * Creates a new {@code RV32IMACore} execution engine configured for {@link
+     * IsaConfig#RV32IMA_ZICSR} (no optional extensions). Identical to the core before {@link
+     * IsaConfig} existed.
+     */
+    public RV32IMACore() {
+        this(IsaConfig.RV32IMA_ZICSR);
+    }
+
+    /**
+     * Creates a new {@code RV32IMACore} execution engine configured for the given extension set.
+     *
+     * @param isaConfig the extension configuration; only affects the {@code misa} CSR value as of
+     *     the Phase 1 foundation work (see {@link IsaConfig}'s class Javadoc).
+     * @throws NullPointerException if {@code isaConfig} is {@code null}.
+     */
+    public RV32IMACore(IsaConfig isaConfig) {
+        this.isaConfig = Objects.requireNonNull(isaConfig, "isaConfig");
+    }
 
     private static final int MSTATUS_MIE = 0x08;
     private static final int MSTATUS_MPIE = 0x80;
@@ -124,8 +149,9 @@ public class RV32IMACore {
      *       the destination register but before the PC is advanced to the next instruction.
      *   <li>For instructions that raise a trap: called before the trap is committed to the machine
      *       CSRs ({@code mepc}, {@code mcause}, {@code mtval}, {@code mstatus}).
-     *   <li>For instruction-fetch failures (PC out of the executable range, or misaligned): the
-     *       hook is <em>not</em> called.
+     *   <li>For instruction-fetch failures (PC out of the executable range, misaligned, or the
+     *       bus rejecting the fetch with an {@link IndexOutOfBoundsException}): the hook is
+     *       <em>not</em> called.
      * </ul>
      */
     public interface PostExecHook {
@@ -152,7 +178,7 @@ public class RV32IMACore {
             case 0x342 -> state.mcause;
             case 0x343 -> state.mtval;
             case 0xf11 -> 0xff0ff0ff; // mvendorid
-            case 0x301 -> 0x40401101; // misa
+            case 0x301 -> isaConfig.misa();
             default -> csrHook != null ? csrHook.handleRead(csrno) : 0;
         };
     }
@@ -209,10 +235,14 @@ public class RV32IMACore {
      * mtvec}. Fewer than {@code count} instructions may be executed when a trap fires.
      *
      * <p><b>Instruction fetch.</b> Instructions are fetched from the window defined by {@code
-     * ramOffset} and {@code ramSize}; a PC outside that range causes an instruction access-fault
-     * trap. Data accesses are delegated to {@code mem}; an {@link IndexOutOfBoundsException} from
-     * the memory bus is converted into a load or store access-fault trap with {@code mtval} set
-     * to the faulting address.
+     * ramOffset} and {@code ramSize}; a PC outside that range, or not 4-byte aligned, causes an
+     * instruction access-fault or misaligned-fetch trap without calling {@code mem}. Within that
+     * window, an {@link IndexOutOfBoundsException} thrown by {@code mem} itself (for example, a
+     * bus enforcing finer-grained access control than the coarse window) is likewise converted
+     * into an instruction access-fault trap, with {@code mtval} set to the faulting PC. Data
+     * accesses are delegated to {@code mem}; an {@link IndexOutOfBoundsException} from a data
+     * access is converted into a load or store access-fault trap with {@code mtval} set to the
+     * faulting address.
      *
      * @param state the mutable processor state to execute.
      * @param mem the memory bus for instruction fetch and data access.
@@ -296,7 +326,18 @@ public class RV32IMACore {
                     rval = pc;
                     break;
                 } else {
-                    ir = mem.readInt(pc);
+                    try {
+                        ir = mem.readInt(pc);
+                    } catch (IndexOutOfBoundsException e) {
+                        // The ramOffset/ramSize check above is only a coarse precheck; a bus can
+                        // still reject a fetch within that window (for example, fine-grained MPU
+                        // enforcement). Convert that rejection into the same instruction
+                        // access-fault trap as the coarse-window check, rather than letting the
+                        // exception propagate to the caller.
+                        trap = exceptionTrap(EXC_INSTRUCTION_ACCESS_FAULT);
+                        rval = pc;
+                        break;
+                    }
                     int rdid = (ir >> 7) & 0x1f;
 
                     int opcode = ir & 0x7f;

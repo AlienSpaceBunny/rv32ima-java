@@ -11,11 +11,26 @@ should be composed around the core through `MemoryBus`, `HardwareHook`,
 
 ## Execution Core
 
+`RV32IMACore()` configures the base RV32IMA_Zicsr ISA. `RV32IMACore(IsaConfig)`
+accepts an `IsaConfig` for the additional extensions being layered on for the
+V-32 multi-hart feature work (`RV32IMFC_ZBA_ZBB_ZICSR`, `RV32IMC_ZBB_ZICSR`, or
+a custom combination). As of the Phase 1 foundation work, `IsaConfig` only
+changes the `misa` CSR value the guest reads back — no optional-extension
+instructions are decoded yet; they still raise an illegal-instruction trap
+until the phase that implements them lands. `misa` is derived from the config
+(`IsaConfig.misa()`); `Zba`/`Zbb`/`Zabha` have no bit of their own in `misa` and
+don't affect it.
+
 `RV32IMACore.step(...)` executes up to `count` guest instructions against the
 provided mutable `RV32IMAState` and `MemoryBus`.
 
 - `state.pc` is the guest program counter at entry and is updated before return.
-- `ramOffset` and `ramSize` define the legal instruction-fetch window.
+- `ramOffset` and `ramSize` define the legal instruction-fetch window as a
+  coarse precheck. Within that window, `mem.readInt(pc)` is still called, and an
+  `IndexOutOfBoundsException` it throws (for example, a bus enforcing
+  finer-grained access control) is converted into the same instruction
+  access-fault trap as a PC outside the window, with `mtval` set to the
+  faulting PC.
 - Data loads and stores are delegated to `MemoryBus`; bus range failures should
   throw `IndexOutOfBoundsException`, which the core converts into guest load or
   store access-fault traps.
@@ -26,7 +41,8 @@ provided mutable `RV32IMAState` and `MemoryBus`.
 - `postExec`, when provided, is called once per instruction cycle: after a
   non-trapping instruction commits its result but before the PC advances, or
   before a trapping instruction's trap state is committed. It is not called when
-  instruction fetch itself fails (PC outside the window, or misaligned).
+  instruction fetch itself fails — PC outside the window, misaligned, or the bus
+  rejecting the fetch as described above.
 
 Timer behavior (see the `RV32IMACore` class Javadoc for the rationale behind
 the two intentional spec deviations):
@@ -112,6 +128,11 @@ RAM, VRAM, and hooks. Keep `MMIOBus` for simple range-routed devices.
 
 - Integer registers, PC, key machine CSRs, cycle counter, and timer registers
   are public fields for simple embedding and checkpointing.
+- `hartId` identifies this hart among others sharing a `MemoryBus`. Defaults to
+  `0`. The core does not read or write it as of the Phase 1 foundation work; a
+  multi-hart-aware `MemoryBus` is expected to key per-hart state by it once bus
+  access metadata lands. Embedders with more than one concurrently participating
+  hart must assign distinct, stable IDs.
 - `getCycle()/setCycle()`, `getTimer()/setTimer()`, and
   `getTimerMatch()/setTimerMatch()` expose the 64-bit split registers; prefer
   them over the raw half-word fields except in a CLINT MMIO hook.

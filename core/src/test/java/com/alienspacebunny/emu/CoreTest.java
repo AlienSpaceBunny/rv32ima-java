@@ -1634,4 +1634,163 @@ public class CoreTest {
             assertEquals(0x2468ace0, ram.readInt(RAM_OFFSET + 100));
         }
     }
+
+    // IsaConfig / misa / hartId tests (Phase 1 foundation work).
+
+    @Test
+    public void defaultConstructorMisaMatchesBaseIsaConfig() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            ram.writeInt(RAM_OFFSET, csrInstruction(0x301, 2, 5, 0)); // csrrs x5, misa, x0
+
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(IsaConfig.RV32IMA_ZICSR.misa(), state.regs[5]);
+        }
+    }
+
+    @Test
+    public void isaConfigConstructorRejectsNull() {
+        assertThrows(NullPointerException.class, () -> new RV32IMACore(null));
+    }
+
+    @Test
+    public void isaConfigConstructorMisaReflectsConfig() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            ram.writeInt(RAM_OFFSET, csrInstruction(0x301, 2, 5, 0)); // csrrs x5, misa, x0
+
+            new RV32IMACore(IsaConfig.RV32IMFC_ZBA_ZBB_ZICSR).step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(IsaConfig.RV32IMFC_ZBA_ZBB_ZICSR.misa(), state.regs[5]);
+        }
+    }
+
+    @Test
+    public void hartIdDefaultsToZeroAndIsNotTouchedByStep() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState defaultState = new RV32IMAState();
+            assertEquals(0, defaultState.hartId);
+
+            RV32IMAState state = machineState();
+            state.hartId = 7;
+            ram.writeInt(RAM_OFFSET, 0x00000013); // nop
+
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(7, state.hartId);
+        }
+    }
+
+    // Instruction-fetch IndexOutOfBoundsException handling (Phase 1 foundation work).
+
+    /**
+     * Wraps a {@link MemoryBus} and rejects a single fetch address, to simulate a bus that
+     * enforces access control finer-grained than the {@code ramOffset}/{@code ramSize} window
+     * (for example, an AP MPU bus), independent of the coarse window check.
+     */
+    private static final class FaultingFetchBus implements MemoryBus {
+        private final MemoryBus delegate;
+        private final int faultAddress;
+
+        FaultingFetchBus(MemoryBus delegate, int faultAddress) {
+            this.delegate = delegate;
+            this.faultAddress = faultAddress;
+        }
+
+        @Override
+        public byte readByte(int address) {
+            return delegate.readByte(address);
+        }
+
+        @Override
+        public short readShort(int address) {
+            return delegate.readShort(address);
+        }
+
+        @Override
+        public int readInt(int address) {
+            if (address == faultAddress) {
+                throw new IndexOutOfBoundsException("fetch rejected: " + Integer.toHexString(address));
+            }
+            return delegate.readInt(address);
+        }
+
+        @Override
+        public void writeByte(int address, byte value) {
+            delegate.writeByte(address, value);
+        }
+
+        @Override
+        public void writeShort(int address, short value) {
+            delegate.writeShort(address, value);
+        }
+
+        @Override
+        public void writeInt(int address, int value) {
+            delegate.writeInt(address, value);
+        }
+    }
+
+    @Test
+    public void fetchIndexOutOfBoundsWithinWindowBecomesInstructionAccessFaultTrap() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.mtvec = RAM_OFFSET + 0x80;
+            ram.writeInt(RAM_OFFSET, 0x00000013); // nop -- never actually fetched
+            MemoryBus faultingBus = new FaultingFetchBus(ram, RAM_OFFSET);
+
+            new RV32IMACore().step(state, faultingBus, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(1, state.mcause); // instruction access fault
+            assertEquals(RAM_OFFSET, state.mtval); // faulting PC
+            assertEquals(RAM_OFFSET, state.mepc);
+            assertEquals(RAM_OFFSET + 0x80, state.pc);
+            assertEquals(3, state.extraflags & 3); // trap entry always lands in machine mode
+        }
+    }
+
+    @Test
+    public void fetchIndexOutOfBoundsMidLoopFaultsAtCorrectPc() {
+        // Simulates an AP MPU-style bus that allows the first couple of instructions and then
+        // rejects a later one -- not the same as faulting on the very first fetch, and a
+        // different code path could plausibly get mepc/mtval off by one instruction here.
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.mtvec = RAM_OFFSET + 0x80;
+            ram.writeInt(RAM_OFFSET, 0x00000013); // nop
+            ram.writeInt(RAM_OFFSET + 4, 0x00000013); // nop
+            ram.writeInt(RAM_OFFSET + 8, 0x00000013); // never actually fetched
+            MemoryBus faultingBus = new FaultingFetchBus(ram, RAM_OFFSET + 8);
+
+            new RV32IMACore().step(state, faultingBus, RAM_OFFSET, ramSize, 0, 5, null, null);
+
+            assertEquals(1, state.mcause);
+            assertEquals(RAM_OFFSET + 8, state.mtval);
+            assertEquals(RAM_OFFSET + 8, state.mepc);
+            assertEquals(RAM_OFFSET + 0x80, state.pc);
+        }
+    }
+
+    @Test
+    public void fetchIndexOutOfBoundsDoesNotInvokePostExec() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.mtvec = RAM_OFFSET + 0x80;
+            ram.writeInt(RAM_OFFSET, 0x00000013);
+            MemoryBus faultingBus = new FaultingFetchBus(ram, RAM_OFFSET);
+            int[] postExecCalls = {0};
+
+            new RV32IMACore()
+                    .step(state, faultingBus, RAM_OFFSET, ramSize, 0, 1, (pc, ir, trap) -> postExecCalls[0]++, null);
+
+            assertEquals(0, postExecCalls[0]);
+        }
+    }
 }

@@ -9,6 +9,17 @@ for how this file is updated as part of cutting a release.
 ## [Unreleased]
 
 ### Added
+- `IsaConfig`, an immutable RISC-V extension configuration (`hasC`, `hasF`, `hasZba`,
+  `hasZbb`, `hasZabha`) accepted by a new `RV32IMACore(IsaConfig)` constructor. The
+  `misa` CSR is now derived from it instead of a hardcoded constant; the zero-argument
+  constructor is unaffected (`IsaConfig.RV32IMA_ZICSR`, identical `misa` value).
+  Optional-extension instructions are not decoded yet — only `misa` reflects the
+  configuration so far (multi-hart Phase 1 foundation work).
+- `RV32IMAState.hartId`, identifying a hart among others sharing a `MemoryBus`.
+  Defaults to `0`; not yet read or written by the core itself.
+- Instruction fetch now catches `IndexOutOfBoundsException` from the memory bus (not
+  just the coarse `ramOffset`/`ramSize` window) and converts it to an instruction
+  access-fault trap, matching how data loads/stores already behave.
 - `RV32IMACore.injectInterrupt(state, bit)` and machine software/external interrupt
   (MSIP/MEIP) dispatch, alongside the existing core-managed timer interrupt (MTIP).
 - `maven-release-plugin`, wired for local versioning and git tagging (`vX.Y.Z`); see

@@ -7,9 +7,10 @@ package com.alienspacebunny.emu;
  *
  * <ul>
  *   <li><em>Stable API fields</em> — safe to read and write between calls to {@link
- *       RV32IMACore#step}: {@link #regs}, {@link #pc}, {@link #mstatus}, {@link #mscratch},
- *       {@link #mtvec}, {@link #mie}, {@link #mip}, {@link #mepc}, {@link #mtval}, {@link
- *       #mcause}, {@link #extraflags}, {@link #reservationAddr}, {@link #reservationValid}.
+ *       RV32IMACore#step}: {@link #regs}, {@link #pc}, {@link #hartId}, {@link #mstatus}, {@link
+ *       #mscratch}, {@link #mtvec}, {@link #mie}, {@link #mip}, {@link #mepc}, {@link #mtval},
+ *       {@link #mcause}, {@link #extraflags}, {@link #reservationAddr}, {@link
+ *       #reservationValid}.
  *   <li><em>CLINT layout fields</em> — {@link #cyclel}, {@link #cycleh}, {@link #timerl}, {@link
  *       #timerh}, {@link #timermatchl}, {@link #timermatchh}. These are the raw 32-bit halves of
  *       the 64-bit cycle counter, machine timer ({@code mtime}), and timer-compare value ({@code
@@ -28,6 +29,18 @@ public class RV32IMAState {
 
     /** Program counter. */
     public int pc;
+
+    /**
+     * Identifies this hart among others sharing a {@link MemoryBus}. Defaults to {@code 0}.
+     *
+     * <p>{@link RV32IMACore} does not read or write this field itself as of the Phase 1
+     * foundation work — it exists so an embedder can assign a stable identity per hart before
+     * first use. A multi-hart-aware {@code MemoryBus} implementation is expected to key
+     * per-hart state (for example, LR/SC reservation ownership) by this value once bus access
+     * metadata is threaded through (see {@code docs/FEATURE_REQUEST_PLAN.md} §2–§3). Embedders
+     * with more than one concurrently participating hart must assign distinct, stable IDs.
+     */
+    public int hartId;
 
     /**
      * Machine status register ({@code mstatus}). Key bits: bit 3 (MIE) — machine interrupt

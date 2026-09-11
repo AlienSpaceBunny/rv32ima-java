@@ -211,6 +211,225 @@ public class RV32IMACore {
         return Integer.rotateRight(rs1, rs2Field); // RORI (funct7 == 0x30)
     }
 
+    // ---- RV32C (compressed instruction) support: Phase 4 ------------------------------------
+    //
+    // decodeCompressed(int) expands one 16-bit RVC encoding into a representative 32-bit RV32I/M
+    // word using the standard, non-scrambled encoding for each target instruction; the caller
+    // feeds that word through the ordinary opcode switch in step() unmodified. This works because
+    // every RVC instruction is semantically an alias for a base RV32I/M operation with a smaller
+    // register or immediate field. The bit-shuffle formulas below (which fields of the 16-bit
+    // word compose each immediate) are taken from the reference simulator's decoder
+    // (riscv-isa-sim, riscv/decode.h's rvc_* helpers), not hand-derived, and cross-checked against
+    // the authoritative riscv-opcodes tables (extensions/rv_c, rv32_c). A reserved or
+    // unimplemented 16-bit pattern returns 0 -- an opcode with no case in the switch below, so its
+    // default branch produces the same illegal-instruction trap a bad 32-bit encoding would.
+    //
+    // Quadrant-0 funct3 3 and 7 are the F/D-extension C.FLW/C.FSW/C.FLD/C.FSD slots. C.FLD/C.FSD
+    // (D extension) are not part of RV32 at all; C.FLW/C.FSW would be legal once F is decoded, but
+    // F is not implemented by this core yet (Phase 5) -- both fall through to the reserved case
+    // below on purpose, not by oversight.
+
+    private static int encodeRType(int opcode, int funct3, int funct7, int rd, int rs1, int rs2) {
+        return (funct7 << 25) | (rs2 << 20) | (rs1 << 15) | (funct3 << 12) | (rd << 7) | opcode;
+    }
+
+    private static int encodeIType(int opcode, int funct3, int rd, int rs1, int imm12) {
+        return ((imm12 & 0xfff) << 20) | (rs1 << 15) | (funct3 << 12) | (rd << 7) | opcode;
+    }
+
+    private static int encodeSType(int opcode, int funct3, int rs1, int rs2, int imm12) {
+        return (((imm12 >> 5) & 0x7f) << 25)
+                | (rs2 << 20)
+                | (rs1 << 15)
+                | (funct3 << 12)
+                | ((imm12 & 0x1f) << 7)
+                | opcode;
+    }
+
+    /** {@code value} is the already-shifted upper immediate; only its top 20 bits are used. */
+    private static int encodeUType(int opcode, int rd, int value) {
+        return (value & 0xfffff000) | (rd << 7) | opcode;
+    }
+
+    /** Inverse of the JAL decode in the opcode switch's {@code case 0x6F} arm. */
+    private static int encodeJal(int rd, int jumpOffset) {
+        return ((jumpOffset & 0x100000) << 11)
+                | ((jumpOffset & 0x7fe) << 20)
+                | ((jumpOffset & 0x800) << 9)
+                | (jumpOffset & 0xff000)
+                | (rd << 7)
+                | 0x6f;
+    }
+
+    /** Inverse of the branch decode in the opcode switch's {@code case 0x63} arm. */
+    private static int encodeBranch(int funct3, int rs1, int rs2, int branchOffset) {
+        return ((branchOffset & 0x1000) << 19)
+                | ((branchOffset & 0x7e0) << 20)
+                | (rs2 << 20)
+                | (rs1 << 15)
+                | (funct3 << 12)
+                | ((branchOffset & 0x1e) << 7)
+                | ((branchOffset & 0x800) >> 4)
+                | 0x63;
+    }
+
+    /** General signed 6-bit CI-format immediate (bit 12 &lt;&lt; 5 | bits 6:2). Used by C.ADDI,
+     * C.LI, C.ANDI, and (before an additional {@code &lt;&lt; 12}) C.LUI. */
+    private static int rvcSignedImm6(int c) {
+        int imm = ((c >>> 2) & 0x1f) | (((c >>> 12) & 0x1) << 5);
+        return (imm << 26) >> 26;
+    }
+
+    private static int rvcAddi4spnImm(int c) {
+        return (((c >>> 6) & 0x1) << 2)
+                | (((c >>> 5) & 0x1) << 3)
+                | (((c >>> 11) & 0x3) << 4)
+                | (((c >>> 7) & 0xf) << 6);
+    }
+
+    /** Shared by C.LW and C.SW. */
+    private static int rvcLwImm(int c) {
+        return (((c >>> 6) & 0x1) << 2) | (((c >>> 10) & 0x7) << 3) | (((c >>> 5) & 0x1) << 6);
+    }
+
+    private static int rvcAddi16spImm(int c) {
+        int imm = (((c >>> 6) & 0x1) << 4)
+                | (((c >>> 2) & 0x1) << 5)
+                | (((c >>> 5) & 0x1) << 6)
+                | (((c >>> 3) & 0x3) << 7)
+                | (((c >>> 12) & 0x1) << 9);
+        return (imm << 22) >> 22;
+    }
+
+    private static int rvcLwspImm(int c) {
+        return (((c >>> 4) & 0x7) << 2) | (((c >>> 12) & 0x1) << 5) | (((c >>> 2) & 0x3) << 6);
+    }
+
+    private static int rvcSwspImm(int c) {
+        return (((c >>> 9) & 0xf) << 2) | (((c >>> 7) & 0x3) << 6);
+    }
+
+    /** Shared by C.J and C.JAL. */
+    private static int rvcJImm(int c) {
+        int imm = (((c >>> 3) & 0x7) << 1)
+                | (((c >>> 11) & 0x1) << 4)
+                | (((c >>> 2) & 0x1) << 5)
+                | (((c >>> 7) & 0x1) << 6)
+                | (((c >>> 6) & 0x1) << 7)
+                | (((c >>> 9) & 0x3) << 8)
+                | (((c >>> 8) & 0x1) << 10)
+                | (((c >>> 12) & 0x1) << 11);
+        return (imm << 20) >> 20;
+    }
+
+    /** Shared by C.BEQZ and C.BNEZ. */
+    private static int rvcBImm(int c) {
+        int imm = (((c >>> 3) & 0x3) << 1)
+                | (((c >>> 10) & 0x3) << 3)
+                | (((c >>> 2) & 0x1) << 5)
+                | (((c >>> 5) & 0x3) << 6)
+                | (((c >>> 12) & 0x1) << 8);
+        return (imm << 23) >> 23;
+    }
+
+    /**
+     * Expands one 16-bit RVC-encoded instruction ({@code c}, zero-extended into an {@code int})
+     * into a representative 32-bit RV32I/M word, or returns {@code 0} for a reserved or
+     * unimplemented pattern. See the block comment above for the overall approach.
+     */
+    private static int decodeCompressed(int c) {
+        int funct3 = (c >>> 13) & 0x7;
+        int rdRs1Full = (c >>> 7) & 0x1f;
+        int rs2Full = (c >>> 2) & 0x1f;
+        int primeHigh = 8 + ((c >>> 7) & 0x7); // bits 9:7 "prime" register field, +8
+        int primeLow = 8 + ((c >>> 2) & 0x7); // bits 4:2 "prime" register field, +8
+
+        switch (c & 0x3) {
+            case 0:
+                return switch (funct3) {
+                    case 0 -> { // C.ADDI4SPN
+                        int imm = rvcAddi4spnImm(c);
+                        yield imm == 0 ? 0 : encodeIType(0x13, 0, primeLow, 2, imm); // ADDI rd', x2, imm
+                    }
+                    case 2 -> encodeIType(0x03, 2, primeLow, primeHigh, rvcLwImm(c)); // LW rd', imm(rs1')
+                    case 6 -> encodeSType(0x23, 2, primeHigh, primeLow, rvcLwImm(c)); // SW rs2', imm(rs1')
+                    default -> 0; // reserved, or C.FLD/C.FSD/C.FLW/C.FSW (D/F, not implemented)
+                };
+            case 1:
+                return switch (funct3) {
+                    case 0 -> encodeIType(0x13, 0, rdRs1Full, rdRs1Full, rvcSignedImm6(c)); // C.ADDI / C.NOP
+                    case 1 -> encodeJal(1, rvcJImm(c)); // C.JAL (RV32-only; rd = x1)
+                    case 2 -> encodeIType(0x13, 0, rdRs1Full, 0, rvcSignedImm6(c)); // C.LI
+                    case 3 -> { // C.LUI / C.ADDI16SP
+                        if (rdRs1Full == 2) {
+                            int imm = rvcAddi16spImm(c);
+                            yield imm == 0 ? 0 : encodeIType(0x13, 0, 2, 2, imm); // ADDI x2, x2, imm
+                        }
+                        int imm = rvcSignedImm6(c);
+                        yield imm == 0 ? 0 : encodeUType(0x37, rdRs1Full, imm << 12); // LUI rd, imm
+                    }
+                    case 4 -> decodeCompressedArithCluster(c, primeHigh, primeLow);
+                    case 5 -> encodeJal(0, rvcJImm(c)); // C.J (no link)
+                    case 6 -> encodeBranch(0, primeHigh, 0, rvcBImm(c)); // C.BEQZ: BEQ rs1', x0, off
+                    default -> encodeBranch(1, primeHigh, 0, rvcBImm(c)); // C.BNEZ: BNE rs1', x0, off
+                };
+            case 2:
+                return switch (funct3) {
+                    case 0 -> // C.SLLI
+                        ((c >>> 12) & 0x1) != 0
+                                ? 0 // shamt[5] set: reserved on RV32
+                                : encodeIType(0x13, 1, rdRs1Full, rdRs1Full, (c >>> 2) & 0x1f);
+                    case 2 -> // C.LWSP
+                        rdRs1Full == 0 ? 0 : encodeIType(0x03, 2, rdRs1Full, 2, rvcLwspImm(c));
+                    case 4 -> decodeCompressedJumpMoveCluster(c, rdRs1Full, rs2Full);
+                    case 6 -> encodeSType(0x23, 2, 2, rs2Full, rvcSwspImm(c)); // C.SWSP
+                    default -> 0; // reserved, or C.FLWSP/C.FSWSP (F, not implemented)
+                };
+            default: // quadrant 3: not a compressed encoding; the caller never reaches this
+                return 0;
+        }
+    }
+
+    /** Quadrant 1, funct3 4: C.SRLI / C.SRAI / C.ANDI / C.SUB / C.XOR / C.OR / C.AND. */
+    private static int decodeCompressedArithCluster(int c, int rdRs1P, int rs2P) {
+        boolean shamtOverflow = ((c >>> 12) & 0x1) != 0;
+        int shamt = (c >>> 2) & 0x1f;
+        return switch ((c >>> 10) & 0x3) {
+            case 0 -> shamtOverflow ? 0 : encodeIType(0x13, 5, rdRs1P, rdRs1P, shamt); // C.SRLI
+            case 1 -> shamtOverflow ? 0 : encodeIType(0x13, 5, rdRs1P, rdRs1P, 0x400 | shamt); // C.SRAI
+            case 2 -> encodeIType(0x13, 7, rdRs1P, rdRs1P, rvcSignedImm6(c)); // C.ANDI
+            default -> { // bits 11:10 == 3
+                if (((c >>> 12) & 0x1) != 0) {
+                    yield 0; // reserved on RV32 (RV64 C.SUBW/C.ADDW live here)
+                }
+                yield switch ((c >>> 5) & 0x3) {
+                    case 0 -> encodeRType(0x33, 0, 0x20, rdRs1P, rdRs1P, rs2P); // C.SUB
+                    case 1 -> encodeRType(0x33, 4, 0, rdRs1P, rdRs1P, rs2P); // C.XOR
+                    case 2 -> encodeRType(0x33, 6, 0, rdRs1P, rdRs1P, rs2P); // C.OR
+                    default -> encodeRType(0x33, 7, 0, rdRs1P, rdRs1P, rs2P); // C.AND
+                };
+            }
+        };
+    }
+
+    /** Quadrant 2, funct3 4: C.JR / C.MV / C.EBREAK / C.JALR / C.ADD. */
+    private static int decodeCompressedJumpMoveCluster(int c, int rdRs1Full, int rs2Full) {
+        boolean linking = ((c >>> 12) & 0x1) != 0;
+        if (!linking) {
+            if (rs2Full == 0) {
+                return rdRs1Full == 0 ? 0 : encodeIType(0x67, 0, 0, rdRs1Full, 0); // C.JR
+            }
+            return encodeRType(0x33, 0, 0, rdRs1Full, 0, rs2Full); // C.MV: ADD rd, x0, rs2
+        }
+        if (rs2Full == 0) {
+            if (rdRs1Full == 0) {
+                return (1 << 20) | 0x73; // C.EBREAK: SYSTEM, csr# 1, funct3 0, rs1 0, rd 0
+            }
+            return encodeIType(0x67, 0, 1, rdRs1Full, 0); // C.JALR: JALR x1, rs1, 0
+        }
+        return rdRs1Full == 0 ? 0 : encodeRType(0x33, 0, 0, rdRs1Full, rdRs1Full, rs2Full); // C.ADD
+    }
+
     /**
      * Optional callback invoked after each instruction execution or trap.
      *
@@ -230,8 +449,13 @@ public class RV32IMACore {
         /**
          * Observes an instruction that just executed or is about to trap.
          *
-         * @param pc the guest PC of the instruction, not yet advanced by 4.
-         * @param ir the raw 32-bit instruction word; zero if fetch failed before decoding.
+         * @param pc the guest PC of the instruction, not yet advanced to the next instruction
+         *     (which may be {@code pc + 2} or {@code pc + 4}; see {@code IsaConfig.hasC}).
+         * @param ir the 32-bit word the opcode decoder acted on; zero if fetch failed before
+         *     decoding. For a compressed (RVC) instruction (Phase 4, {@code IsaConfig.hasC}), this
+         *     is {@code RV32IMACore}'s internal 32-bit expansion of the 16-bit encoding, not the
+         *     original 16-bit bits — the same value used for {@code mtval} on an
+         *     illegal-instruction trap raised from a bad compressed encoding.
          * @param trap zero for normal execution; otherwise the trap cause (internal encoding,
          *     before being committed to {@code mcause}).
          */
@@ -361,6 +585,16 @@ public class RV32IMACore {
         int rval = 0;
         int pc = state.pc;
         int ir = 0;
+        // Length in bytes of the instruction currently being processed: 4 normally, or 2 for a
+        // compressed (RVC) instruction when IsaConfig.hasC is set. Every place that computes "the
+        // PC after this instruction" -- JAL/JALR/branch targets, the loop's PC advance, and the
+        // pending-interrupt PC correction below -- uses this instead of a literal 4, so those stay
+        // correct regardless of whether the instruction that ran was compressed. It is reset to 4
+        // at the top of every loop iteration and only lowered to 2 once the fetch stage confirms a
+        // compressed encoding; outside the loop (the pending-interrupt path immediately below, where
+        // no instruction has been fetched at all) it stays at its initial value of 4.
+        int instrLen = 4;
+        boolean hasC = isaConfig.hasC();
         long cycle = state.getCycle();
 
         // Check for a pending machine interrupt before starting the instruction loop. This core
@@ -381,11 +615,12 @@ public class RV32IMACore {
         }
 
         if (trap != 0) {
-            pc -= 4; // Will be incremented back to original PC in the interrupt handler
+            pc -= instrLen; // Will be incremented back to original PC in the interrupt handler
         } else {
             for (int icount = 0; icount < count; icount++) {
                 ir = 0;
                 rval = 0;
+                instrLen = 4;
                 cycle++;
                 // Privilege is stable for the duration of one instruction: nothing a load, store,
                 // or AMO does can change it before the AccessContext below is built.
@@ -396,20 +631,46 @@ public class RV32IMACore {
                     trap = exceptionTrap(EXC_INSTRUCTION_ACCESS_FAULT);
                     rval = pc;
                     break;
-                } else if ((ofsPc & 3) != 0) {
+                } else if (hasC ? (ofsPc & 1) != 0 : (ofsPc & 3) != 0) {
                     trap = exceptionTrap(EXC_INSTRUCTION_MISALIGNED);
                     rval = pc;
                     break;
                 } else {
-                    AccessContext fetchCtx = new AccessContext(state.hartId, privilege, AccessKind.FETCH, 4, 0);
                     try {
-                        ir = mem.readInt(pc, fetchCtx);
+                        if (hasC) {
+                            // Probe the halfword at pc first: bits[1:0] == 0b11 means a normal
+                            // 32-bit instruction (which may start at a non-word-aligned address
+                            // here, since a preceding compressed instruction can leave pc at an
+                            // odd multiple of 2 -- readInt supports that), anything else means a
+                            // 16-bit compressed instruction, and no second read is needed.
+                            AccessContext fetchCtx16 =
+                                    new AccessContext(state.hartId, privilege, AccessKind.FETCH, 2, 0);
+                            int lowHalf = mem.readShort(pc, fetchCtx16) & 0xffff;
+                            if ((lowHalf & 0x3) == 0x3) {
+                                AccessContext fetchCtx32 =
+                                        new AccessContext(state.hartId, privilege, AccessKind.FETCH, 4, 0);
+                                ir = mem.readInt(pc, fetchCtx32);
+                            } else {
+                                // decodeCompressed expands the 16-bit encoding into an equivalent
+                                // standard 32-bit RV32I/M word that the opcode switch below can
+                                // execute unmodified, or returns an opcode with no case in that
+                                // switch (its default branch already means illegal instruction) for
+                                // any reserved 16-bit pattern.
+                                ir = decodeCompressed(lowHalf);
+                                instrLen = 2;
+                            }
+                        } else {
+                            AccessContext fetchCtx = new AccessContext(state.hartId, privilege, AccessKind.FETCH, 4, 0);
+                            ir = mem.readInt(pc, fetchCtx);
+                        }
                     } catch (IndexOutOfBoundsException e) {
                         // The ramOffset/ramSize check above is only a coarse precheck; a bus can
                         // still reject a fetch within that window (for example, fine-grained MPU
-                        // enforcement). Convert that rejection into the same instruction
-                        // access-fault trap as the coarse-window check, rather than letting the
-                        // exception propagate to the caller.
+                        // enforcement, or -- with hasC -- a 32-bit fetch that starts within the
+                        // window but whose last bytes fall past ramSize/the bus's own bounds).
+                        // Convert that rejection into the same instruction access-fault trap as the
+                        // coarse-window check, rather than letting the exception propagate to the
+                        // caller.
                         trap = exceptionTrap(EXC_INSTRUCTION_ACCESS_FAULT);
                         rval = pc;
                         break;
@@ -431,16 +692,16 @@ public class RV32IMACore {
                                     | ((ir & 0x00100000) >> 9)
                                     | ((ir & 0x000ff000));
                             if ((jumpOffset & 0x00100000) != 0) jumpOffset |= 0xffe00000;
-                            rval = pc + 4;
-                            pc = pc + jumpOffset - 4;
+                            rval = pc + instrLen;
+                            pc = pc + jumpOffset - instrLen;
                             break;
                         }
                         case 0x67: // JALR
                         {
                             int imm = ir >>> 20;
                             int immSext = imm | (((imm & 0x800) != 0) ? 0xfffff000 : 0);
-                            rval = pc + 4;
-                            pc = ((state.regs[(ir >> 15) & 0x1f] + immSext) & ~1) - 4;
+                            rval = pc + instrLen;
+                            pc = ((state.regs[(ir >> 15) & 0x1f] + immSext) & ~1) - instrLen;
                             break;
                         }
                         case 0x63: // Branch
@@ -452,7 +713,7 @@ public class RV32IMACore {
                             if ((branchOffset & 0x1000) != 0) branchOffset |= 0xffffe000;
                             int rs1 = state.regs[(ir >> 15) & 0x1f];
                             int rs2 = state.regs[(ir >> 20) & 0x1f];
-                            branchOffset = pc + branchOffset - 4;
+                            branchOffset = pc + branchOffset - instrLen;
                             rdid = 0;
                             switch ((ir >> 12) & 0x7) {
                                 case 0:
@@ -762,7 +1023,7 @@ public class RV32IMACore {
                                             | MSTATUS_MPIE;
                                     state.extraflags = (startextraflags & ~EXTRAFLAG_PRIV_MASK)
                                             | ((startmstatus & MSTATUS_MPP) >> MSTATUS_MPP_SHIFT);
-                                    pc = state.mepc - 4;
+                                    pc = state.mepc - instrLen;
                                 } else {
                                     switch (csrno) {
                                         case 0: // ECALL
@@ -779,7 +1040,7 @@ public class RV32IMACore {
                                             state.mstatus |= MSTATUS_MIE;
                                             state.extraflags |= EXTRAFLAG_WFI;
                                             state.setCycle(cycle);
-                                            state.pc = pc + 4;
+                                            state.pc = pc + instrLen;
                                             return 1;
                                         default:
                                             trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
@@ -868,7 +1129,7 @@ public class RV32IMACore {
                 }
 
                 if (postExec != null) postExec.onPostExec(pc, ir, trap);
-                pc += 4;
+                pc += instrLen;
             }
         }
 
@@ -877,7 +1138,7 @@ public class RV32IMACore {
             if ((trap & INTERRUPT_FLAG) != 0) {
                 state.mcause = trap;
                 state.mtval = 0;
-                pc += 4;
+                pc += instrLen;
             } else {
                 state.mcause = trap - 1; // undo the "+1" internal encoding
                 state.mtval = state.mcause == EXC_ILLEGAL_INSTRUCTION ? ir : rval;

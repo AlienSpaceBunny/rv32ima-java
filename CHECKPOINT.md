@@ -12,8 +12,9 @@ Central publish until after multi-hart Phase 1–2. `docs/FEATURE_REQUEST_PLAN.m
 been reviewed and conditionally signed off by the originating LLM (`docs/PLAN_REVIEW_RESPONSE.md`);
 the one condition (real MSIP/MEIP interrupt delivery, not just injection) is done (`5620de0`).
 **Phase 1 (foundation) is done (`c92045e`)** — see below. **Phase 2 is done** (items 5, 6, 7,
-8, 9, 10 all complete; final pieces `4aeec77`) — see below. Phase 3 (Zba/Zbb/Zabha) is next,
-pending Nate's go-ahead.
+8, 9, 10 all complete; final pieces `4aeec77`) — see below. **Phase 3 is done** (items 11, 12,
+13 — Zba, Zbb, Zabha — `590a4c9`) — see below. Phase 4 (C extension) is next, pending Nate's
+go-ahead.
 
 ---
 
@@ -157,6 +158,46 @@ multi-hart `MemoryBus` implementation doesn't exist yet in this repo, and `aq`/`
 memory-ordering semantics remain explicitly out of `AccessContext`'s scope pending that
 bus's design (§3, §5) — flag this before anyone relies on shared-memory IPC between AP
 and IOP.
+
+---
+
+## Phase 3 — Zba/Zbb/Zabha decode (`590a4c9`) — done
+
+Items 11, 12, 13. `RV32IMACore`'s OP/OP-IMM decode block gained a `computeBitmanip` helper
+(mirroring `MemoryBus.computeAmo`'s style) reached via a new `isBitmanip` branch computed
+alongside `legalEncoding`, so an unsupported combination still falls through to the base
+`legalEncoding` check and traps illegal-instruction exactly as before.
+
+- **Zba** (`IsaConfig.hasZba`): `SH1ADD`/`SH2ADD`/`SH3ADD` (OP, funct7 `0x10`).
+- **Zbb** (`IsaConfig.hasZbb`): all 18 instructions — `CLZ`, `CTZ`, `CPOP`, `SEXT.B`,
+  `SEXT.H` (OP-IMM, funct7 `0x30`, discriminated by the `rs2` field); `ZEXT.H` (OP, funct7
+  `0x04`, `rs2` fixed to `x0`); `MIN`/`MINU`/`MAX`/`MAXU` (OP, funct7 `0x05`); `ANDN`/`ORN`/
+  `XNOR` (OP, funct7 `0x20`, same funct7 as `SUB`/`SRA` but disjoint funct3 values); `ROL`/
+  `ROR` (OP, funct7 `0x30`); `RORI` (OP-IMM, funct7 `0x30`, shift amount in the `rs2` field);
+  `ORC.B` (OP-IMM, funct7 `0x14`); `REV8` (OP-IMM, funct7 `0x34`, RV32 form). All encodings
+  verified against the authoritative
+  [riscv-opcodes](https://github.com/riscv/riscv-opcodes) machine-readable tables — an
+  earlier draft of `docs/FEATURE_REQUEST_PLAN.md`'s encoding table had three funct7 values
+  wrong and omitted `ZEXT.H` entirely; fixed in the same commit as the doc update.
+- **Zabha** (`IsaConfig.hasZabha`): byte/halfword AMOs. The RV32A decoder's `funct3` field
+  now also admits `0`/`1` for the nine RMW ops (still `2`-only for `LR.W`/`SC.W` — Zabha
+  defines no sub-word `LR`/`SC`, and the core traps that combination illegal even with
+  `hasZabha` set). `MemoryBus.atomicRmw`'s default implementation became width-aware via
+  `ctx.width()`: it reads/writes at that width, sign-extends the loaded value and truncates
+  `operand` to it before calling the unchanged, still-`int`-based `computeAmo`, and writes
+  back only the low `width` bytes. This works without a sub-word variant of `computeAmo`
+  because sign-extending both operands to the same width preserves their relative order
+  under `Integer.compareUnsigned` — documented on `atomicRmw`'s Javadoc and locked in by
+  `ZabhaTest`.
+- New `RV32IComplianceTest` Zba/Zbb sections and `ZabhaTest` (8 tests): computation,
+  edge/boundary values, neighboring-byte preservation for sub-word AMOs, signed-vs-unsigned
+  comparison at reduced width, `rs2` bits above the operand width being ignored per the
+  Zabha spec, and `IsaConfig` gating in both directions (extension present but the specific
+  encoding not covered; extension absent entirely). 362 core + 1 cli tests.
+
+**Phase 3 is ISA decode only** — it doesn't change the multi-hart bus contract. A
+multi-hart-aware `MemoryBus`'s `atomicRmw` override still owns sub-word lock granularity for
+Zabha, the same way it already owns word-width AMO/LR/SC coordination from Phase 2.
 
 ---
 

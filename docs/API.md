@@ -14,17 +14,21 @@ should be composed around the core through `MemoryBus`, `HardwareHook`,
 `RV32IMACore()` configures the base RV32IMA_Zicsr ISA. `RV32IMACore(IsaConfig)`
 accepts an `IsaConfig` for the additional extensions being layered on for the
 V-32 multi-hart feature work (`RV32IMFC_ZBA_ZBB_ZICSR`, `RV32IMC_ZBB_ZICSR`, or
-a custom combination). As of the Phase 1 foundation work, `IsaConfig` only
-changes the `misa` CSR value the guest reads back — no optional-extension
-instructions are decoded yet; they still raise an illegal-instruction trap
-until the phase that implements them lands. `misa` is derived from the config
-(`IsaConfig.misa()`); `Zba`/`Zbb`/`Zabha` have no bit of their own in `misa` and
-don't affect it. `hasU` picks which of two mutually exclusive bits `misa`
-reports: `false` (the default, `RV32IMA_ZICSR`) reproduces the exact value this
-core hardcoded before `IsaConfig` existed, including a non-standard bit 22 with
-no architected meaning; `true` (both V-32 presets) reports the standard U-mode
-bit (20) instead. Use `true` for any config whose guest code actually runs in
-user mode.
+a custom combination). As of Phase 3, `hasZba`, `hasZbb`, and `hasZabha` are
+decoded — enabling one unlocks the corresponding instructions, and the
+un-gated encodings still raise an illegal-instruction trap even when the
+config would otherwise support them (see the `IsaConfig`/`RV32IMACore` class
+Javadoc for the exact instruction list per flag). `hasC` and `hasF` are not
+decoded yet: enabling either only changes the `misa` CSR value the guest reads
+back, until the phase that implements them lands. `misa` is derived from the
+config (`IsaConfig.misa()`); `Zba`/`Zbb`/`Zabha` have no bit of their own in
+`misa` and don't affect it regardless of decode support. `hasU` picks which of
+two mutually exclusive bits `misa` reports: `false` (the default,
+`RV32IMA_ZICSR`) reproduces the exact value this core hardcoded before
+`IsaConfig` existed, including a non-standard bit 22 with no architected
+meaning; `true` (both V-32 presets) reports the standard U-mode bit (20)
+instead. Use `true` for any config whose guest code actually runs in user
+mode.
 
 `RV32IMACore.step(...)` executes up to `count` guest instructions against the
 provided mutable `RV32IMAState` and `MemoryBus`.
@@ -115,12 +119,14 @@ through three `MemoryBus` methods instead of computing AMO results itself.
 - `atomicRmw(address, funct5, operand, ctx)` handles every RV32A AMO except
   `LR.W`/`SC.W` (the nine read-modify-write ops: `AMOSWAP`, `AMOADD`,
   `AMOXOR`, `AMOAND`, `AMOOR`, `AMOMIN[U]`, `AMOMAX[U]`). The default
-  implementation is read-compute-write as two separate calls to
-  `readInt(address, ctx)`/`writeInt(address, value, ctx)` — correct for a
-  single hart, but **not atomic with respect to a concurrent hart** sharing
-  the bus. A multi-hart-aware override must hold one lock over the granule
-  for the read, compute, write, and invalidation of any overlapping LR/SC
-  reservation in its own tracking, for the whole operation.
+  implementation is read-compute-write as two separate calls at the width
+  given by `ctx.width()` — `readInt(address, ctx)`/`writeInt(address, value,
+  ctx)` for a word (`width == 4`), or the byte/halfword overloads for a Zabha
+  sub-word AMO (`width == 1`/`2`) — correct for a single hart, but **not
+  atomic with respect to a concurrent hart** sharing the bus. A
+  multi-hart-aware override must hold one lock over the granule for the read,
+  compute, write, and invalidation of any overlapping LR/SC reservation in its
+  own tracking, for the whole operation, at whatever width the AMO uses.
 - `LR.W` routes through the existing `readInt(address, ctx)` overload — a
   multi-hart bus records `(ctx.hartId(), address)` in its own reservation
   tracking there, keyed off `ctx.kind() == AccessKind.AMO && ctx.atomicOp()
@@ -139,6 +145,25 @@ A fault (`IndexOutOfBoundsException`) thrown from either `atomicRmw` or
 `tryScAndStore` becomes a standard store/AMO access fault (cause 7, `mtval`
 = the AMO address), exactly like an ordinary faulting store — see
 `AtomicPrimitivesTest`.
+
+Zabha (byte/halfword AMOs, Phase 3): with `IsaConfig.hasZabha`, the RV32A
+opcode's `funct3` field also admits `0` (byte) and `1` (halfword) for the nine
+read-modify-write AMOs above — `LR.W`/`SC.W` remain word-only; Zabha does not
+define a sub-word `LR`/`SC`. `atomicRmw`'s default sign-extends the loaded
+value and truncates `operand` to the AMO's width before computing, and writes
+back only the low `width` bytes — see `atomicRmw`'s Javadoc for why this
+default is correct for `AMOMIN[U]`/`AMOMAX[U]`'s signed and unsigned
+comparisons without a separate sub-word code path. `RV32IMACore` never
+widens a sub-word AMO into a word-width bus access. See `ZabhaTest`.
+
+Zba/Zbb (Phase 3): `RV32IMACore` decodes `SH1ADD`/`SH2ADD`/`SH3ADD` when
+`IsaConfig.hasZba`, and all 18 Zbb basic bit-manipulation instructions when
+`IsaConfig.hasZbb` (`CLZ`, `CTZ`, `CPOP`, `SEXT.B`, `SEXT.H`, `ZEXT.H`, `MIN`,
+`MINU`, `MAX`, `MAXU`, `ANDN`, `ORN`, `XNOR`, `ROL`, `ROR`, `RORI`, `ORC.B`,
+`REV8`). These are pure register/immediate operations with no `MemoryBus`
+involvement. See `RV32IComplianceTest`'s Zba/Zbb sections for the full
+instruction-by-instruction coverage, including `IsaConfig` gating in both
+directions.
 
 ## MMIOBus and HardwareHook
 

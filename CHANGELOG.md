@@ -41,6 +41,18 @@ for how this file is updated as part of cutting a release.
   lock and to have the final say on whether an `SC.W` the core's local reservation
   check believed would succeed actually does. See `MemoryBus`'s and `docs/API.md`'s
   updated Javadoc, and `AtomicPrimitivesTest`.
+- Zba, Zbb, and Zabha instruction decode (multi-hart Phase 3): `IsaConfig.hasZba` unlocks
+  `SH1ADD`/`SH2ADD`/`SH3ADD`; `IsaConfig.hasZbb` unlocks all 18 basic bit-manipulation
+  instructions (`CLZ`, `CTZ`, `CPOP`, `SEXT.B`, `SEXT.H`, `ZEXT.H`, `MIN`, `MINU`, `MAX`,
+  `MAXU`, `ANDN`, `ORN`, `XNOR`, `ROL`, `ROR`, `RORI`, `ORC.B`, `REV8`); `IsaConfig.hasZabha`
+  unlocks byte/halfword AMOs (the RV32A opcode's `funct3` field admitting `0`/`1` in addition
+  to `2` for the nine read-modify-write ops — `LR.W`/`SC.W` remain word-only). `misa` is
+  unaffected either way; these are `Z`-prefixed sub-extensions with no bit of their own.
+  `MemoryBus.atomicRmw`'s default implementation is now width-aware via `ctx.width()`,
+  sign-extending the loaded value and truncating the operand to the AMO's width before
+  delegating to the unchanged, still-`int`-based `computeAmo`. See `docs/API.md`, the
+  `IsaConfig`/`MemoryBus`/`RV32IMACore` Javadoc, and the new `RV32IComplianceTest`
+  Zba/Zbb sections and `ZabhaTest`.
 - Instruction fetch now catches `IndexOutOfBoundsException` from the memory bus (not
   just the coarse `ramOffset`/`ramSize` window) and converts it to an instruction
   access-fault trap, matching how data loads/stores already behave.

@@ -4,9 +4,10 @@ Revision: **r6**, 2026-09-10. See [PLAN_REVIEW_RESPONSE.md](PLAN_REVIEW_RESPONSE
 for the application-context review of r5 and answers B1–B7.
 
 **Implementation progress:** Phase 1 (items 1–4: `IsaConfig`, `misa` derivation, `hartId`,
-instruction-fetch fault handling) is done, plus Phase 2 item 7 (interrupt gating fix, MSIP/MEIP
-dispatch, `injectInterrupt`) landed early — see the inline "done" notes in the Existing Gap
-section, Design Decisions §1/§2/§6/§7, and the Staging Plan. Rolling status lives in
+instruction-fetch fault handling) and Phase 2 (items 5–10: privilege/interrupt correctness fixes,
+`AccessContext`, `atomicRmw`, `tryScAndStore`) are done, and so is Phase 3 (items 11–13: Zba, Zbb,
+Zabha) — see the inline "done" notes in the Existing Gap section, Design Decisions §1–§5, the
+ISA Extension Implementation Details section, and the Staging Plan. Rolling status lives in
 [`../CHECKPOINT.md`](../CHECKPOINT.md).
 
 ## Overall Verdict
@@ -38,10 +39,10 @@ Estimated relative effort (rough):
 | U-mode CSR access privilege check | P1 | XS |
 | Interrupt injection and MSIP/MEIP delivery | P1 | S — **done** (`5620de0`) |
 | Bus access metadata (AccessContext) | P1 | S — **done** (`d9e93da`) |
-| `atomicRmw` + `tryScAndStore` / bus-internal tracking | P1 | M |
-| Zba (3 instructions) | P2 | XS |
-| Zbb (~18 instructions) | P2 | S |
-| Zabha sub-word AMOs | P2 | S |
+| `atomicRmw` + `tryScAndStore` / bus-internal tracking | P1 | M — **done** (`4aeec77`) |
+| Zba (3 instructions) | P2 | XS — **done** (`590a4c9`) |
+| Zbb (18 instructions) | P2 | S — **done** (`590a4c9`) |
+| Zabha sub-word AMOs | P2 | S — **done** (`590a4c9`) |
 | C extension (fetch loop refactor) | P2 | M |
 | F extension (new register file + ~50 instrs) | P3 | L |
 
@@ -371,7 +372,7 @@ confined to U-mode across traps. Trap handling must remain within the AP's bus p
 
 ## ISA Extension Implementation Details
 
-### Zba (Address Generation)
+### Zba (Address Generation) — done (`590a4c9`)
 
 Three new OP-class instructions in the decode of opcode `0x33`, funct7 `0x10`:
 
@@ -384,27 +385,36 @@ Three new OP-class instructions in the decode of opcode `0x33`, funct7 `0x10`:
 The existing `legalEncoding` check in the OP/OP-IMM decode block must be extended to admit
 funct7 `0x10` when `IsaConfig.hasZba` is true. Low risk; no fetch or state changes.
 
-### Zbb (Basic Bit Manipulation)
+### Zbb (Basic Bit Manipulation) — done (`590a4c9`)
 
-~18 new instructions. Key funct7 assignments in OP (0x33) and OP-IMM (0x13):
+18 new instructions. Encodings below are taken from the authoritative
+[riscv-opcodes](https://github.com/riscv/riscv-opcodes) machine-readable tables
+(`extensions/rv_zbb`, `rv32_zbb`, `rv_zba`), not hand-derived — an earlier revision of this
+table had three funct7 values wrong (CLZ/CTZ/CPOP/SEXT.B/SEXT.H's group was listed as `0x04`
+instead of `0x30`; ORC.B as `0x18` instead of `0x14`; REV8 as `0x68` instead of `0x34`) and
+omitted ZEXT.H entirely. Verify against that source, not this table, if the two ever disagree
+again.
 
-| funct7 | funct3 | Instructions |
-|---|---|---|
-| 0x04 | various | CLZ, CTZ, CPOP (OP-IMM, rs2=0/1/2), SEXT.B, SEXT.H |
-| 0x05 | 4–7 | MIN, MAX, MINU, MAXU (OP) |
-| 0x20 | 6,7 | ANDN, ORN (funct3 6,7) — same funct7 as SUB/SRA; discriminate by funct3 |
-| 0x20 | 4 | XNOR |
-| 0x30 | 1,5 | ROL, ROR (OP); RORI (OP-IMM) |
-| 0x18 | 5 | ORC.B (OP-IMM) |
-| 0x68 | 5 | REV8 (OP-IMM) |
+| funct7 | funct3 | rs2 (OP-IMM only) | Instructions |
+|---|---|---|---|
+| 0x30 | 1 | 0/1/2/4/5 | CLZ, CTZ, CPOP, SEXT.B, SEXT.H (OP-IMM) |
+| 0x30 | 5 | any | RORI (OP-IMM; rs2 field is the shift amount) |
+| 0x14 | 5 | 0x07 | ORC.B (OP-IMM) |
+| 0x34 | 5 | 0x18 | REV8 (OP-IMM, RV32 form) |
+| 0x04 | 4 | 0 (rs2 = x0) | ZEXT.H (OP) |
+| 0x05 | 4–7 | — | MIN, MINU, MAX, MAXU (OP) |
+| 0x20 | 4 | — | XNOR (OP) — same funct7 as SUB/SRA; discriminate by funct3 |
+| 0x20 | 6, 7 | — | ORN, ANDN (OP) |
+| 0x30 | 1, 5 | — | ROL, ROR (OP) |
 
 Java standard library provides efficient hardware-backed implementations for the heavy operations:
 `Integer.numberOfLeadingZeros()` (CLZ), `Integer.numberOfTrailingZeros()` (CTZ),
-`Integer.bitCount()` (CPOP), `Integer.reverse()` (used in REV8).
+`Integer.bitCount()` (CPOP), `Integer.reverseBytes()` (REV8), `Integer.rotateLeft()`/
+`Integer.rotateRight()` (ROL/ROR/RORI).
 
 The `legalEncoding` guard must be relaxed for these funct7 values when `IsaConfig.hasZbb`.
 
-### Zabha (Byte/Halfword AMOs — confirmed scope)
+### Zabha (Byte/Halfword AMOs — confirmed scope) — done (`590a4c9`)
 
 Extend the existing AMO decoder at opcode `0x2F`. Currently funct3 must be 2 (word). Zabha
 adds funct3 0 (byte) and 1 (halfword) with the same funct5 operations. Byte/halfword AMOs
@@ -420,6 +430,17 @@ require width-aware `atomicRmw` handling:
   No byte/halfword LR/SC is introduced.
 
 Guard with `IsaConfig.hasZabha`. No fetch or state changes.
+
+**Landed as-specified**, with one implementation refinement worth recording: `RV32IMACore`
+sign-extends the loaded value and truncates `operand` to the AMO's width (both via a plain Java
+narrowing cast, e.g. `(byte) value`) *before* calling `MemoryBus.computeAmo` — which is otherwise
+unchanged and still operates on plain `int`s. This works because sign-extending two values to the
+same width and comparing them with `Integer.compareUnsigned` preserves the same relative order as
+comparing the original narrower values unsigned (sign-extension maps the "large" half of the
+narrower range to the "large" half of the wider unsigned range, contiguously and monotonically).
+So the existing signed (`Math.min`/`Math.max`) and unsigned (`compareUnsigned`) branches in
+`computeAmo` did not need separate sub-word variants. See `MemoryBus.atomicRmw`'s updated Javadoc
+and `ZabhaTest`.
 
 ### C Extension (Compressed Instructions)
 
@@ -544,11 +565,25 @@ ordering contract; adding default methods alone does not establish it — that b
 exist in this repo, and `aq`/`rl` memory-ordering semantics remain explicitly out of
 `AccessContext`'s scope (§3, §5) pending that bus's design.
 
-### Phase 3 — Integer ISA Extensions (P2)
+### Phase 3 — Integer ISA Extensions (P2) — done (`590a4c9`)
 
-11. Zba (3 instructions in OP decode).
-12. Zbb (~18 instructions; extend OP/OP-IMM decode, update `legalEncoding` guard).
-13. Zabha byte/halfword AMOs (confirmed; extend AMO decoder and width-aware bus handling).
+11. ~~Zba (3 instructions in OP decode).~~ **Done.** `SH1ADD`/`SH2ADD`/`SH3ADD`, gated by
+    `IsaConfig.hasZba`.
+12. ~~Zbb (~18 instructions; extend OP/OP-IMM decode, update `legalEncoding` guard).~~ **Done.**
+    All 18 instructions, gated by `IsaConfig.hasZbb`: `CLZ`, `CTZ`, `CPOP`, `SEXT.B`, `SEXT.H`,
+    `ZEXT.H`, `MIN`, `MINU`, `MAX`, `MAXU`, `ANDN`, `ORN`, `XNOR`, `ROL`, `ROR`, `RORI`, `ORC.B`,
+    `REV8`. See the corrected encoding table above.
+13. ~~Zabha byte/halfword AMOs (confirmed; extend AMO decoder and width-aware bus handling).~~
+    **Done.** `MemoryBus.atomicRmw`'s default is now width-aware via `ctx.width()`; gated by
+    `IsaConfig.hasZabha`. Byte/halfword `LR`/`SC` remain illegal-instruction, per Zabha's own
+    scope. New `RV32IComplianceTest` vectors (Zba/Zbb) and `ZabhaTest` (Zabha) cover routing,
+    edge cases, signed-vs-unsigned comparison at reduced width, neighboring-byte preservation, and
+    gating by `IsaConfig` in both directions (present but disabled → illegal instruction; absent
+    combination → illegal instruction regardless of config). 362 core + 1 cli tests.
+
+**Phase 3 delivers ISA decode only.** A multi-hart-aware `MemoryBus`'s `atomicRmw` override
+still owns sub-word RMW/lock granularity, exactly as for the word-width AMOs in Phase 2 — nothing
+here changes that division of responsibility or narrows it to word-only.
 
 ### Phase 4 — Compressed Instructions (P2)
 

@@ -1,3 +1,7 @@
+> **ARCHIVED (2026-09-10).** P0–P7 are done; release tooling and Public API Javadoc are done.
+> Superseded by `../../CHECKPOINT.md` and `../../CLEANUP_TODO.md`. The "Deferred / Lower
+> Priority" list at the bottom is still a useful backlog reference.
+
 # Remaining Work Before Public Release
 
 ## Status Summary

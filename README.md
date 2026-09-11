@@ -27,6 +27,7 @@ See [Core API Contracts](docs/API.md) for the public integration contracts.
 - `core`: The platform-agnostic emulator library.
 - `cli`: A command-line runner for testing and executing RISC-V binaries.
 - `C/`: Original C source and test programs (for reference and validation).
+- `docs/`: API contracts and planning documents — see [docs/README.md](docs/README.md).
 
 ## Getting Started
 

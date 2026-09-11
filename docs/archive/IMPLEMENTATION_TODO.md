@@ -1,3 +1,6 @@
+> **ARCHIVED (2026-09-10).** All P0–P7 items in this document are shipped and tested.
+> Kept for historical context only. Current status: `../../CHECKPOINT.md`.
+
 # Implementation TODO Before Public Release
 
 This plan addresses the implementation issues found during review in priority order. Each item should be handled test-first where practical: add a failing test that demonstrates the bug or missing contract, confirm it fails for the expected reason, then fix the implementation and keep the test.

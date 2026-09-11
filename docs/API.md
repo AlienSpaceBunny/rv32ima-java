@@ -1,9 +1,13 @@
 # RV32IMA Core API Contracts
 
-This document records the public contracts that embedders can rely on when
-using `rv32emu-core`. The core is intended to stay platform-neutral; console,
-board, and SoC behavior should be composed around the core through `MemoryBus`,
-`HardwareHook`, `CSRHook`, and scheduler code.
+This document is a narrative summary of the public contracts that embedders can
+rely on when using `rv32emu-core`. The Javadoc on `MemoryBus`, `HardwareHook`,
+`CSRHook`, `RV32IMACore`, and `RV32IMAState` is the authoritative specification;
+where this document and the Javadoc disagree, the Javadoc wins.
+
+The core is intended to stay platform-neutral; console, board, and SoC behavior
+should be composed around the core through `MemoryBus`, `HardwareHook`,
+`CSRHook`, and scheduler code.
 
 ## Execution Core
 
@@ -19,16 +23,20 @@ provided mutable `RV32IMAState` and `MemoryBus`.
 - Return value `0` means normal execution or trap handling completed.
 - Return value `1` means the CPU is waiting for interrupt and no instruction was
   executed.
-- `postExec`, when provided, is called after instruction execution or before
-  trap handling for the instruction that caused a trap.
+- `postExec`, when provided, is called once per instruction cycle: after a
+  non-trapping instruction commits its result but before the PC advances, or
+  before a trapping instruction's trap state is committed. It is not called when
+  instruction fetch itself fails (PC outside the window, or misaligned).
 
-Known timer behavior inherited from the current implementation:
+Timer behavior (see the `RV32IMACore` class Javadoc for the rationale behind
+the two intentional spec deviations):
 
-- Timer interrupt pending is set only when `mtimecmp != 0`.
-- Timer interrupt pending currently uses `mtime > mtimecmp`; P6 will change this
-  to `mtime >= mtimecmp`.
-- `WFI` sets `mstatus.MIE` before entering wait state so timer interrupts can
-  wake the CPU.
+- `MTIP` in `mip` is raised only when `mtimecmp != 0` and `mtime >= mtimecmp`;
+  it is cleared otherwise. The `mtimecmp != 0` guard suppresses a spurious
+  interrupt in the reset state before the guest configures `mtimecmp`.
+- `WFI` unconditionally sets `mstatus.MIE` before entering the wait state so a
+  pending timer interrupt can wake the hart even if the guest had not enabled
+  interrupts.
 
 ## MemoryBus
 
@@ -40,10 +48,11 @@ instruction fetch after the core's instruction-fetch window check.
 - Implementations should throw `IndexOutOfBoundsException` for unmapped or
   disallowed addresses so the core can raise guest access-fault traps.
 - `readByte()` and `readShort()` return raw Java byte/short values; callers use
-  the signed default helpers or unsigned masking depending on instruction
-  semantics.
-- Multi-byte endianness is intended to be little-endian. P5 will make this
-  explicit in implementation and tests.
+  the signed default helpers (`readByteSigned`, `readShortSigned`) or unsigned
+  masking depending on instruction semantics.
+- Multi-byte accesses (`short`, `int`) are little-endian. `FFMMemoryBus`
+  enforces this explicitly and `FFMMemoryBusEndianTest` covers it. Big-endian
+  hosts are not supported.
 
 ## MMIOBus and HardwareHook
 
@@ -85,7 +94,9 @@ RAM, VRAM, and hooks. Keep `MMIOBus` for simple range-routed devices.
 - Integer registers, PC, key machine CSRs, cycle counter, and timer registers
   are public fields for simple embedding and checkpointing.
 - `getCycle()/setCycle()`, `getTimer()/setTimer()`, and
-  `getTimerMatch()/setTimerMatch()` expose the 64-bit split registers.
-- `extraflags` currently stores privilege, WFI state, and LR/SC reservation bits.
-  P7 will replace the LR/SC reservation encoding with explicit reservation
-  state.
+  `getTimerMatch()/setTimerMatch()` expose the 64-bit split registers; prefer
+  them over the raw half-word fields except in a CLINT MMIO hook.
+- `extraflags` holds the privilege level (bits 0–1: machine = `3`, user = `0`)
+  and the WFI flag (bit 2).
+- LR/SC reservation state is held separately in `reservationAddr` and
+  `reservationValid`.

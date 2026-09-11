@@ -72,12 +72,17 @@ public class RV32IMAState {
     /** Machine trap-handler base address ({@code mtvec}). */
     public int mtvec;
 
-    /** Machine interrupt-enable register ({@code mie}). Bit 7 (MTIE) enables the timer interrupt. */
+    /**
+     * Machine interrupt-enable register ({@code mie}). Bit 3 (MSIE) enables software interrupts,
+     * bit 7 (MTIE) enables the timer interrupt, bit 11 (MEIE) enables external interrupts.
+     */
     public int mie;
 
     /**
-     * Machine interrupt-pending register ({@code mip}). Bit 7 (MTIP) is set by the core when
-     * {@code mtime >= mtimecmp} (and {@code mtimecmp != 0}), and cleared otherwise.
+     * Machine interrupt-pending register ({@code mip}). Bit 7 (MTIP) is managed entirely by the
+     * core: set when {@code mtime >= mtimecmp} (and {@code mtimecmp != 0}), cleared otherwise. Bits
+     * 3 (MSIP) and 11 (MEIP) are set by the embedder, typically via {@link
+     * RV32IMACore#injectInterrupt}, and cleared by guest or embedder acknowledgement.
      */
     public int mip;
 

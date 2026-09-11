@@ -461,6 +461,142 @@ public class CoreTest {
         }
     }
 
+    // MSIP/MEIP interrupt tests — the U-mode gating rule and non-timer interrupt dispatch added
+    // alongside the multi-hart feature work.
+
+    @Test
+    public void softwareInterruptTrapsInUserModeWithMstatusMieClear() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = new RV32IMAState(); // extraflags == 0: user mode
+            state.pc = RAM_OFFSET;
+            state.mtvec = RAM_OFFSET + 0x80;
+            state.mstatus = 0; // MIE clear — must not matter while running in user mode
+            state.mie = 1 << 3; // MSIE set
+            state.mip = 1 << 3; // MSIP pending
+
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(0x80000003, state.mcause);
+            assertEquals(RAM_OFFSET, state.mepc);
+            assertEquals(RAM_OFFSET + 0x80, state.pc);
+            assertEquals(3, state.extraflags & 3); // trap entry always lands in machine mode
+        }
+    }
+
+    @Test
+    public void softwareInterruptDoesNotTrapInMachineModeWithMstatusMieClear() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.mstatus = 0; // MIE clear — must mask the interrupt while already in machine mode
+            state.mie = 1 << 3;
+            state.mip = 1 << 3;
+            ram.writeInt(RAM_OFFSET, 0x00000013); // nop
+
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(0, state.mcause);
+            assertEquals(RAM_OFFSET + 4, state.pc); // the nop executed; no trap taken
+        }
+    }
+
+    @Test
+    public void softwareInterruptTrapsInMachineModeWithMstatusMieSet() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.mtvec = RAM_OFFSET + 0x80;
+            state.mstatus = 0x08; // MIE set
+            state.mie = 1 << 3;
+            state.mip = 1 << 3;
+
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(0x80000003, state.mcause);
+            assertEquals(RAM_OFFSET + 0x80, state.pc);
+        }
+    }
+
+    @Test
+    public void externalInterruptTrapsInUserMode() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = new RV32IMAState();
+            state.pc = RAM_OFFSET;
+            state.mtvec = RAM_OFFSET + 0x80;
+            state.mstatus = 0;
+            state.mie = 1 << 11; // MEIE set
+            state.mip = 1 << 11; // MEIP pending
+
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(0x8000000b, state.mcause);
+            assertEquals(RAM_OFFSET + 0x80, state.pc);
+        }
+    }
+
+    @Test
+    public void pendingButDisabledInterruptDoesNotTrapInUserMode() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = new RV32IMAState();
+            state.pc = RAM_OFFSET;
+            state.mstatus = 0;
+            state.mie = 0; // MSIE clear: pending-but-disabled must not trap even in user mode
+            state.mip = 1 << 3;
+            ram.writeInt(RAM_OFFSET, 0x00000013); // nop
+
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(0, state.mcause);
+            assertEquals(RAM_OFFSET + 4, state.pc);
+        }
+    }
+
+    @Test
+    public void externalInterruptTakesPriorityOverSoftwareAndTimer() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.mtvec = RAM_OFFSET + 0x80;
+            state.mstatus = 0x08;
+            state.mie = (1 << 3) | (1 << 7) | (1 << 11); // all three enabled
+            state.mip = (1 << 3) | (1 << 7) | (1 << 11); // all three pending
+
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(0x8000000b, state.mcause); // MEIP wins
+        }
+    }
+
+    @Test
+    public void softwareInterruptTakesPriorityOverTimerWhenExternalNotPending() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.mtvec = RAM_OFFSET + 0x80;
+            state.mstatus = 0x08;
+            state.mie = (1 << 3) | (1 << 7);
+            state.mip = (1 << 3) | (1 << 7);
+
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(0x80000003, state.mcause); // MSIP wins over MTIP
+        }
+    }
+
+    @Test
+    public void injectInterruptSetsPendingBitAndWakesFromWfi() {
+        RV32IMAState state = new RV32IMAState();
+        state.extraflags |= 4; // WFI active
+
+        RV32IMACore.injectInterrupt(state, 3); // MSIP
+
+        assertEquals(1 << 3, state.mip);
+        assertEquals(0, state.extraflags & 4); // WFI cleared
+    }
+
     // LR.W / SC.W tests
 
     @Test

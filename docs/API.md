@@ -38,6 +38,25 @@ the two intentional spec deviations):
   pending timer interrupt can wake the hart even if the guest had not enabled
   interrupts.
 
+Interrupt gating and injection:
+
+- Three machine interrupts are modeled: `MTIP` (bit 7, timer, core-managed from
+  `mtimecmp` as above), `MSIP` (bit 3, software), and `MEIP` (bit 11, external).
+  An embedder sets `MSIP`/`MEIP` directly on `state.mip`/`state.mie`, or via the
+  static helper `RV32IMACore.injectInterrupt(state, bit)`, which also clears the
+  hart's WFI flag so a stalled hart wakes.
+- All three are gated the same way: the bit must be set in both `mip` and `mie`,
+  and either the hart is currently in user mode, or `mstatus.MIE` is set. This
+  core models only machine and user privilege, so `mstatus.MIE` only masks
+  interrupts while executing in machine mode — a machine interrupt that is
+  individually enabled is always taken while the hart is running in user mode,
+  per the RISC-V privileged spec.
+- If more than one is simultaneously pending and enabled, priority is external >
+  software > timer.
+- Injecting an interrupt into another hart's `RV32IMAState` from a different
+  thread (for example, one hart signaling another) is the caller's
+  responsibility to synchronize; `RV32IMAState` itself provides no locking.
+
 ## MemoryBus
 
 `MemoryBus` is the address-space abstraction for guest data access and

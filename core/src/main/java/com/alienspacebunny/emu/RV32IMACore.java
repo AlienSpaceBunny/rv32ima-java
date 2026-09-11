@@ -23,6 +23,14 @@ package com.alienspacebunny.emu;
  *       state), no interrupt fires. This prevents a spurious timer interrupt before the guest
  *       configures {@code mtimecmp}.
  * </ul>
+ *
+ * <p><b>Interrupts.</b> {@code MTIP} (timer) is managed entirely by this class from {@code
+ * mtimecmp}. {@code MSIP} (software) and {@code MEIP} (external) are pending/enable bits an
+ * embedder sets directly on {@code mip}/{@code mie}, typically via {@link #injectInterrupt}. All
+ * three are gated identically: individually enabled in {@code mie}, and either the hart is
+ * running in user mode or {@code mstatus.MIE} is set (machine-mode interrupts are not maskable by
+ * {@code mstatus.MIE} while executing below machine mode). When more than one is simultaneously
+ * pending and enabled, external takes priority over software, which takes priority over timer.
  */
 public class RV32IMACore {
     /** Creates a new {@code RV32IMACore} execution engine. */
@@ -35,8 +43,14 @@ public class RV32IMACore {
     /** Bit position of the low end of {@code mstatus.MPP} (bits 12–11). */
     private static final int MSTATUS_MPP_SHIFT = 11;
 
+    /** {@code mip}/{@code mie} bit 3: machine software interrupt pending/enable (MSIP/MSIE). */
+    private static final int MIP_MSIP = 1 << 3;
+
     /** {@code mip}/{@code mie} bit 7: machine timer interrupt pending/enable (MTIP/MTIE). */
     private static final int MIP_MTIP = 1 << 7;
+
+    /** {@code mip}/{@code mie} bit 11: machine external interrupt pending/enable (MEIP/MEIE). */
+    private static final int MIP_MEIP = 1 << 11;
 
     /** {@code extraflags} bits 0–1: current privilege level ({@link #PRIV_MACHINE}/{@link #PRIV_USER}). */
     private static final int EXTRAFLAG_PRIV_MASK = 0x3;
@@ -66,12 +80,38 @@ public class RV32IMACore {
     /** {@code mcause} high bit: set for an interrupt, clear for a synchronous exception. */
     private static final int INTERRUPT_FLAG = 0x80000000;
 
+    /** Machine software interrupt, already in {@code mcause} form (interrupt bit set, code 3). */
+    private static final int INT_MACHINE_SOFTWARE = INTERRUPT_FLAG | 3;
+
     /** Machine timer interrupt, already in {@code mcause} form (interrupt bit set, code 7). */
     private static final int INT_MACHINE_TIMER = INTERRUPT_FLAG | 7;
+
+    /** Machine external interrupt, already in {@code mcause} form (interrupt bit set, code 11). */
+    private static final int INT_MACHINE_EXTERNAL = INTERRUPT_FLAG | 11;
 
     /** Encodes a synchronous exception cause into the local {@code trap} variable's "+1" form. */
     private static int exceptionTrap(int cause) {
         return cause + 1;
+    }
+
+    /**
+     * Marks a machine interrupt pending on {@code state} and, if the hart is stalled in {@code
+     * WFI}, wakes it.
+     *
+     * <p>Setting the pending bit alone does not guarantee delivery on the next {@link #step} call:
+     * the interrupt must also be individually enabled in {@code mie}, and — per the gating rule
+     * documented on {@link #step} — either the hart must be running in {@link #PRIV_USER}, or
+     * {@code mstatus.MIE} must be set. The caller is responsible for whatever synchronization
+     * guards concurrent access to {@code state}, for example an I/O-processor hart injecting an
+     * interrupt into an application-processor hart's state from another thread.
+     *
+     * @param state the target hart's state.
+     * @param interruptBit the {@code mip}/{@code mie} bit index to set: 3 (MSIP), 7 (MTIP — normally
+     *     core-managed from {@code mtimecmp}; injecting it directly is unusual), or 11 (MEIP).
+     */
+    public static void injectInterrupt(RV32IMAState state, int interruptBit) {
+        state.mip |= 1 << interruptBit;
+        state.extraflags &= ~EXTRAFLAG_WFI;
     }
 
     /**
@@ -221,9 +261,24 @@ public class RV32IMACore {
         int ir = 0;
         long cycle = state.getCycle();
 
-        // Check for timer interrupt before starting loop
-        if ((state.mip & MIP_MTIP) != 0 && (state.mie & MIP_MTIP) != 0 && (state.mstatus & MSTATUS_MIE) != 0) {
+        // Check for a pending machine interrupt before starting the instruction loop. This core
+        // models only M-mode and U-mode, so mstatus.MIE gates interrupts only while executing in
+        // M-mode: per the privileged spec, a machine interrupt that is individually enabled in
+        // mie is always taken while running below M-mode (here, U-mode), regardless of
+        // mstatus.MIE. Priority when more than one bit is simultaneously pending and enabled:
+        // external > software > timer.
+        boolean interruptsGloballyEnabled =
+                (state.extraflags & EXTRAFLAG_PRIV_MASK) == PRIV_USER || (state.mstatus & MSTATUS_MIE) != 0;
+        int pendingEnabled = interruptsGloballyEnabled ? (state.mip & state.mie) : 0;
+        if ((pendingEnabled & MIP_MEIP) != 0) {
+            trap = INT_MACHINE_EXTERNAL;
+        } else if ((pendingEnabled & MIP_MSIP) != 0) {
+            trap = INT_MACHINE_SOFTWARE;
+        } else if ((pendingEnabled & MIP_MTIP) != 0) {
             trap = INT_MACHINE_TIMER;
+        }
+
+        if (trap != 0) {
             pc -= 4; // Will be incremented back to original PC in the interrupt handler
         } else {
             for (int icount = 0; icount < count; icount++) {

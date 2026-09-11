@@ -14,21 +14,38 @@ should be composed around the core through `MemoryBus`, `HardwareHook`,
 `RV32IMACore()` configures the base RV32IMA_Zicsr ISA. `RV32IMACore(IsaConfig)`
 accepts an `IsaConfig` for the additional extensions being layered on for the
 V-32 multi-hart feature work (`RV32IMFC_ZBA_ZBB_ZICSR`, `RV32IMC_ZBB_ZICSR`, or
-a custom combination). As of Phase 4, `hasZba`, `hasZbb`, `hasZabha`, and
-`hasC` are decoded — enabling one unlocks the corresponding instructions, and
-the un-gated encodings still raise an illegal-instruction trap even when the
-config would otherwise support them (see the `IsaConfig`/`RV32IMACore` class
-Javadoc for the exact instruction list per flag). `hasF` is not decoded yet:
-enabling it only changes the `misa` CSR value the guest reads back, until
-Phase 5 lands. `misa` is derived from the config (`IsaConfig.misa()`);
-`Zba`/`Zbb`/`Zabha` have no bit of their own in `misa` and don't affect it
-regardless of decode support; `C` does have a `misa` bit and `hasC` sets it.
-`hasU` picks which of two mutually exclusive bits `misa` reports: `false` (the
-default, `RV32IMA_ZICSR`) reproduces the exact value this core hardcoded
-before `IsaConfig` existed, including a non-standard bit 22 with no
-architected meaning; `true` (both V-32 presets) reports the standard U-mode
-bit (20) instead. Use `true` for any config whose guest code actually runs in
-user mode.
+a custom combination). As of Phase 5a, `hasZba`, `hasZbb`, `hasZabha`, `hasC`,
+and `hasF` (partially — see below) are decoded — enabling one unlocks the
+corresponding instructions, and the un-gated encodings still raise an
+illegal-instruction trap even when the config would otherwise support them
+(see the `IsaConfig`/`RV32IMACore` class Javadoc for the exact instruction
+list per flag). `hasF` currently unlocks `FLW`/`FSW`, the FP moves
+(`FMV.X.W`/`FMV.W.X`), sign injection (`FSGNJ[N|X].S`), `FCLASS.S`,
+comparisons (`FEQ`/`FLT`/`FLE.S`), and `FMIN`/`FMAX.S` — every RV32F
+instruction with no rounding-mode dependence. `FADD`/`FSUB`/`FMUL`/`FDIV`/
+`FSQRT.S`, the FMADD family, and `FCVT` conversions all consult the rounding
+mode and are not decoded yet (Phase 5b). `hasD` is not decoded at all: it
+only changes the `misa` CSR value the guest reads back. `misa` is derived
+from the config (`IsaConfig.misa()`); `Zba`/`Zbb`/`Zabha` have no bit of
+their own in `misa` and don't affect it regardless of decode support; `C`,
+`F`, and `D` do have `misa` bits and their flags set them independently of
+decode support. `hasU` picks which of two mutually exclusive bits `misa`
+reports: `false` (the default, `RV32IMA_ZICSR`) reproduces the exact value
+this core hardcoded before `IsaConfig` existed, including a non-standard bit
+22 with no architected meaning; `true` (both V-32 presets) reports the
+standard U-mode bit (20) instead. Use `true` for any config whose guest code
+actually runs in user mode.
+
+`RV32IMAState.fregs` (the FP register file, `IsaConfig.hasF`) is `long[32]`,
+not `float[32]`, even though only the low 32 bits are used while D remains
+undecoded — see `docs/FEATURE_REQUEST_PLAN.md` Design Decision §8. Every
+FP-producing instruction NaN-boxes its write (sets the upper 32 bits to
+all-ones); read the low 32 bits directly, or via `Float.intBitsToFloat((int)
+state.fregs[i])`. `state.fcsr` holds the rounding mode (bits 7–5, `frm`) and
+accrued exception flags (bits 4–0, `fflags`); also addressable piecewise as
+CSRs `0x001` and `0x002`. Currently only `NV` (invalid operation) can be set,
+from a signaling-NaN operand to a comparison or `FMIN`/`FMAX`; the other four
+flags are all rounding-related and wait for Phase 5b.
 
 `RV32IMACore.step(...)` executes up to `count` guest instructions against the
 provided mutable `RV32IMAState` and `MemoryBus`.
@@ -178,6 +195,19 @@ Zba/Zbb (Phase 3): `RV32IMACore` decodes `SH1ADD`/`SH2ADD`/`SH3ADD` when
 involvement. See `RV32IComplianceTest`'s Zba/Zbb sections for the full
 instruction-by-instruction coverage, including `IsaConfig` gating in both
 directions.
+
+F extension, rounding-mode-independent subset (Phase 5a): with
+`IsaConfig.hasF`, `FLW`/`FSW` route through the existing
+`readInt(address, ctx)`/`writeInt(address, value, ctx)` overloads exactly
+like `LW`/`SW`, and `FSW` invalidates any held LR/SC reservation like any
+other store. `FMIN.S`/`FMAX.S` are not `Math.min`/`Math.max` — RISC-V
+returns the non-NaN operand when exactly one operand is NaN (the canonical
+NaN only when both are), and `-0.0` compares below `+0.0`; both were
+hand-rolled rather than reusing the JDK methods. `FEQ.S` is a quiet
+comparison (only a signaling NaN operand sets `fcsr`'s `NV` bit); `FLT.S`/
+`FLE.S` are signaling (any NaN operand, quiet or not, sets `NV`). See
+`FExtensionTest` for the full instruction-by-instruction coverage, including
+the NaN-boxing, `IsaConfig` gating, and `fcsr`/`fflags`/`frm` CSR behavior.
 
 ## MMIOBus and HardwareHook
 

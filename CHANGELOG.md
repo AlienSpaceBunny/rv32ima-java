@@ -9,6 +9,18 @@ for how this file is updated as part of cutting a release.
 ## [Unreleased]
 
 ### Added
+- RV32F (single-precision floating-point) decode, rounding-mode-independent subset (multi-hart
+  Phase 5a), gated by `IsaConfig.hasF`: `RV32IMAState.fregs` (FP register file) and `fcsr`
+  (rounding mode / accrued exception flags), the `fflags`/`frm`/`fcsr` CSRs, `FLW`/`FSW`,
+  `FMV.X.W`/`FMV.W.X`, `FSGNJ[N|X].S`, `FCLASS.S`, `FEQ/FLT/FLE.S`, and `FMIN/FMAX.S`.
+  `FADD`/`FSUB`/`FMUL`/`FDIV`/`FSQRT.S`, the FMADD family, and `FCVT` conversions all consult the
+  rounding mode and remain undecoded (Phase 5b). **Behavioral note:** `RV32IMAState.fregs` is
+  `long[32]`, not `float[32]`, even though only the low 32 bits are used under F alone — see
+  `docs/FEATURE_REQUEST_PLAN.md` Design Decision §8. Every FP-producing instruction NaN-boxes its
+  write (upper 32 bits set to all-ones); nothing under F-only decode reads the upper bits.
+- `IsaConfig.hasD`: a misa-only flag (bit 3) for the double-precision D extension, added ahead of
+  any D decode work to avoid a later breaking change to `IsaConfig`'s constructors (see Design
+  Decision §8). Validated `hasD ⇒ hasF` in the record's compact constructor. Decodes nothing.
 - RV32C (compressed instruction) decode (multi-hart Phase 4), gated by `IsaConfig.hasC`.
   Instruction fetch gains a halfword-probe stage and halfword alignment when `hasC` is set
   (unchanged, word-only fetch and alignment otherwise); every base RV32C instruction is

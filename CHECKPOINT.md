@@ -14,7 +14,7 @@ the one condition (real MSIP/MEIP interrupt delivery, not just injection) is don
 **Phase 1 (foundation) is done (`c92045e`)** — see below. **Phase 2 is done** (items 5, 6, 7,
 8, 9, 10 all complete; final pieces `4aeec77`) — see below. **Phase 3 is done** (items 11, 12,
 13 — Zba, Zbb, Zabha — `590a4c9`) — see below. **Phase 4 is done** (item 14 — the C extension —
-`b224ac3`) — see below. Phase 5 (F extension, AP-only) is next, pending Nate's go-ahead.
+`b224ac3`) — see below. **Phase 5a is done** (item 15's rounding-mode-independent subset — register file, `fcsr`, FLW/FSW, moves, sign injection, classify, comparisons, min/max — `f50e0a8`) — see below. Phase 5b (the rounding-mode layer: FADD/FSUB/FMUL/FDIV/FSQRT.S, the FMADD family, FCVT conversions, full `fflags`) is next, pending Nate's go-ahead.
 
 ---
 
@@ -239,6 +239,45 @@ instruction-fetch and PC-arithmetic logic, not just the decode switch.
   `pc+4`), a compressed breakpoint's `mtval`, RAM-window-edge fetch faulting instead of
   overrunning the backing store, and mixed compressed/32-bit streams in both orderings. 400
   core + 1 cli tests.
+
+---
+
+## Phase 5a — F extension, rounding-mode-independent subset (`f50e0a8`) — done
+
+Item 15, split in two: before starting, Nate asked whether doing F and D (double-precision)
+together now would be cheaper than F now, D later. Estimate (not measured, see Design Decision
+§8): D's non-RNE rounding doesn't inherit F's "compute in `double`, round once" shortcut, so the
+hard parts of F and D don't share; not meaningfully cheaper together, so F proceeds alone. Three
+forward-compatibility decisions were baked in anyway since they're free now and a breaking-API
+retrofit later otherwise (`IsaConfig.hasD` misa-only flag now; `long`-backed NaN-boxed FP register
+file; `MemoryBus` 64-bit access explicitly deferred, since FLW/FSW don't need it).
+
+- **`IsaConfig.hasD`** added as a 7th record component (misa-only, bit 3), with `hasD ⇒ hasF`
+  validated in the compact constructor. Two compatibility constructors (5-arg, 6-arg) preserve
+  every existing call site unchanged.
+- **`RV32IMAState.fregs`** (`long[32]`, not `float[32]`) and **`fcsr`** (`int`) added. Every FP
+  write NaN-boxes (upper 32 bits set to all-ones); reads take the low 32 bits. f0 is an ordinary
+  register, unlike `x0`.
+- **`fflags`/`frm`/`fcsr` CSRs** (`0x001`/`0x002`/`0x003`) added to `readCsr`/`writeCsr`, gated on
+  `hasF` — but only as a guard around these three cases, not a "CSR doesn't exist" trap; matches
+  this core's existing behavior for every other unimplemented CSR (silent no-op/hook passthrough).
+- **Decoded:** FLW/FSW (opcodes `0x07`/`0x27`); on `0x53` (OP-FP) — FSGNJ/FSGNJN/FSGNJX.S,
+  FMIN/FMAX.S, FEQ/FLT/FLE.S, FMV.X.W/FCLASS.S, FMV.W.X. All rounding-mode-independent. FMIN/FMAX
+  are hand-rolled (not `Math.min`/`Math.max`, which get NaN propagation wrong for RISC-V's
+  semantics). `NV` is the only `fflags` bit that can arise here (signaling-NaN operands to a
+  comparison or min/max); `DZ`/`OF`/`UF`/`NX` are all rounding-related and wait for 5b.
+- **Not yet decoded (Phase 5b, all consult `frm`):** FADD/FSUB/FMUL/FDIV/FSQRT.S, the FMADD
+  family, FCVT.{W,WU}.S/FCVT.S.{W,WU}. Advisor-reviewed numerical approach recorded in the F
+  Extension design section: double-as-intermediate is provably safe for RNE and all three directed
+  rounding modes on the basic arithmetic ops (double has enough precision margin over float — 53
+  vs. 24 mantissa bits — that double-rounding introduces no error), implemented as one native
+  `(float)` cast plus a `Math.nextUp`/`nextDown` correction for directed modes; this shortcut does
+  **not** extend to the fused multiply-add family (RISC-V FMA is a single rounding of `a*b+c`,
+  which `Math.fma` on the float operands gets right for RNE but a double-intermediate expression
+  does not, since the `+c` step double-rounds). `NX` detection needs no error-free-transformation
+  machinery — compare the rounded result back against the true (or residual-checked) value.
+- New `FExtensionTest` (39 tests) plus 6 new `IsaConfigTest` cases for `hasD`. 446 core + 1 cli
+  tests.
 
 ---
 

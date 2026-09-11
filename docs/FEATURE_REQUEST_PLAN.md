@@ -3,9 +3,11 @@
 Revision: **r6**, 2026-09-10. See [PLAN_REVIEW_RESPONSE.md](PLAN_REVIEW_RESPONSE.md)
 for the application-context review of r5 and answers B1–B7.
 
-**Implementation progress:** Phase 2 item 7 (interrupt gating fix, MSIP/MEIP dispatch,
-`injectInterrupt`) is done — see the inline "done" notes in §6/§7 and the Staging Plan. Rolling
-status lives in [`../CHECKPOINT.md`](../CHECKPOINT.md).
+**Implementation progress:** Phase 1 (items 1–4: `IsaConfig`, `misa` derivation, `hartId`,
+instruction-fetch fault handling) is done, plus Phase 2 item 7 (interrupt gating fix, MSIP/MEIP
+dispatch, `injectInterrupt`) landed early — see the inline "done" notes in the Existing Gap
+section, Design Decisions §1/§2/§6/§7, and the Staging Plan. Rolling status lives in
+[`../CHECKPOINT.md`](../CHECKPOINT.md).
 
 ## Overall Verdict
 
@@ -63,7 +65,7 @@ software/external interrupt delivery, not just pending-bit injection and WFI wak
 
 ---
 
-## Existing Gap: Instruction-Fetch Fault Handling
+## Existing Gap: Instruction-Fetch Fault Handling — done (`c92045e`)
 
 The current `step()` loop does not wrap `mem.readInt(pc)` in a try/catch. An
 `IndexOutOfBoundsException` from a fetch would propagate uncaught to the caller rather than
@@ -84,7 +86,7 @@ instruction-access-fault traps through the same `trap = 1 + 1` path.
 
 ## Design Decisions
 
-### 1. ISA Configuration Object
+### 1. ISA Configuration Object — done (`c92045e`)
 
 Add an immutable `IsaConfig` class passed to `RV32IMACore` at construction time.
 
@@ -106,12 +108,29 @@ When an instruction belonging to a disabled extension is decoded, the core raise
 illegal-instruction trap — the same path it uses today for reserved encodings. No behavior change
 for base configs.
 
-### 2. Hart Identity
+**Landed:** `IsaConfig` is a record (`hasC`, `hasF`, `hasZba`, `hasZbb`, `hasZabha`) with
+`RV32IMA_ZICSR`/`RV32IMFC_ZBA_ZBB_ZICSR`/`RV32IMC_ZBB_ZICSR` presets and an `misa()` method;
+`misa` (CSR `0x301`) is now derived from it. Two notes for the next phase and for Nate:
+- The previously-hardcoded `misa` value (`0x40401101`) sets bits {0, 8, 12, 22, 30} — **not**
+  bit 20, the standard "U" (user-mode support) bit. Preserved exactly, per this section's "no
+  behavior change for base configs," but flagging it: this core does implement U-mode, and the
+  V-32 AP runs guests in it, yet a guest probing `misa` won't see U-mode advertised. Bit 22 has
+  no standard single-letter meaning.
+- `RV32IMFC_ZBA_ZBB_ZICSR` sets the C and F `misa` bits even though those instructions aren't
+  decoded until Phase 4/5 — a guest that probes `misa` on that config and trusts it will find
+  F-extension instructions illegal-trap instead of executing.
+- No decode-time gating exists yet because there is nothing to gate: none of Zba/Zbb/Zabha/C/F
+  are decoded before their respective phases land.
+
+### 2. Hart Identity — done (`c92045e`)
 
 Add `int hartId` to `RV32IMAState` (defaults to 0). The embedder sets it before first use.
 The core passes `hartId` through to access-context callbacks (see §3). No other core behavior
 depends on the hart ID internally; the bus uses it as a reservation-owner identity.
 Embedders must assign distinct, stable IDs to concurrently participating harts.
+
+**Landed:** `RV32IMAState.hartId`, default `0`. Not yet read or written by the core itself — that
+starts in Phase 2 once `AccessContext` plumbing exists (§3).
 
 ### 3. Bus Access Metadata — `AccessContext` via Default Method Overloads
 
@@ -440,12 +459,16 @@ Guard with `IsaConfig.hasF`. All new opcodes with F disabled → illegal instruc
 
 The following order is recommended. Each step is independently committable and testable.
 
-### Phase 1 — Foundation (prerequisite for everything)
+### Phase 1 — Foundation (prerequisite for everything) — done (`c92045e`)
 
-1. Add `IsaConfig` (immutable value type with extension flags; derive `misa` from it).
-2. Add `hartId` to `RV32IMAState`.
-3. Fix the instruction-fetch exception gap (wrap `mem.readInt(pc)` in try/catch).
-4. Derive `misa` from `IsaConfig` instead of hardcoded constant.
+1. ~~Add `IsaConfig` (immutable value type with extension flags; derive `misa` from it).~~ Done.
+2. ~~Add `hartId` to `RV32IMAState`.~~ Done.
+3. ~~Fix the instruction-fetch exception gap (wrap `mem.readInt(pc)` in try/catch).~~ Done.
+4. ~~Derive `misa` from `IsaConfig` instead of hardcoded constant.~~ Done (folded into item 1).
+
+281 core + 1 cli tests green (`./mvnw clean verify`). See notes on Design Decisions §1–§2 above
+for the `misa` bit-22/no-U caveats and the F-before-it's-decoded caveat on
+`RV32IMFC_ZBA_ZBB_ZICSR` — worth Nate's attention before Phase 2 wires up a real AP/IOP core pair.
 
 ### Phase 2 — Multi-Hart Infrastructure (P1 continued)
 

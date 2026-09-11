@@ -10,8 +10,9 @@ JUnit 6.1.3 upgrade, architectural review, and the C1–C7 cleanup pass are all 
 pushed. Release readiness is documented but deliberately paused (`RELEASE_TODO.md`) — no
 Central publish until after multi-hart Phase 1–2. `docs/FEATURE_REQUEST_PLAN.md` r6 has
 been reviewed and conditionally signed off by the originating LLM (`docs/PLAN_REVIEW_RESPONSE.md`);
-the one condition (real MSIP/MEIP interrupt delivery, not just injection) is now done
-(`5620de0`). Feature-plan implementation can proceed.
+the one condition (real MSIP/MEIP interrupt delivery, not just injection) is done (`5620de0`).
+**Phase 1 (foundation) is now done (`c92045e`)** — see below. Next up: Phase 2 (multi-hart
+infrastructure: U-mode CSR privilege check, `AccessContext`, `atomicRmw`, `tryScAndStore`).
 
 ---
 
@@ -87,8 +88,32 @@ Committed one-per-unit and pushed to `origin/main` (`0943a48`, `1d45c2b`, `1c324
    - `aq`/`rl` memory-ordering semantics are explicitly out of `AccessContext`'s scope
      (B6) — acceptable only if the eventual bus implementation supplies stronger
      ordering; flag before declaring shared-memory IPC safe.
-   - Start with Phase 1 (`IsaConfig`, `hartId`, instruction-fetch-fault fix, `misa` from
-     config) — independently committable, no multi-hart bus design needed yet.
+   - ~~Start with Phase 1...~~ Done, see below. Phase 2 is next.
+
+---
+
+## Phase 1 Foundation (`c92045e`) — done
+
+Implements `docs/FEATURE_REQUEST_PLAN.md` Staging Plan items 1–4. No behavior change for
+existing callers — `RV32IMACore()`'s zero-arg constructor is untouched in effect.
+
+- `IsaConfig` record (`hasC`/`hasF`/`hasZba`/`hasZbb`/`hasZabha`) + 3 presets +
+  `misa()`; `RV32IMACore(IsaConfig)` constructor added alongside the zero-arg one;
+  `misa` (CSR `0x301`) now derived from it instead of a hardcoded literal.
+- `RV32IMAState.hartId` (default `0`), not yet read by the core.
+- Instruction fetch (`mem.readInt(pc)`) now catches `IndexOutOfBoundsException` within
+  the `ramOffset`/`ramSize` window and converts it to an instruction access-fault trap,
+  matching data load/store behavior.
+- **Two things flagged for Nate, not acted on** (see the commit message and
+  `docs/FEATURE_REQUEST_PLAN.md` §1/§2 for detail):
+  - The previously-hardcoded `misa` value doesn't set the standard "U" (bit 20) bit,
+    even though this core does implement U-mode and V-32's AP runs guests in it.
+    Preserved unchanged (required for backward compatibility); worth a decision before
+    Phase 2 wires up a real AP core with an `IsaConfig`.
+  - `RV32IMFC_ZBA_ZBB_ZICSR` (the V-32 AP preset) sets the F bit in `misa` even though F
+    isn't decoded until Phase 5 — a guest that trusts `misa` and probes for it will find
+    F instructions illegal-trap instead of executing.
+- 281 core + 1 cli tests (`./mvnw clean verify` green), up from 267 + 1.
 
 ---
 
@@ -116,7 +141,10 @@ now because `Main.java` always runs the CLI in machine mode.
 - **JUnit version** lives only in `<junit.version>` (parent pom) via the BOM. Bump there.
 - **Surefire** pinned — do not remove the pin; the bundled default lags the Platform.
 - **Big-endian JVM** explicitly out of scope (documented in `FFMMemoryBus` Javadoc).
-- **Manual release process** — no automated semantic versioning.
+- **Versioning is `maven-release-plugin`-driven** (superseded the earlier "no automated
+  semantic versioning" note) — see `docs/RELEASING.md`. Don't hand-edit pom versions.
+- **Changelog**: add a `CHANGELOG.md` entry under `[Unreleased]` in the same commit as any
+  user-facing change — see `AGENTS.md`.
 - **License**: MIT forked from MIT; existing `LICENSE` is sufficient.
 - **Commit each release-readiness / cleanup step separately** with a clear message.
 - `step()`'s 8-arg signature and long body are a **deliberate interpreter idiom** — not a

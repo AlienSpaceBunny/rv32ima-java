@@ -364,7 +364,8 @@ public class AccessContextTest {
             new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
 
             assertEquals(0, state.regs[3]); // SC succeeded -- this is exercising the write path
-            assertContext(bus.lastReadInt, 0, 3, AccessKind.AMO, 4, 3);
+            // SC.W does not call readInt via the core at all (its local pre-check already knows
+            // the answer); lastReadInt still holds this instruction's own FETCH context.
             assertContext(bus.lastWriteInt, 0, 3, AccessKind.AMO, 4, 3);
         }
     }

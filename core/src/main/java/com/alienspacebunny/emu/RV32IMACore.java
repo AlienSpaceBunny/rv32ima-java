@@ -710,7 +710,6 @@ public class RV32IMACore {
                                 break;
                             }
 
-                            boolean doWrite = true;
                             int accessFaultTrap = (irmid == 2)
                                     ? exceptionTrap(EXC_LOAD_ACCESS_FAULT)
                                     : exceptionTrap(EXC_STORE_ACCESS_FAULT);
@@ -719,56 +718,29 @@ public class RV32IMACore {
                             // this readInt override, per AccessContext's Javadoc.
                             AccessContext amoCtx = new AccessContext(state.hartId, privilege, AccessKind.AMO, 4, irmid);
                             try {
-                                // We'll assume the memory bus handles atomics or we just implement them simply
-                                rval = mem.readInt(rs1, amoCtx);
                                 switch (irmid) {
                                     case 2: // LR.W
-                                        doWrite = false;
+                                        rval = mem.readInt(rs1, amoCtx);
                                         state.reservationAddr = rs1;
                                         state.reservationValid = true;
                                         break;
                                     case 3: // SC.W
+                                        // Local fast-path pre-check: if it fails, fail immediately with no
+                                        // bus call at all (Design Decision §5). If it passes, the bus still
+                                        // makes the final atomic decision -- it may reject even though the
+                                        // local state says valid, if a cross-hart invalidation landed between
+                                        // this hart's LR and SC.
                                         if (state.reservationValid && state.reservationAddr == rs1) {
-                                            rval = 0;
-                                            doWrite = true;
+                                            rval = mem.tryScAndStore(state.hartId, rs1, rs2, amoCtx);
                                         } else {
                                             rval = 1;
-                                            doWrite = false;
                                         }
                                         state.reservationValid = false;
                                         break;
-                                    case 1:
-                                        break; // AMOSWAP.W
-                                    case 0:
-                                        rs2 += rval;
-                                        break; // AMOADD.W
-                                    case 4:
-                                        rs2 ^= rval;
-                                        break; // AMOXOR.W
-                                    case 12:
-                                        rs2 &= rval;
-                                        break; // AMOAND.W
-                                    case 8:
-                                        rs2 |= rval;
-                                        break; // AMOOR.W
-                                    case 16:
-                                        rs2 = (rs2 < rval) ? rs2 : rval;
-                                        break; // AMOMIN.W
-                                    case 20:
-                                        rs2 = (rs2 > rval) ? rs2 : rval;
-                                        break; // AMOMAX.W
-                                    case 24:
-                                        rs2 = Integer.compareUnsigned(rs2, rval) < 0 ? rs2 : rval;
-                                        break; // AMOMINU.W
-                                    case 28:
-                                        rs2 = Integer.compareUnsigned(rs2, rval) > 0 ? rs2 : rval;
-                                        break; // AMOMAXU.W
-                                    default:
-                                        trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
-                                        doWrite = false;
+                                    default: // the 9 validated non-LR/SC AMOs (ADD/SWAP/XOR/AND/OR/MIN[U]/MAX[U])
+                                        rval = mem.atomicRmw(rs1, irmid, rs2, amoCtx);
                                         break;
                                 }
-                                if (doWrite) mem.writeInt(rs1, rs2, amoCtx);
                             } catch (IndexOutOfBoundsException e) {
                                 trap = accessFaultTrap;
                                 rval = rs1;

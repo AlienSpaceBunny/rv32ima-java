@@ -32,6 +32,12 @@ package com.alienspacebunny.emu;
  * implementation of just the six abstract methods above continues to work unmodified. A bus that
  * needs the metadata — for per-hart MPU enforcement, or cross-hart LR/SC/AMO coordination —
  * overrides the context-bearing overloads instead.
+ *
+ * <p><b>Atomics (Phase 2).</b> {@link #atomicRmw} handles every RV32A read-modify-write AMO
+ * except {@code LR.W}/{@code SC.W}; {@code LR.W} routes through {@link #readInt(int,
+ * AccessContext)} and {@code SC.W} through {@link #tryScAndStore}. The default implementations of
+ * all three are correct only for a single hart — see each method's Javadoc for what a
+ * multi-hart-aware override must do.
  */
 public interface MemoryBus {
     /**
@@ -229,5 +235,91 @@ public interface MemoryBus {
      */
     default int readByteSigned(int address, AccessContext ctx) {
         return readByteSigned(address);
+    }
+
+    /**
+     * Performs an atomic read-modify-write AMO (everything in the RV32A extension except {@code
+     * LR.W}/{@code SC.W}, which route through {@link #readInt(int, AccessContext)} and {@link
+     * #tryScAndStore} instead).
+     *
+     * <p>The default implementation reads, computes the new value, and writes it back as two
+     * separate calls to {@link #readInt(int, AccessContext)} and {@link #writeInt(int, int,
+     * AccessContext)} — correct for a single hart, but <b>not atomic with respect to a concurrent
+     * hart sharing this bus</b>, even if each call individually holds a lock. A multi-hart-aware
+     * override must hold one lock over the granule for the read, the computation, the write, and
+     * the invalidation of any overlapping LR/SC reservations in its own tracking (see {@link
+     * #tryScAndStore}), so no other hart's access can be interleaved with any part of this
+     * operation.
+     *
+     * @param address the unsigned 32-bit guest address. Word-aligned; there is no sub-word AMO
+     *     support yet (Zabha, byte/halfword AMOs, is a later phase).
+     * @param funct5 the RV32A {@code funct5} encoding identifying the operation (for example,
+     *     {@code 0} for {@code AMOADD.W}, {@code 1} for {@code AMOSWAP.W}); equal to {@link
+     *     AccessContext#atomicOp()} on {@code ctx}. Must be one of the values {@link RV32IMACore}
+     *     validates before calling this method: {@code 0, 1, 4, 8, 12, 16, 20, 24, 28}.
+     * @param operand the AMO's second operand (the value from {@code rs2}).
+     * @param ctx metadata describing this access. See {@link AccessContext}.
+     * @return the value at {@code address} <em>before</em> the write — this becomes the
+     *     destination register's value.
+     * @throws IndexOutOfBoundsException if the address is not mapped or otherwise disallowed.
+     * @throws IllegalArgumentException if {@code funct5} is not one of the values documented above.
+     *     {@link RV32IMACore} never triggers this; it applies only to a caller invoking this method
+     *     directly with an unsupported encoding.
+     */
+    default int atomicRmw(int address, int funct5, int operand, AccessContext ctx) {
+        int old = readInt(address, ctx);
+        int result = computeAmo(funct5, old, operand);
+        writeInt(address, result, ctx);
+        return old;
+    }
+
+    /**
+     * Computes an AMO's new value from its {@code funct5} encoding, the value currently at the
+     * address, and the operand. Shared by {@link #atomicRmw}'s default implementation.
+     */
+    private static int computeAmo(int funct5, int old, int operand) {
+        return switch (funct5) {
+            case 1 -> operand; // AMOSWAP.W
+            case 0 -> old + operand; // AMOADD.W
+            case 4 -> old ^ operand; // AMOXOR.W
+            case 12 -> old & operand; // AMOAND.W
+            case 8 -> old | operand; // AMOOR.W
+            case 16 -> Math.min(operand, old); // AMOMIN.W (signed)
+            case 20 -> Math.max(operand, old); // AMOMAX.W (signed)
+            case 24 -> Integer.compareUnsigned(operand, old) < 0 ? operand : old; // AMOMINU.W
+            case 28 -> Integer.compareUnsigned(operand, old) > 0 ? operand : old; // AMOMAXU.W
+            default -> throw new IllegalArgumentException("Unsupported AMO funct5: " + funct5);
+        };
+    }
+
+    /**
+     * Makes the final atomic decision for {@code SC.W} and, if it succeeds, performs the store.
+     *
+     * <p>{@link RV32IMACore} calls this only after its own local fast-path check passes (the
+     * hart's {@code state.reservationValid} is true and its {@code reservationAddr} matches). This
+     * method is the bus's opportunity to reject the store anyway — a multi-hart bus may have
+     * observed a cross-hart invalidation (another hart's plain store or AMO to the same granule)
+     * between this hart's {@code LR.W} and this {@code SC.W}, which the core's purely local state
+     * cannot see.
+     *
+     * <p>The default implementation provides correct single-hart behavior: it unconditionally
+     * writes and reports success, since the core's local check is already sufficient when there is
+     * only one hart. A multi-hart-aware override must, as one critical section under a per-granule
+     * lock: check its own private reservation tracking for this {@code (hartId, address)}, and if
+     * still valid, perform the write and invalidate the reservation; either way, the reservation
+     * entry is consumed (removed) by this call, regardless of success.
+     *
+     * @param hartId the calling hart's identity (see {@link AccessContext#hartId()}), passed
+     *     separately rather than requiring it be re-derived from {@code ctx}.
+     * @param address the unsigned 32-bit guest address, matching the preceding {@code LR.W}.
+     * @param value the value to conditionally store (from {@code rs2}).
+     * @param ctx metadata describing this access. See {@link AccessContext}.
+     * @return {@code 0} on success; any non-zero value on failure. This becomes the destination
+     *     register's value, per the RV32A {@code SC.W} semantics.
+     * @throws IndexOutOfBoundsException if the address is not mapped or otherwise disallowed.
+     */
+    default int tryScAndStore(int hartId, int address, int value, AccessContext ctx) {
+        writeInt(address, value, ctx);
+        return 0;
     }
 }

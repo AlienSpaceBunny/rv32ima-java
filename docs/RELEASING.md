@@ -8,7 +8,9 @@ not the eventual publish-to-Central process.
 
 ## Model
 
-`main` always carries a `-SNAPSHOT` version (currently `0.1.0-SNAPSHOT`). Cutting a release:
+`main` always carries a `-SNAPSHOT` version (currently `0.1.1-SNAPSHOT` — the first real
+release will be `0.1.1`; `0.1.0` is skipped because that version number is already
+referenced by the downstream V-32 project). Cutting a release:
 
 1. Bumps to the release version (drops `-SNAPSHOT`), commits.
 2. Tags `vX.Y.Z`.
@@ -19,11 +21,11 @@ not the eventual publish-to-Central process.
 All of this is driven by `maven-release-plugin` (parent `pom.xml`), configured for this
 repo as:
 
-- **`tagNameFormat`**: `v@{project.version}` — tags look like `v0.1.0`.
+- **`tagNameFormat`**: `v@{project.version}` — tags look like `v0.1.1`.
 - **`autoVersionSubmodules=true`** — `core` and `cli` inherit the parent's version, so
   you're only asked for one version number, not three.
 - **`pushChanges=false`** — `release:prepare` commits and tags **locally only**. Pushing
-  is a separate, explicit step (§4 below) so nothing reaches `origin` by surprise.
+  is a separate, explicit step (§5 below) so nothing reaches `origin` by surprise.
 - **`localCheckout=true`** — `release:perform` builds from the local tag; you don't need
   to have pushed it to GitHub first.
 - **`goals=install`** on `perform` — not the plugin's default `deploy`, since there's no
@@ -34,6 +36,7 @@ repo as:
 - Working tree clean (`git status`), on `main`, up to date with `origin/main`.
 - `./mvnw clean verify` green.
 - No local-only commits you're not ready to have permanently referenced by a tag.
+- `CHANGELOG.md`'s `[Unreleased]` section reflects what's actually shipping (see step 2).
 
 ## Procedure
 
@@ -58,7 +61,23 @@ for a quick check, but read the defaults before using it for a real release:
 ./mvnw -B release:prepare -DdryRun=true
 ```
 
-### 2. Prepare (real)
+### 2. Update the changelog
+
+Before tagging, turn `CHANGELOG.md`'s `[Unreleased]` section into the section for the
+version you're about to cut, and start a fresh empty `[Unreleased]` above it:
+
+```markdown
+## [Unreleased]
+
+## [0.1.1] - 2026-09-15
+...entries that were under Unreleased...
+```
+
+Commit this on its own (`git commit -am "Changelog for 0.1.1"`) — `release:prepare`'s
+`preparationGoals` (`clean verify`) doesn't touch the changelog for you, and the release
+commit it makes is a version-bump commit, not the right place to bury changelog content.
+
+### 3. Prepare (real)
 
 Interactively confirms the release version and the next development version (press enter
 to accept the sensible defaults), runs `clean verify`, then commits and tags **locally**.
@@ -70,14 +89,14 @@ to accept the sensible defaults), runs `clean verify`, then commits and tags **l
 To pick specific versions non-interactively instead of the defaults:
 
 ```bash
-./mvnw release:prepare -DreleaseVersion=0.1.0 -DdevelopmentVersion=0.2.0-SNAPSHOT
+./mvnw release:prepare -DreleaseVersion=0.1.1 -DdevelopmentVersion=0.1.2-SNAPSHOT
 ```
 
 At this point `git log` shows two new local commits (`[maven-release-plugin] prepare
 release vX.Y.Z` and `[maven-release-plugin] prepare for next development iteration`) and
 `git tag` shows `vX.Y.Z`. Nothing has been pushed.
 
-### 3. Perform
+### 4. Perform
 
 Checks out the new tag into `target/checkout` and runs `install` there — a second,
 independent build of exactly the tagged commit, installed to your local
@@ -97,7 +116,7 @@ The CLI fat jar for that same tag is at `target/checkout/cli/target/rv32emu-cli-
 after `perform` — this is what gets attached to a GitHub Release (manually, for now; see
 `RELEASE_TODO.md` R7 for future CI automation).
 
-### 4. Push, when you're satisfied
+### 5. Push, when you're satisfied
 
 `release:prepare`/`perform` never touch `origin`. When you're ready to make the release
 commits and tag visible on GitHub:
@@ -121,7 +140,7 @@ git tag -d vX.Y.Z
 git reset --hard <commit-before-prepare>
 ```
 
-Never run rollback (or a manual reset) after step 4 has pushed — that rewrites published
+Never run rollback (or a manual reset) after step 5 has pushed — that rewrites published
 history. Cut a new patch release instead.
 
 ## Validating a release build
@@ -138,7 +157,7 @@ anything. Run it standalone at any time, or from inside `target/checkout` after
 
 ## What's still open
 
-- **Versioning scheme (RELEASE_TODO.md R2/R5):** this document assumes standard SemVer
+- **Versioning scheme (RELEASE_TODO.md R5):** this document assumes standard SemVer
   patch/minor/major judgement calls at prepare time; there's no enforced policy yet.
 - **CI (R7):** no `.github/workflows/` exists. `release:prepare`'s build step and
   `release.sh` are currently the only gates, run locally.

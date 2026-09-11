@@ -68,9 +68,12 @@ Committed one-per-unit and pushed to `origin/main` (`0943a48`, `1d45c2b`, `1c324
    work below; no rush cost since namespace registration (`com.alienspacebunny`,
    also `us.n8l`) is already done. Revisit after Phase 1–2 land and an explicit
    API-freeze review happens. **Versioning + local release mechanics are done**
-   (R5/R6, this session): `main` is `0.1.0-SNAPSHOT`, `maven-release-plugin` is
-   wired (tags `vX.Y.Z`, commits/tags locally only), `release.sh` fixed. Procedure
-   in `docs/RELEASING.md`. No release has actually been cut yet.
+   (R5/R6, this session): `main` is `0.1.1-SNAPSHOT` (Nate: skip `0.1.0`, it's
+   already referenced by the downstream V-32 project — first release will be
+   `0.1.1`), `maven-release-plugin` is wired (tags `vX.Y.Z`, commits/tags locally
+   only), `release.sh` fixed. Procedure in `docs/RELEASING.md`. `CHANGELOG.md`
+   started (Keep a Changelog format; maintenance rule in `AGENTS.md`). No release
+   has actually been cut yet.
 3. Feature work per `docs/FEATURE_REQUEST_PLAN.md` r6. **Reviewed and conditionally
    signed off** by the originating LLM (`docs/PLAN_REVIEW_REQUEST.md` →
    `docs/PLAN_REVIEW_RESPONSE.md`, B1–B7). The one condition (real MSIP/MEIP delivery)

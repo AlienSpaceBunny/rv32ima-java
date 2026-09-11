@@ -14,7 +14,8 @@
 
 Rolling status lives in [`../CHECKPOINT.md`](../CHECKPOINT.md). `../CLEANUP_TODO.md` is
 closed out (see its status table); `../RELEASE_TODO.md` tracks the current release-readiness
-work.
+work. `../CHANGELOG.md` tracks notable changes per version (Keep a Changelog format);
+`../AGENTS.md` has the maintenance rule for it, plus other agent-facing project conventions.
 
 ## Archive
 

@@ -48,7 +48,7 @@ See [Core API Contracts](docs/API.md) for the public integration contracts.
 java -jar cli/target/rv32emu-cli-<version>.jar -f path/to/image.bin [parameters]
 ```
 
-(`<version>` matches the version in `pom.xml`, e.g. `0.1.0-SNAPSHOT`; or just `ls cli/target/*.jar`.)
+(`<version>` matches the version in `pom.xml`, e.g. `0.1.1-SNAPSHOT`; or just `ls cli/target/*.jar`.)
 
 #### Parameters:
 - `-m [ram amount]`: Set the RAM size (default: 64MB).

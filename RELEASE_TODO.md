@@ -5,8 +5,10 @@ Follows the post-P0–P7 cleanup pass (`CLEANUP_TODO.md`, done). Goal: publish
 
 Baseline: `./mvnw clean verify` green — 267 core + 1 cli tests, SpotBugs/Checkstyle
 clean, CLI smoke passes, on JUnit 6.1.3. No git tags, no release history yet, but
-`main` now carries `0.1.0-SNAPSHOT` and `maven-release-plugin` is wired (R5, done) —
-see `docs/RELEASING.md` for the local versioning/tagging/build procedure.
+`main` now carries `0.1.1-SNAPSHOT` and `maven-release-plugin` is wired (R5, done) —
+see `docs/RELEASING.md` for the local versioning/tagging/build procedure. `0.1.0` is
+deliberately skipped: that version number is already referenced by the downstream V-32
+project, so the first release from this repo will be `0.1.1`.
 
 ## Recommendation: not yet (2026-09-10)
 
@@ -43,15 +45,12 @@ Good sequence: land Phase 1–2 → API-freeze review → set up versioning + CI
 | What publishes to Central (eventually) | **`rv32emu-core` only.** |
 | CLI distribution | **`rv32emu-cli` fat jar → GitHub Releases** as an asset, not a Maven artifact. Avoids the duplicate-classes problem (shade bundles core's classes; a published cli POM would also declare core as a dependency). |
 | Interim dependency access | **JitPack**, on demand — no repo changes required. |
-| Versioning mechanics | **Done (R5).** `main` carries `0.1.0-SNAPSHOT`; `maven-release-plugin` handles the release/next-SNAPSHOT bump and `vX.Y.Z` tagging. See `docs/RELEASING.md`. |
+| Versioning mechanics | **Done (R5).** `main` carries `0.1.1-SNAPSHOT`; `maven-release-plugin` handles the release/next-SNAPSHOT bump and `vX.Y.Z` tagging. See `docs/RELEASING.md`. |
+| First release number | **`0.1.1`** (Nate). `0.1.0` is skipped — already referenced by the downstream V-32 project. |
+| Changelog | **`CHANGELOG.md`**, Keep a Changelog format, tracked per version. Maintenance instructions in `AGENTS.md`. |
 
 ## Open questions
 
-- **First release number:** the mechanics are wired, but no one has actually cut a
-  release yet, so `release:prepare` will currently default to releasing `0.1.0` and
-  bumping `main` to `0.1.1-SNAPSHOT`. Confirm that's the intended first version before
-  the first real (non-dry-run) `release:prepare` — pass `-DreleaseVersion=`/
-  `-DdevelopmentVersion=` explicitly to pick something else (see `docs/RELEASING.md`).
 - Does the published API count as stable (1.0.0) yet, or stay 0.x while the
   multi-hart feature work (`docs/FEATURE_REQUEST_PLAN.md`) lands? The feature plan
   is explicitly additive/backward-compatible, so 1.0.0 now is defensible.
@@ -106,7 +105,9 @@ inherit).
 
 ## R5 — Versioning mechanics  *(done)*
 
-- `main` moved to `0.1.0-SNAPSHOT` in all 3 poms.
+- `main` moved to `0.1.0-SNAPSHOT` in all 3 poms, then to `0.1.1-SNAPSHOT` once Nate
+  confirmed the first release should be `0.1.1` (`0.1.0` is already referenced by the
+  downstream V-32 project).
 - Adopted `maven-release-plugin` (not hand-edited versions) — supersedes the earlier
   "no automated semantic versioning" checkpoint note. Configured `autoVersionSubmodules`,
   `tagNameFormat=v@{project.version}`, `pushChanges=false`, `localCheckout=true`,

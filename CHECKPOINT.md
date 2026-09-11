@@ -11,10 +11,9 @@ pushed. Release readiness is documented but deliberately paused (`RELEASE_TODO.m
 Central publish until after multi-hart Phase 1–2. `docs/FEATURE_REQUEST_PLAN.md` r6 has
 been reviewed and conditionally signed off by the originating LLM (`docs/PLAN_REVIEW_RESPONSE.md`);
 the one condition (real MSIP/MEIP interrupt delivery, not just injection) is done (`5620de0`).
-**Phase 1 (foundation) is done (`c92045e`)** — see below. **Phase 2 is in progress**: item 5
-(U-mode CSR privilege check, `d9298a3`) and item 6 (`AccessContext`/`AccessKind`, `d9e93da`) are
-done. Remaining: item 8 (`atomicRmw`), item 9 (`tryScAndStore`), item 10 (`ReservationTable`
-doc-only, bus-internal).
+**Phase 1 (foundation) is done (`c92045e`)** — see below. **Phase 2 is done** (items 5, 6, 7,
+8, 9, 10 all complete; final pieces `4aeec77`) — see below. Phase 3 (Zba/Zbb/Zabha) is next,
+pending Nate's go-ahead.
 
 ---
 
@@ -136,8 +135,28 @@ implement `MemoryBus` directly instead. AMO accesses carry context now but the A
 **still not cross-hart atomic** (two separate bus calls) — that's item 8. 301 core + 1 cli
 tests.
 
-**Still open in Phase 2:** item 8 (`atomicRmw`), item 9 (`tryScAndStore`), item 10
-(`ReservationTable`, doc-only/bus-internal — no core code expected).
+**Items 8, 9, 10 (`4aeec77`) — done. Phase 2 is complete.** `RV32IMACore`'s AMO block
+now routes through two new `MemoryBus` default methods instead of computing results
+inline: `atomicRmw(address, funct5, operand, ctx)` handles the nine RMW AMOs (the old
+inline switch moved into a private static `MemoryBus.computeAmo` helper), and
+`tryScAndStore(hartId, address, value, ctx)` makes the bus's final atomic decision for
+`SC.W` — called only if the core's local reservation fast-path check passes; the bus can
+still reject a store the core's local state believed would succeed. `LR.W` is unchanged
+(already routed through `readInt(address, ctx)` per item 6). Both default implementations
+are single-hart-correct only; a multi-hart bus must hold a per-granule lock, per their
+Javadoc. Item 10 (`ReservationTable`) is doc-only as the plan specifies — no class exists
+or is needed in this repo; `docs/FEATURE_REQUEST_PLAN.md` §5 and the new methods' Javadoc
+already state the full contract, and `step()`'s signature is unchanged. New
+`AtomicPrimitivesTest` (8 tests) proves the routing contract with a recording bus,
+including that the bus's rejection overrides the core's local belief, and that a fault
+thrown from either new primitive becomes a standard store/AMO access fault (cause 7).
+309 core + 1 cli tests.
+
+**Phase 2 landing is not the same as cross-hart IPC being safe.** A conforming
+multi-hart `MemoryBus` implementation doesn't exist yet in this repo, and `aq`/`rl`
+memory-ordering semantics remain explicitly out of `AccessContext`'s scope pending that
+bus's design (§3, §5) — flag this before anyone relies on shared-memory IPC between AP
+and IOP.
 
 ---
 

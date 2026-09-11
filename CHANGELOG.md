@@ -33,6 +33,14 @@ for how this file is updated as part of cutting a release.
   `AccessContext` to `HardwareHook`; see its updated Javadoc.
 - `RV32IMAState.hartId`, identifying a hart among others sharing a `MemoryBus`.
   Defaults to `0`; not yet read or written by the core itself.
+- `MemoryBus.atomicRmw` and `MemoryBus.tryScAndStore` (multi-hart Phase 2):
+  `RV32IMACore`'s AMO block now routes every RV32A atomic through these two default
+  methods instead of computing results inline. `LR.W` continues to route through the
+  existing `readInt(address, ctx)` overload. The default implementations are correct
+  only for a single hart; a multi-hart-aware bus overrides them to hold a per-granule
+  lock and to have the final say on whether an `SC.W` the core's local reservation
+  check believed would succeed actually does. See `MemoryBus`'s and `docs/API.md`'s
+  updated Javadoc, and `AtomicPrimitivesTest`.
 - Instruction fetch now catches `IndexOutOfBoundsException` from the memory bus (not
   just the coarse `ramOffset`/`ramSize` window) and converts it to an instruction
   access-fault trap, matching how data loads/stores already behave.

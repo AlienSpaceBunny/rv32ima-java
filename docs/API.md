@@ -109,6 +109,37 @@ rather than wrap or extend `MMIOBus`. `AccessContext` does not carry `aq`/`rl`
 ordering bits; per-access exclusion alone is not a payload-publication
 guarantee for shared-memory IPC — see `AccessContext`'s Javadoc.
 
+Atomics (multi-hart Phase 2): `RV32IMACore`'s AMO block (RV32A) routes
+through three `MemoryBus` methods instead of computing AMO results itself.
+
+- `atomicRmw(address, funct5, operand, ctx)` handles every RV32A AMO except
+  `LR.W`/`SC.W` (the nine read-modify-write ops: `AMOSWAP`, `AMOADD`,
+  `AMOXOR`, `AMOAND`, `AMOOR`, `AMOMIN[U]`, `AMOMAX[U]`). The default
+  implementation is read-compute-write as two separate calls to
+  `readInt(address, ctx)`/`writeInt(address, value, ctx)` — correct for a
+  single hart, but **not atomic with respect to a concurrent hart** sharing
+  the bus. A multi-hart-aware override must hold one lock over the granule
+  for the read, compute, write, and invalidation of any overlapping LR/SC
+  reservation in its own tracking, for the whole operation.
+- `LR.W` routes through the existing `readInt(address, ctx)` overload — a
+  multi-hart bus records `(ctx.hartId(), address)` in its own reservation
+  tracking there, keyed off `ctx.kind() == AccessKind.AMO && ctx.atomicOp()
+  == 2`.
+- `tryScAndStore(hartId, address, value, ctx)` makes the bus's final
+  atomic decision for `SC.W`. `RV32IMACore` calls this only after its own
+  local fast-path check passes (`state.reservationValid` and
+  `state.reservationAddr` match) — if that check fails, the bus is never
+  called and the destination register gets `1` (failure) directly. The bus
+  is still free to reject a store the core's local state believed would
+  succeed, if it observed a cross-hart invalidation the core's purely local
+  state cannot see; the default implementation always succeeds, correct
+  only for a single hart. Either way the reservation is consumed.
+
+A fault (`IndexOutOfBoundsException`) thrown from either `atomicRmw` or
+`tryScAndStore` becomes a standard store/AMO access fault (cause 7, `mtval`
+= the AMO address), exactly like an ordinary faulting store — see
+`AtomicPrimitivesTest`.
+
 ## MMIOBus and HardwareHook
 
 `MMIOBus` composes a backing RAM bus with registered `HardwareHook` ranges.

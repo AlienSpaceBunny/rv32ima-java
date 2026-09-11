@@ -195,7 +195,7 @@ The AMO block now carries `AccessContext` (`kind=AMO`, `atomicOp=funct5`) on its
 `writeInt` calls, but **is not yet atomic across harts** — it's still two separate bus
 transactions, same as before. That's item 8 (`atomicRmw`).
 
-### 4. AMO Atomicity — `atomicRmw` Bus Primitive
+### 4. AMO Atomicity — `atomicRmw` Bus Primitive — done (`4aeec77`)
 
 The current AMO implementation in `RV32IMACore` (lines 529–579) calls `mem.readInt` then
 `mem.writeInt` as two separate bus transactions. This is not atomic with respect to a concurrent
@@ -223,7 +223,7 @@ The default does not provide multi-hart atomic correctness. A multi-hart impleme
 coordinate all overlapping accesses, including ordinary reads/writes, with the atomic operation.
 The sketch above is for words; Zabha requires width-aware dispatch as described below.
 
-### 5. Cross-Hart LR/SC Reservations
+### 5. Cross-Hart LR/SC Reservations — `tryScAndStore` done (`4aeec77`); `ReservationTable` itself is bus-internal, doc-only (see item 10)
 
 LR/SC reservations currently live in `RV32IMAState.reservationAddr/reservationValid`. For
 cross-hart correctness, a store from Hart 1 must invalidate Hart 2's reservation. The approach:
@@ -511,20 +511,38 @@ behavior on `RV32IMFC_ZBA_ZBB_ZICSR` is confirmed acceptable for now (Nate).
 7. ~~Add `injectInterrupt`, MSIP/MEIP delivery, and the privilege-dependent interrupt gating
    fix (§6–§7).~~ **Done (`5620de0`)**, landed ahead of the rest of this phase as a standalone
    correctness fix. Acknowledgement against a real mailbox device is still open (§6).
-8. Add `atomicRmw` default method to `MemoryBus`; route all AMO instructions through it.
-9. Add `tryScAndStore` default method to `MemoryBus`; route SC.W through it (core retains
-   local fast-path reservation check in state; bus makes final atomic decision for multi-hart).
-10. Define `ReservationTable` as a bus-internal type; document how a multi-hart bus override
+8. ~~Add `atomicRmw` default method to `MemoryBus`; route all AMO instructions through it.~~
+   **Done (`4aeec77`)**. `RV32IMACore`'s AMO block now calls `mem.atomicRmw(rs1, irmid, rs2,
+   ctx)` for the nine RMW ops instead of computing the result inline; the old inline switch
+   moved into `MemoryBus.computeAmo`, a private static helper shared only by `atomicRmw`'s
+   default. `LR.W` is unchanged (already routed through `readInt(rs1, ctx)` per item 6).
+9. ~~Add `tryScAndStore` default method to `MemoryBus`; route SC.W through it (core retains
+   local fast-path reservation check in state; bus makes final atomic decision for
+   multi-hart).~~ **Done (`4aeec77`)**. If the core's local check fails, the bus is never
+   called at all (destination register gets `1` directly); if it passes, `mem.tryScAndStore
+   (state.hartId, rs1, rs2, ctx)` makes the final call and its result — success or a
+   bus-side rejection the core's local state couldn't see — becomes the destination
+   register's value verbatim. `AtomicPrimitivesTest` proves both the routing (each new
+   method called with the right args, in the right cases, and not otherwise) and a fault
+   thrown from either primitive correctly becomes a store/AMO access fault (cause 7).
+10. ~~Define `ReservationTable` as a bus-internal type; document how a multi-hart bus override
     manages it privately via `readInt` (LR detection), `tryScAndStore`, `atomicRmw`, and
     all store-width overrides. Cover translated aliases, indivisible LR registration, and
     SC reservation consumption. Specify the memory-ordering contract in §3.
-    `step()` gains no new parameter.
+    `step()` gains no new parameter.~~ **Done, doc-only as specified** — no `ReservationTable`
+    class exists or is needed in this repo; §5 above already specifies the full contract
+    (what a multi-hart bus's private table must track and when), and the `atomicRmw`/
+    `tryScAndStore` Javadoc restates the locking obligations at each call site. `step()`'s
+    signature is unchanged, confirming no core-side parameter was needed.
 
-At the end of Phase 2, the core supplies the processor support for interrupt-capable
-synchronized MMIO mailboxes. The emulator supplies the mailbox device, synchronization,
-acknowledgement, and AP trap/IOP notification path. No later ISA phase is required for mailbox v1.
-Cross-hart LR/SC and AMO correctness requires a conforming multi-hart bus implementation and
-verification of the ordering contract; adding default methods alone does not establish it.
+**Phase 2 is complete** as scoped in this repo (items 5, 6, 7, 8, 9, 10 all done). At the end
+of Phase 2, the core supplies the processor support for interrupt-capable synchronized MMIO
+mailboxes. The emulator supplies the mailbox device, synchronization, acknowledgement, and AP
+trap/IOP notification path. No later ISA phase is required for mailbox v1. Cross-hart LR/SC and
+AMO correctness requires a conforming multi-hart bus implementation and verification of the
+ordering contract; adding default methods alone does not establish it — that bus does not yet
+exist in this repo, and `aq`/`rl` memory-ordering semantics remain explicitly out of
+`AccessContext`'s scope (§3, §5) pending that bus's design.
 
 ### Phase 3 — Integer ISA Extensions (P2)
 

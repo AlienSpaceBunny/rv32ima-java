@@ -1793,4 +1793,75 @@ public class CoreTest {
             assertEquals(0, postExecCalls[0]);
         }
     }
+
+    // U-mode CSR access privilege check (Phase 2, Design Decision §7).
+
+    @Test
+    public void userModeCannotReadMachineOnlyCsr() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = new RV32IMAState(); // extraflags == 0: user mode
+            state.pc = RAM_OFFSET;
+            state.mstatus = 0x12345678; // any value; must be unreadable, not just unwritable
+            ram.writeInt(RAM_OFFSET, csrInstruction(0x300, 2, 5, 0)); // csrrs x5, mstatus, x0
+
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(2, state.mcause); // illegal instruction
+            assertEquals(0, state.regs[5]); // never written
+        }
+    }
+
+    @Test
+    public void userModeCannotWriteMachineOnlyCsr() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = new RV32IMAState();
+            state.pc = RAM_OFFSET;
+            state.mtvec = 0x11111111;
+            state.regs[1] = 0x22222222;
+            ram.writeInt(RAM_OFFSET, csrInstruction(0x305, 1, 0, 1)); // csrrw x0, mtvec, x1
+
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(2, state.mcause);
+            assertEquals(0x11111111, state.mtvec); // never written
+        }
+    }
+
+    @Test
+    public void userModeCanReadUserAccessibleCsr() {
+        // 0xC00 (cycle) has privilege field 0b00 in its address encoding -- must pass in user
+        // mode, unlike M-mode-only CSRs such as mstatus.
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = new RV32IMAState();
+            state.pc = RAM_OFFSET;
+            state.setCycle(42);
+            ram.writeInt(RAM_OFFSET, csrInstruction(0xC00, 2, 5, 0)); // csrrs x5, cycle, x0
+
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(0, state.mcause);
+            assertEquals(43, state.regs[5]); // cycle increments once per instruction before fetch
+        }
+    }
+
+    @Test
+    public void machineModeCanStillAccessMachineOnlyCsr() {
+        // No regression: the existing (M-mode) behavior of every other CSR test in this file
+        // depends on this continuing to work.
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.mtvec = 0x11111111;
+            state.regs[1] = 0x22222222;
+            ram.writeInt(RAM_OFFSET, csrInstruction(0x305, 1, 0, 1)); // csrrw x0, mtvec, x1
+
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(0, state.mcause);
+            assertEquals(0x22222222, state.mtvec);
+        }
+    }
 }

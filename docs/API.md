@@ -126,6 +126,14 @@ RAM, VRAM, and hooks. Keep `MMIOBus` for simple range-routed devices.
   are ignored when no hook is present.
 - CSR instruction side-effect rules are enforced by the core before invoking
   the hook.
+- **Privilege gating** (Phase 2): before any of the above, the core checks the
+  CSR number's minimum-privilege field (bits 9–8 of the 12-bit CSR number, the
+  standard RISC-V CSR address convention) against the hart's current privilege
+  and raises an illegal-instruction trap — without calling the hook — if the
+  hart's privilege is lower. This applies to hook-routed CSR numbers too, even
+  ones that don't follow the convention on purpose: a custom CSR meant to be
+  reachable from user-mode guest code needs an address whose bits 9–8 are
+  `0b00`.
 
 ## RV32IMAState
 

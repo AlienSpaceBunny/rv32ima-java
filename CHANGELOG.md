@@ -19,6 +19,12 @@ for how this file is updated as part of cutting a release.
   reproduces the previously-hardcoded value's non-standard bit 22. Defaults to `false`
   (bit 22, matching the original mini-rv32ima-derived value exactly) via a 5-argument
   compatibility constructor; the V-32 presets set it `true`.
+- U-mode CSR access privilege check (multi-hart Phase 2): a CSR access now raises an
+  illegal-instruction trap, instead of succeeding, when the hart's current privilege is
+  below the CSR address's minimum-privilege field (bits 9-8 of the CSR number, the
+  standard RISC-V encoding). Applies uniformly to hook-routed custom CSR numbers too —
+  see `CSRHook`'s updated Javadoc if you have a custom CSR meant to be reachable from
+  user-mode guest code.
 - `RV32IMAState.hartId`, identifying a hart among others sharing a `MemoryBus`.
   Defaults to `0`; not yet read or written by the core itself.
 - Instruction fetch now catches `IndexOutOfBoundsException` from the memory bus (not

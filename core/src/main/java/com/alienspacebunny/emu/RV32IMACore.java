@@ -86,6 +86,16 @@ public class RV32IMACore {
     private static final int PRIV_USER = 0;
     private static final int PRIV_MACHINE = 3;
 
+    /**
+     * Bit position of a CSR address's minimum-privilege field (bits 9–8 of the 12-bit CSR
+     * address). Numerically equal to {@link #EXTRAFLAG_PRIV_MASK} by coincidence of the encoding,
+     * not by relation between the two.
+     */
+    private static final int CSR_PRIVILEGE_SHIFT = 8;
+
+    /** Mask for the 2-bit field extracted via {@link #CSR_PRIVILEGE_SHIFT}. */
+    private static final int CSR_PRIVILEGE_FIELD_MASK = 0x3;
+
     /*
      * Trap dispatch uses a "+1" internal encoding on the local {@code trap} variable so that
      * {@code trap == 0} unambiguously means "no trap". A synchronous exception is held as
@@ -574,6 +584,12 @@ public class RV32IMACore {
                             int microop = (ir >> 12) & 0x7;
                             if ((microop & 3) != 0) {
                                 // Zicsr
+                                int csrMinPrivilege = (csrno >> CSR_PRIVILEGE_SHIFT) & CSR_PRIVILEGE_FIELD_MASK;
+                                if (csrMinPrivilege > (state.extraflags & EXTRAFLAG_PRIV_MASK)) {
+                                    trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
+                                    break;
+                                }
+
                                 int rs1Index = (ir >> 15) & 0x1f;
                                 int rs1 = state.regs[rs1Index];
                                 boolean isWrite = microop == 1 || microop == 5;

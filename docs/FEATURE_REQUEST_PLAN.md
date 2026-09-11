@@ -302,10 +302,10 @@ This section specifies the intended behavior for AP (U-mode) and IOP (M-mode) pr
 handling. Items marked **existing** are already implemented correctly; only items marked
 **new fix** require code changes.
 
-**U-mode CSR access restriction (new fix).** The current CSR decode path in `RV32IMACore`
-(line 437) has no privilege check — any privilege level can read or write any CSR. The RISC-V
-spec encodes the minimum required privilege in CSR bits[9:8]: M-mode CSRs have `0b11`, and
-U-mode-accessible CSRs (cycle/time/instret, `0xC00`–`0xCFF`) have `0b00`. Add before the CSR
+**U-mode CSR access restriction — done (`<pending>`).** The current CSR decode path in
+`RV32IMACore` (line 437) has no privilege check — any privilege level can read or write any CSR.
+The RISC-V spec encodes the minimum required privilege in CSR bits[9:8]: M-mode CSRs have `0b11`,
+and U-mode-accessible CSRs (cycle/time/instret, `0xC00`–`0xCFF`) have `0b00`. Add before the CSR
 dispatch:
 
 ```java
@@ -317,6 +317,15 @@ if (((csrno >> 8) & 3) > (state.extraflags & 3)) {
 
 This raises an illegal-instruction trap when U-mode code attempts to access any M-mode CSR,
 and passes U-mode reads of `0xC00` (cycle) since their privilege field is `0b00`.
+
+**Landed as-specified**, named constants substituted for the literals (`CSR_PRIVILEGE_SHIFT`,
+`CSR_PRIVILEGE_FIELD_MASK`, `EXTRAFLAG_PRIV_MASK`, `exceptionTrap(EXC_ILLEGAL_INSTRUCTION)`).
+**Applies uniformly to hook-routed CSR numbers too** — see `CSRHook`'s updated Javadoc: a custom
+CSR address that doesn't follow the standard convention on purpose (for example, mini-rv32ima's
+`0x136`–`0x140` console CSRs, whose bits 9–8 happen to be `1`) is gated by that coincidental
+field just like a real CSR. A custom CSR meant to be reachable from user-mode guest code needs an
+address whose bits 9–8 are `0b00`. Worth checking before wiring V-32's IOP console/debug CSRs to
+an AP-visible address.
 
 **ECALL cause by privilege (existing).** `ECALL` from M-mode sets `mcause = 11`; from U-mode
 sets `mcause = 8`. Already correct at line 489.
@@ -475,8 +484,8 @@ behavior on `RV32IMFC_ZBA_ZBB_ZICSR` is confirmed acceptable for now (Nate).
 
 ### Phase 2 — Multi-Hart Infrastructure (P1 continued)
 
-5. Add U-mode CSR access privilege check (Design Decision §7): `((csrno >> 8) & 3) > privilege`
-   → illegal-instruction trap.
+5. ~~Add U-mode CSR access privilege check (Design Decision §7): `((csrno >> 8) & 3) > privilege`
+   → illegal-instruction trap.~~ **Done (`<pending>`)**.
 6. Add `AccessContext` record and `AccessKind` enum; add default-method overloads to
    `MemoryBus`; plumb context through all core load/store/fetch calls.
 7. ~~Add `injectInterrupt`, MSIP/MEIP delivery, and the privilege-dependent interrupt gating

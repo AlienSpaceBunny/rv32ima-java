@@ -8,7 +8,8 @@ package com.alienspacebunny.emu;
  *
  * <ul>
  *   <li>{@code 0x300} — {@code mstatus}
- *   <li>{@code 0x301} — {@code misa} (read-only, fixed at {@code 0x40401101}: RV32IMA)
+ *   <li>{@code 0x301} — {@code misa} (read-only; value depends on the {@link IsaConfig} the core
+ *       was constructed with — see {@link IsaConfig#misa()})
  *   <li>{@code 0x304} — {@code mie}
  *   <li>{@code 0x305} — {@code mtvec}
  *   <li>{@code 0x340} — {@code mscratch}
@@ -30,6 +31,16 @@ package com.alienspacebunny.emu;
  *   <li>Immediate variants ({@code CSRRSI uimm=0}, {@code CSRRCI uimm=0}): the CSR is not
  *       written; {@link #handleWrite} is not called.
  * </ul>
+ *
+ * <p><b>Privilege gating.</b> Before any CSR read or write reaches the core's built-in handling or
+ * this hook, {@code RV32IMACore} checks the CSR number's minimum-privilege field (bits 9–8 of the
+ * 12-bit CSR number, per the standard RISC-V CSR address encoding) against the hart's current
+ * privilege. If the hart's privilege is lower, the access raises an illegal-instruction trap and
+ * this hook is never called. This applies uniformly, including to hook-routed CSR numbers that
+ * don't follow the standard convention on purpose (for example, {@code 0x136}–{@code 0x140}-style
+ * custom console CSRs have a minimum-privilege field of {@code 1} by coincidence of their address,
+ * not by design) — a custom CSR intended to be callable from user-mode guest code must use an
+ * address whose bits 9–8 are {@code 0b00}.
  *
  * <p><b>Unrecognised CSR numbers.</b> {@link #handleRead} should return {@code 0} for any CSR
  * number the hook does not implement. {@link #handleWrite} should silently ignore writes to

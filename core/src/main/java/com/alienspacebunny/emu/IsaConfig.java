@@ -10,18 +10,20 @@ package com.alienspacebunny.emu;
  * existed. The flags below toggle optional extensions layered on top, added for the V-32 AP/IOP
  * multi-hart feature work (see {@code docs/FEATURE_REQUEST_PLAN.md}).
  *
- * <p><b>Decode support.</b> {@link #hasZba}, {@link #hasZbb}, {@link #hasZabha}, and {@link #hasC}
- * are decoded (Phase 3 and Phase 4 respectively): {@link #hasZba} unlocks {@code SH1ADD}/{@code
- * SH2ADD}/{@code SH3ADD}; {@link #hasZbb} unlocks the 18 basic bit-manipulation instructions;
- * {@link #hasZabha} unlocks byte/halfword AMOs (the RV32A opcode's {@code funct3} field admitting
- * {@code 0}/{@code 1} in addition to {@code 2}); {@link #hasC} unlocks the RV32C base compressed
- * instruction set (see {@code RV32IMACore}'s {@code decodeCompressed} — every 16-bit encoding
- * without an {@code F}/{@code D} dependency; {@code C.FLW}/{@code C.FSW} stay illegal since
- * {@code F} isn't decoded). {@link #hasF} is not decoded yet: setting it only changes the {@link
- * #misa()} value the guest observes, and F-extension instructions still raise an
- * illegal-instruction trap until Phase 5 lands. Enabling a flag ahead of its phase does not unlock
- * any instructions early — it only
- * changes what the guest reads back from {@code misa}.
+ * <p><b>Decode support.</b> {@link #hasZba}, {@link #hasZbb}, {@link #hasZabha}, {@link #hasC},
+ * and {@link #hasF} are decoded (Phases 3, 4, and 5 respectively): {@link #hasZba} unlocks {@code
+ * SH1ADD}/{@code SH2ADD}/{@code SH3ADD}; {@link #hasZbb} unlocks the 18 basic bit-manipulation
+ * instructions; {@link #hasZabha} unlocks byte/halfword AMOs (the RV32A opcode's {@code funct3}
+ * field admitting {@code 0}/{@code 1} in addition to {@code 2}); {@link #hasC} unlocks the RV32C
+ * base compressed instruction set (see {@code RV32IMACore}'s {@code decodeCompressed} — every
+ * 16-bit encoding without an {@code F}/{@code D} dependency; {@code C.FLW}/{@code C.FSW} stay
+ * illegal since {@code D} isn't decoded); {@link #hasF} unlocks the RV32F single-precision
+ * floating-point instructions. {@link #hasD} is <b>not</b> decoded: like {@link #hasF} before
+ * Phase 5, setting it only changes the {@link #misa()} value the guest observes, and D-extension
+ * instructions still raise an illegal-instruction trap. It exists now, ahead of any D decode
+ * work, purely to avoid a later compatibility-constructor layer — see {@code
+ * docs/FEATURE_REQUEST_PLAN.md} Design Decision §8. Enabling a flag ahead of its phase does not
+ * unlock any instructions early — it only changes what the guest reads back from {@code misa}.
  *
  * <p><b>{@code misa}'s U-mode bit.</b> The value {@code RV32IMACore} hardcoded before this type
  * existed ({@code 0x40401101}) does not set the standard "U" bit (bit 20) that advertises
@@ -40,14 +42,24 @@ package com.alienspacebunny.emu;
  *     SH3ADD}).
  * @param hasZbb basic bit-manipulation extension.
  * @param hasZabha byte/halfword atomic memory operations.
+ * @param hasD double-precision floating-point (D extension) support. Misa-only; not decoded. Must
+ *     not be {@code true} without {@link #hasF} also {@code true} (D implies F).
  * @param hasU whether {@link #misa()} advertises standard U-mode support (bit 20) instead of
  *     reproducing the original hardcoded value's non-standard bit 22. See the class Javadoc.
  */
-public record IsaConfig(boolean hasC, boolean hasF, boolean hasZba, boolean hasZbb, boolean hasZabha, boolean hasU) {
+public record IsaConfig(
+        boolean hasC, boolean hasF, boolean hasZba, boolean hasZbb, boolean hasZabha, boolean hasD, boolean hasU) {
+
+    public IsaConfig {
+        if (hasD && !hasF) {
+            throw new IllegalArgumentException("hasD requires hasF (the D extension implies F)");
+        }
+    }
 
     private static final int MISA_MXL32 = 0x40000000;
     private static final int MISA_A = 1; // bit 0
     private static final int MISA_C = 1 << 2;
+    private static final int MISA_D = 1 << 3;
     private static final int MISA_F = 1 << 5;
     private static final int MISA_I = 1 << 8;
     private static final int MISA_M = 1 << 12;
@@ -65,9 +77,9 @@ public record IsaConfig(boolean hasC, boolean hasF, boolean hasZba, boolean hasZ
     private static final int MISA_BASE = MISA_MXL32 | MISA_I | MISA_M | MISA_A;
 
     /**
-     * Creates an {@code IsaConfig} with {@link #hasU} defaulted to {@code false} (reproduce the
-     * original hardcoded {@code misa} value's non-standard bit 22 rather than the standard U bit)
-     * — the behavior every config had before {@link #hasU} was added.
+     * Creates an {@code IsaConfig} with {@link #hasD} and {@link #hasU} defaulted to {@code
+     * false} — the behavior every config had before {@link #hasU} (and later {@link #hasD}) was
+     * added.
      *
      * @param hasC see {@link #hasC}.
      * @param hasF see {@link #hasF}.
@@ -76,7 +88,22 @@ public record IsaConfig(boolean hasC, boolean hasF, boolean hasZba, boolean hasZ
      * @param hasZabha see {@link #hasZabha}.
      */
     public IsaConfig(boolean hasC, boolean hasF, boolean hasZba, boolean hasZbb, boolean hasZabha) {
-        this(hasC, hasF, hasZba, hasZbb, hasZabha, false);
+        this(hasC, hasF, hasZba, hasZbb, hasZabha, false, false);
+    }
+
+    /**
+     * Creates an {@code IsaConfig} with {@link #hasD} defaulted to {@code false} — the behavior
+     * every config had before {@link #hasD} was added.
+     *
+     * @param hasC see {@link #hasC}.
+     * @param hasF see {@link #hasF}.
+     * @param hasZba see {@link #hasZba}.
+     * @param hasZbb see {@link #hasZbb}.
+     * @param hasZabha see {@link #hasZabha}.
+     * @param hasU see {@link #hasU}.
+     */
+    public IsaConfig(boolean hasC, boolean hasF, boolean hasZba, boolean hasZbb, boolean hasZabha, boolean hasU) {
+        this(hasC, hasF, hasZba, hasZbb, hasZabha, false, hasU);
     }
 
     /**
@@ -107,8 +134,8 @@ public record IsaConfig(boolean hasC, boolean hasF, boolean hasZba, boolean hasZ
      * multi-letter "Z" sub-extensions with no bit of their own in the register.
      *
      * @return the RV32 {@code misa} value: the always-present base bits, plus either the standard
-     *     U bit or the legacy non-U bit depending on {@link #hasU} (see the class Javadoc), plus C
-     *     and/or F when enabled.
+     *     U bit or the legacy non-U bit depending on {@link #hasU} (see the class Javadoc), plus
+     *     C, F, and/or D when enabled.
      */
     public int misa() {
         int value = MISA_BASE | (hasU ? MISA_U : MISA_LEGACY_NON_U_BIT);
@@ -117,6 +144,9 @@ public record IsaConfig(boolean hasC, boolean hasF, boolean hasZba, boolean hasZ
         }
         if (hasF) {
             value |= MISA_F;
+        }
+        if (hasD) {
+            value |= MISA_D;
         }
         return value;
     }

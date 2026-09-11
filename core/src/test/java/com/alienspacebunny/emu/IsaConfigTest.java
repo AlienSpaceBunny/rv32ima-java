@@ -2,6 +2,7 @@ package com.alienspacebunny.emu;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -85,5 +86,40 @@ public class IsaConfigTest {
         IsaConfig config = new IsaConfig(false, false, true, true, true, false);
 
         assertEquals(0x40401101, config.misa());
+    }
+
+    @Test
+    public void sixArgCompatConstructorDefaultsHasDToFalse() {
+        IsaConfig config = new IsaConfig(false, true, false, false, false, true);
+
+        assertFalse(config.hasD());
+    }
+
+    @Test
+    public void fiveArgCompatConstructorDefaultsHasDToFalse() {
+        IsaConfig config = new IsaConfig(false, true, false, false, false);
+
+        assertFalse(config.hasD());
+    }
+
+    @Test
+    public void hasDWithoutHasFIsRejected() {
+        assertThrows(
+                IllegalArgumentException.class, () -> new IsaConfig(false, false, false, false, false, true, false));
+    }
+
+    @Test
+    public void hasDAddsMisaBit3() {
+        IsaConfig config = new IsaConfig(false, true, false, false, false, true, false);
+
+        assertTrue(config.hasD());
+        assertEquals(1 << 3, config.misa() & (1 << 3));
+    }
+
+    @Test
+    public void hasDFalseLeavesMisaBit3Clear() {
+        IsaConfig config = new IsaConfig(false, true, false, false, false, false, false);
+
+        assertEquals(0, config.misa() & (1 << 3));
     }
 }

@@ -10,7 +10,7 @@ package com.alienspacebunny.emu;
  *       RV32IMACore#step}: {@link #regs}, {@link #pc}, {@link #hartId}, {@link #mstatus}, {@link
  *       #mscratch}, {@link #mtvec}, {@link #mie}, {@link #mip}, {@link #mepc}, {@link #mtval},
  *       {@link #mcause}, {@link #extraflags}, {@link #reservationAddr}, {@link
- *       #reservationValid}.
+ *       #reservationValid}, {@link #fregs}, {@link #fcsr}.
  *   <li><em>CLINT layout fields</em> — {@link #cyclel}, {@link #cycleh}, {@link #timerl}, {@link
  *       #timerh}, {@link #timermatchl}, {@link #timermatchh}. These are the raw 32-bit halves of
  *       the 64-bit cycle counter, machine timer ({@code mtime}), and timer-compare value ({@code
@@ -131,6 +131,25 @@ public class RV32IMAState {
 
     /** Whether this hart currently holds an active LR/SC reservation. */
     public boolean reservationValid;
+
+    /**
+     * FP register file f0–f31 ({@code IsaConfig.hasF}, Phase 5). Stored as {@code long} rather
+     * than {@code float} so that a later D extension does not need a breaking storage-width
+     * change to this public field — see {@code docs/FEATURE_REQUEST_PLAN.md} Design Decision §8.
+     * Every write NaN-boxes the value (sets the upper 32 bits to all-ones, per the standard
+     * RISC-V convention for a register wider than the value it holds); {@code RV32IMACore} reads
+     * only the low 32 bits under F alone. f0 is not hardwired to zero — unlike {@link #regs}, all
+     * 32 FP registers are ordinary read/write registers.
+     */
+    public final long[] fregs = new long[32];
+
+    /**
+     * FP control and status register ({@code fcsr}, {@code IsaConfig.hasF}, Phase 5). Bits 7–5
+     * are the rounding mode ({@code frm}); bits 4–0 are the accrued exception flags ({@code
+     * fflags}: NV, DZ, OF, UF, NX from bit 4 down to bit 0). Also addressable piecewise as CSRs
+     * {@code 0x001} ({@code fflags}) and {@code 0x002} ({@code frm}).
+     */
+    public int fcsr;
 
     /** Creates a new {@code RV32IMAState} with all fields at their default values (zero/false). */
     public RV32IMAState() {}

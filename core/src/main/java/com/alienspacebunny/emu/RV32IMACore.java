@@ -113,6 +113,16 @@ public class RV32IMACore {
     private static final int EXC_ECALL_FROM_U = 8;
     private static final int EXC_ECALL_FROM_M = 11;
 
+    // ---- F extension (fcsr / fflags) support: Phase 5 ----------------------------------------
+    private static final int FFLAGS_NV = 1 << 4; // invalid operation
+    private static final int FFLAGS_MASK = 0x1f;
+    private static final int FCSR_FRM_SHIFT = 5;
+    private static final int FCSR_FRM_FIELD_MASK = 0x7;
+    private static final int FCSR_MASK = 0xff;
+
+    /** Canonical quiet NaN bit pattern RISC-V mandates in place of any NaN payload it produces. */
+    private static final int CANONICAL_NAN_BITS = 0x7fc00000;
+
     /** {@code mcause} high bit: set for an interrupt, clear for a synchronous exception. */
     private static final int INTERRUPT_FLAG = 0x80000000;
 
@@ -209,6 +219,107 @@ public class RV32IMACore {
             return Integer.reverseBytes(rs1); // REV8
         }
         return Integer.rotateRight(rs1, rs2Field); // RORI (funct7 == 0x30)
+    }
+
+    // ---- F extension (single-precision floating-point) support: Phase 5a --------------------
+    //
+    // This block covers only the rounding-mode-independent RV32F instructions: register-file and
+    // fcsr plumbing, loads/stores, moves, sign injection, classification, comparisons, and
+    // min/max. FADD/FSUB/FMUL/FDIV/FSQRT.S, the FMADD family, and FCVT.{W,WU}.S/FCVT.S.{W,WU} all
+    // consult the rounding mode and are deferred to Phase 5b, along with `fflags` accrual beyond
+    // NV (see the design discussion in this session: double-precision-as-intermediate is provably
+    // safe for those ops' RNE and directed rounding modes, but that machinery doesn't exist yet).
+
+    /** Writes {@code bits} into FP register {@code idx}, NaN-boxed (see {@code RV32IMAState.fregs}). */
+    private static void writeFReg(RV32IMAState state, int idx, int bits) {
+        state.fregs[idx] = 0xFFFFFFFF00000000L | (bits & 0xFFFFFFFFL);
+    }
+
+    /** Reads the low 32 bits of FP register {@code idx}. */
+    private static int readFReg(RV32IMAState state, int idx) {
+        return (int) state.fregs[idx];
+    }
+
+    private static boolean isNaN32(int bits) {
+        return (bits & 0x7f800000) == 0x7f800000 && (bits & 0x007fffff) != 0;
+    }
+
+    private static boolean isSignalingNaN32(int bits) {
+        return isNaN32(bits) && (bits & 0x00400000) == 0;
+    }
+
+    /** RISC-V {@code fclass.s}: a one-hot 10-bit classification of {@code bits}. */
+    private static int fclassS(int bits) {
+        boolean sign = bits < 0;
+        int exp = (bits >>> 23) & 0xff;
+        int mantissa = bits & 0x7fffff;
+        if (exp == 0xff) {
+            if (mantissa == 0) {
+                return sign ? (1 << 0) : (1 << 7); // -infinity : +infinity
+            }
+            return ((mantissa & 0x400000) != 0) ? (1 << 9) : (1 << 8); // quiet NaN : signaling NaN
+        }
+        if (exp == 0) {
+            if (mantissa == 0) {
+                return sign ? (1 << 3) : (1 << 4); // -0 : +0
+            }
+            return sign ? (1 << 2) : (1 << 5); // -subnormal : +subnormal
+        }
+        return sign ? (1 << 1) : (1 << 6); // -normal : +normal
+    }
+
+    /**
+     * RISC-V {@code feq.s}: quiet comparison. Only a signaling NaN operand sets {@code NV}; a
+     * quiet NaN operand silently makes the result false.
+     */
+    private static int fEqS(RV32IMAState state, int aBits, int bBits) {
+        if (isSignalingNaN32(aBits) || isSignalingNaN32(bBits)) {
+            state.fcsr |= FFLAGS_NV;
+        }
+        if (isNaN32(aBits) || isNaN32(bBits)) {
+            return 0;
+        }
+        return (Float.intBitsToFloat(aBits) == Float.intBitsToFloat(bBits)) ? 1 : 0;
+    }
+
+    /** RISC-V {@code flt.s}/{@code fle.s}: signaling comparisons — any NaN operand sets {@code NV}. */
+    private static int fCompareS(RV32IMAState state, int aBits, int bBits, boolean orEqual) {
+        if (isNaN32(aBits) || isNaN32(bBits)) {
+            state.fcsr |= FFLAGS_NV;
+            return 0;
+        }
+        float a = Float.intBitsToFloat(aBits);
+        float b = Float.intBitsToFloat(bBits);
+        return (orEqual ? (a <= b) : (a < b)) ? 1 : 0;
+    }
+
+    /**
+     * RISC-V {@code fmin.s}/{@code fmax.s}. Not {@link Math#min(float, float)}/{@link
+     * Math#max(float, float)}: those propagate NaN, where RISC-V returns the non-NaN operand
+     * (canonical NaN only when both are NaN), and {@code -0.0} must compare below {@code +0.0}.
+     */
+    private static int fMinMaxS(RV32IMAState state, int aBits, int bBits, boolean max) {
+        boolean aNaN = isNaN32(aBits);
+        boolean bNaN = isNaN32(bBits);
+        if (isSignalingNaN32(aBits) || isSignalingNaN32(bBits)) {
+            state.fcsr |= FFLAGS_NV;
+        }
+        if (aNaN && bNaN) {
+            return CANONICAL_NAN_BITS;
+        }
+        if (aNaN) {
+            return bBits;
+        }
+        if (bNaN) {
+            return aBits;
+        }
+        float a = Float.intBitsToFloat(aBits);
+        float b = Float.intBitsToFloat(bBits);
+        if (a == 0f && b == 0f) {
+            boolean aNegativeZero = (aBits & 0x80000000) != 0;
+            return (aNegativeZero == max) ? bBits : aBits;
+        }
+        return (max ? (a > b) : (a < b)) ? aBits : bBits;
     }
 
     // ---- RV32C (compressed instruction) support: Phase 4 ------------------------------------
@@ -463,6 +574,18 @@ public class RV32IMACore {
     }
 
     private int readCsr(RV32IMAState state, CSRHook csrHook, int csrno, long cycle) {
+        if (isaConfig.hasF()) {
+            switch (csrno) {
+                case 0x001:
+                    return state.fcsr & FFLAGS_MASK;
+                case 0x002:
+                    return (state.fcsr >>> FCSR_FRM_SHIFT) & FCSR_FRM_FIELD_MASK;
+                case 0x003:
+                    return state.fcsr & FCSR_MASK;
+                default:
+                    break;
+            }
+        }
         return switch (csrno) {
             case 0x340 -> state.mscratch;
             case 0x305 -> state.mtvec;
@@ -480,6 +603,22 @@ public class RV32IMACore {
     }
 
     private void writeCsr(RV32IMAState state, CSRHook csrHook, int csrno, int writeValue) {
+        if (isaConfig.hasF()) {
+            switch (csrno) {
+                case 0x001:
+                    state.fcsr = (state.fcsr & ~FFLAGS_MASK) | (writeValue & FFLAGS_MASK);
+                    return;
+                case 0x002:
+                    state.fcsr = (state.fcsr & ~(FCSR_FRM_FIELD_MASK << FCSR_FRM_SHIFT))
+                            | ((writeValue & FCSR_FRM_FIELD_MASK) << FCSR_FRM_SHIFT);
+                    return;
+                case 0x003:
+                    state.fcsr = writeValue & FCSR_MASK;
+                    return;
+                default:
+                    break;
+            }
+        }
         switch (csrno) {
             case 0x340:
                 state.mscratch = writeValue;
@@ -739,6 +878,29 @@ public class RV32IMACore {
                             }
                             break;
                         }
+                        case 0x07: // FLW
+                        {
+                            if (!isaConfig.hasF() || ((ir >> 12) & 0x7) != 2) {
+                                trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
+                                break;
+                            }
+                            int rs1 = state.regs[(ir >> 15) & 0x1f];
+                            int imm = ir >>> 20;
+                            int immSext = imm | (((imm & 0x800) != 0) ? 0xfffff000 : 0);
+                            int addr = rs1 + immSext;
+                            int fRd = rdid;
+                            rdid = 0;
+
+                            try {
+                                int bits = mem.readInt(
+                                        addr, new AccessContext(state.hartId, privilege, AccessKind.LOAD, 4, 0));
+                                writeFReg(state, fRd, bits);
+                            } catch (IndexOutOfBoundsException e) {
+                                trap = exceptionTrap(EXC_LOAD_ACCESS_FAULT);
+                                rval = addr;
+                            }
+                            break;
+                        }
                         case 0x03: // Load
                         {
                             int rs1 = state.regs[(ir >> 15) & 0x1f];
@@ -785,6 +947,31 @@ public class RV32IMACore {
                                 rval = addr;
                             }
                             // Note: C code had some MMIO checks here, but our MemoryBus handles it via MMIOBus
+                            break;
+                        }
+                        case 0x27: // FSW
+                        {
+                            if (!isaConfig.hasF() || ((ir >> 12) & 0x7) != 2) {
+                                trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
+                                break;
+                            }
+                            int rs1 = state.regs[(ir >> 15) & 0x1f];
+                            int fSrcBits = readFReg(state, (ir >> 20) & 0x1f);
+                            int imm = ((ir >> 7) & 0x1f) | ((ir & 0xfe000000) >> 20);
+                            if ((imm & 0x800) != 0) imm |= 0xfffff000;
+                            int addr = rs1 + imm;
+                            rdid = 0;
+
+                            try {
+                                mem.writeInt(
+                                        addr,
+                                        fSrcBits,
+                                        new AccessContext(state.hartId, privilege, AccessKind.STORE, 4, 0));
+                                state.reservationValid = false;
+                            } catch (IndexOutOfBoundsException e) {
+                                trap = exceptionTrap(EXC_STORE_ACCESS_FAULT);
+                                rval = addr;
+                            }
                             break;
                         }
                         case 0x23: // Store
@@ -964,6 +1151,100 @@ public class RV32IMACore {
                         case 0x0f: // FENCE
                             rdid = 0;
                             break;
+                        case 0x53: // OP-FP (Phase 5a subset; rounding-mode-dependent ops are Phase 5b)
+                        {
+                            if (!isaConfig.hasF()) {
+                                trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
+                                break;
+                            }
+                            // funct7 bits 26:25 are the "fmt" field (00=S, 01=D, 10=H, 11=Q); every
+                            // funct7 case below has fmt=00, so the exact match already rejects the
+                            // D/Q-format encodings of these same operations without a separate check.
+                            int funct7 = (ir >>> 25) & 0x7f;
+                            int fFunct3 = (ir >> 12) & 0x7;
+                            int fRs1 = (ir >> 15) & 0x1f;
+                            int fRs2 = (ir >> 20) & 0x1f;
+                            int fRd = rdid;
+                            int aBits = readFReg(state, fRs1);
+                            int bBits = readFReg(state, fRs2);
+
+                            switch (funct7) {
+                                case 0x10: // FSGNJ.S / FSGNJN.S / FSGNJX.S
+                                    rdid = 0;
+                                    switch (fFunct3) {
+                                        case 0:
+                                            writeFReg(state, fRd, (bBits & 0x80000000) | (aBits & 0x7fffffff));
+                                            break;
+                                        case 1:
+                                            writeFReg(state, fRd, (~bBits & 0x80000000) | (aBits & 0x7fffffff));
+                                            break;
+                                        case 2:
+                                            writeFReg(
+                                                    state, fRd, ((aBits ^ bBits) & 0x80000000) | (aBits & 0x7fffffff));
+                                            break;
+                                        default:
+                                            trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
+                                    }
+                                    break;
+                                case 0x14: // FMIN.S / FMAX.S
+                                    rdid = 0;
+                                    switch (fFunct3) {
+                                        case 0:
+                                            writeFReg(state, fRd, fMinMaxS(state, aBits, bBits, false));
+                                            break;
+                                        case 1:
+                                            writeFReg(state, fRd, fMinMaxS(state, aBits, bBits, true));
+                                            break;
+                                        default:
+                                            trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
+                                    }
+                                    break;
+                                case 0x50: // FLE.S / FLT.S / FEQ.S -- integer destination
+                                    switch (fFunct3) {
+                                        case 0:
+                                            rval = fCompareS(state, aBits, bBits, true);
+                                            break;
+                                        case 1:
+                                            rval = fCompareS(state, aBits, bBits, false);
+                                            break;
+                                        case 2:
+                                            rval = fEqS(state, aBits, bBits);
+                                            break;
+                                        default:
+                                            trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
+                                    }
+                                    break;
+                                case 0x70: // FMV.X.W / FCLASS.S -- integer destination
+                                    if (fRs2 != 0) {
+                                        trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
+                                        break;
+                                    }
+                                    switch (fFunct3) {
+                                        case 0:
+                                            rval = aBits;
+                                            break; // FMV.X.W
+                                        case 1:
+                                            rval = fclassS(aBits);
+                                            break; // FCLASS.S
+                                        default:
+                                            trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
+                                    }
+                                    break;
+                                case 0x78: // FMV.W.X -- rs1 is an INTEGER register here, not FP
+                                    if (fRs2 != 0 || fFunct3 != 0) {
+                                        trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
+                                        break;
+                                    }
+                                    rdid = 0;
+                                    writeFReg(state, fRd, state.regs[fRs1]);
+                                    break;
+                                default:
+                                    // Covers Phase 5b's rounding-mode-dependent opcodes (FADD/FSUB/FMUL/
+                                    // FDIV/FSQRT.S, FCVT.{W,WU}.S, FCVT.S.{W,WU}) until that phase lands.
+                                    trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
+                            }
+                            break;
+                        }
                         case 0x73: // SYSTEM
                         {
                             int csrno = ir >>> 20;

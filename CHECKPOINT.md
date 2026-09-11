@@ -63,13 +63,14 @@ Committed one-per-unit and pushed to `origin/main` (`0943a48`, `1d45c2b`, `1c324
 ## After the Cleanup Pass
 
 1. ~~Decide whether anything warrants a comprehensive review.~~ Done — no.
-2. **Release readiness → `RELEASE_TODO.md`** (R1–R8). **Recommendation: hold** — Central
-   artifacts are immutable and the public API is about to move under the feature-plan work
-   below; no rush cost since namespace registration (`com.alienspacebunny`, also
-   `us.n8l`) is already done. Revisit after Phase 1–2 land and an explicit API-freeze
-   review happens. Decisions locked meanwhile: publish `rv32emu-core` only; CLI fat jar
-   to GitHub Releases; JitPack covers any interim consumer. **Open: versioning scheme
-   (R2)** — `0.1.0` is hardcoded, no SNAPSHOT, no tags.
+2. **Release readiness → `RELEASE_TODO.md`** (R1–R8). **Central publish still on
+   hold** — immutable, and the public API is about to move under the feature-plan
+   work below; no rush cost since namespace registration (`com.alienspacebunny`,
+   also `us.n8l`) is already done. Revisit after Phase 1–2 land and an explicit
+   API-freeze review happens. **Versioning + local release mechanics are done**
+   (R5/R6, this session): `main` is `0.1.0-SNAPSHOT`, `maven-release-plugin` is
+   wired (tags `vX.Y.Z`, commits/tags locally only), `release.sh` fixed. Procedure
+   in `docs/RELEASING.md`. No release has actually been cut yet.
 3. Feature work per `docs/FEATURE_REQUEST_PLAN.md` r6. **Reviewed and conditionally
    signed off** by the originating LLM (`docs/PLAN_REVIEW_REQUEST.md` →
    `docs/PLAN_REVIEW_RESPONSE.md`, B1–B7). The one condition (real MSIP/MEIP delivery)

@@ -6,7 +6,7 @@
 
     <groupId>com.alienspacebunny</groupId>
     <artifactId>rv32emu-parent</artifactId>
-    <version>0.1.0</version>
+    <version>0.1.0-SNAPSHOT</version>
     <packaging>pom</packaging>
 
     <name>RV32IMA Emulator (parent)</name>
@@ -56,6 +56,7 @@
         <source.plugin.version>3.3.1</source.plugin.version>
         <junit.version>6.1.3</junit.version>
         <surefire.plugin.version>3.5.4</surefire.plugin.version>
+        <release.plugin.version>3.3.1</release.plugin.version>
     </properties>
 
     <dependencyManagement>
@@ -204,6 +205,30 @@
                         </goals>
                     </execution>
                 </executions>
+            </plugin>
+            <!--
+                maven-release-plugin: versions, tags, and builds a release from a git tag.
+                See docs/RELEASING.md for the step-by-step local release procedure.
+
+                `perform` currently runs `install`, not the default `deploy`: there is no
+                Maven Central deploy wired yet (RELEASE_TODO.md R1-R4 are deliberately on
+                hold). Change `goals` to `deploy` (or a dedicated release profile) once that
+                lands; until then this only installs the tagged build to the local repository.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-release-plugin</artifactId>
+                <version>${release.plugin.version}</version>
+                <configuration>
+                    <!-- All 3 poms share one version; don't prompt separately per module. -->
+                    <autoVersionSubmodules>true</autoVersionSubmodules>
+                    <tagNameFormat>v@{project.version}</tagNameFormat>
+                    <!-- Commit + tag locally only; pushing is a separate, explicit step. -->
+                    <pushChanges>false</pushChanges>
+                    <!-- perform builds from the local tag; it need not be pushed to origin first. -->
+                    <localCheckout>true</localCheckout>
+                    <goals>install</goals>
+                </configuration>
             </plugin>
         </plugins>
     </build>

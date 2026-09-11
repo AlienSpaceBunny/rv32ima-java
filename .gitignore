@@ -42,3 +42,11 @@ build/
 
 .claude/
 CONSOLE_PROJECT.md
+
+### maven-release-plugin working files (see docs/RELEASING.md) ###
+release.properties
+pom.xml.releaseBackup
+pom.xml.next
+pom.xml.tag
+pom.xml.branch
+pom.xml.backup

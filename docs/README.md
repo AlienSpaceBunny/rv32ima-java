@@ -10,9 +10,11 @@
 | [PLAN_REVIEW_REQUEST.md](PLAN_REVIEW_REQUEST.md) | Questions sent to the originating LLM to sign off FEATURE_REQUEST_PLAN.md r5. |
 | [PLAN_REVIEW_RESPONSE.md](PLAN_REVIEW_RESPONSE.md) | The originating LLM's answers (B1–B7); basis for r6 and the interrupt-gating fix. |
 | [TEST_PLAN.md](TEST_PLAN.md) | Test-suite expansion plan. Layers 1 & 2 done; Layer 3 (system-level scenarios) not started. |
+| [RELEASING.md](RELEASING.md) | Local versioning/tagging/build procedure (`maven-release-plugin`). Central publishing is a separate, on-hold step — see `../RELEASE_TODO.md`. |
 
-Rolling status lives in [`../CHECKPOINT.md`](../CHECKPOINT.md); the current cleanup pass is
-tracked in [`../CLEANUP_TODO.md`](../CLEANUP_TODO.md).
+Rolling status lives in [`../CHECKPOINT.md`](../CHECKPOINT.md). `../CLEANUP_TODO.md` is
+closed out (see its status table); `../RELEASE_TODO.md` tracks the current release-readiness
+work.
 
 ## Archive
 

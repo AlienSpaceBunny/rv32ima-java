@@ -45,8 +45,10 @@ See [Core API Contracts](docs/API.md) for the public integration contracts.
 ### Running the CLI Emulator
 
 ```bash
-java -jar cli/target/rv32emu-cli-0.1.0.jar -f path/to/image.bin [parameters]
+java -jar cli/target/rv32emu-cli-<version>.jar -f path/to/image.bin [parameters]
 ```
+
+(`<version>` matches the version in `pom.xml`, e.g. `0.1.0-SNAPSHOT`; or just `ls cli/target/*.jar`.)
 
 #### Parameters:
 - `-m [ram amount]`: Set the RAM size (default: 64MB).

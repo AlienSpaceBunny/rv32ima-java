@@ -3,9 +3,10 @@
 Follows the post-P0–P7 cleanup pass (`CLEANUP_TODO.md`, done). Goal: publish
 `rv32emu-core` to Maven Central and establish a repeatable manual release process.
 
-Baseline: `./mvnw clean verify` green — 259 core + 1 cli tests, SpotBugs/Checkstyle
-clean, CLI smoke passes, on JUnit 6.1.3. No git tags, no release history. Every
-commit on `main` currently claims version `0.1.0` (not a SNAPSHOT).
+Baseline: `./mvnw clean verify` green — 267 core + 1 cli tests, SpotBugs/Checkstyle
+clean, CLI smoke passes, on JUnit 6.1.3. No git tags, no release history yet, but
+`main` now carries `0.1.0-SNAPSHOT` and `maven-release-plugin` is wired (R5, done) —
+see `docs/RELEASING.md` for the local versioning/tagging/build procedure.
 
 ## Recommendation: not yet (2026-09-10)
 
@@ -42,15 +43,15 @@ Good sequence: land Phase 1–2 → API-freeze review → set up versioning + CI
 | What publishes to Central (eventually) | **`rv32emu-core` only.** |
 | CLI distribution | **`rv32emu-cli` fat jar → GitHub Releases** as an asset, not a Maven artifact. Avoids the duplicate-classes problem (shade bundles core's classes; a published cli POM would also declare core as a dependency). |
 | Interim dependency access | **JitPack**, on demand — no repo changes required. |
-| Versioning scheme | **UNRESOLVED — see R2.** Need to decide SemVer policy, SNAPSHOT-on-main, and pick the first published version. |
+| Versioning mechanics | **Done (R5).** `main` carries `0.1.0-SNAPSHOT`; `maven-release-plugin` handles the release/next-SNAPSHOT bump and `vX.Y.Z` tagging. See `docs/RELEASING.md`. |
 
 ## Open questions
 
-- **R2 versioning:** current state is `0.1.0` hardcoded in all three poms with no
-  tag. Proposed: `main` carries `0.2.0-SNAPSHOT`; release versions exist only on
-  annotated tags (`v0.2.0`); post-release bump commits the next `-SNAPSHOT`.
-  First Central release could be `0.1.0` (retroactive) or start at `0.2.0`.
-  **Needs Nate's call.**
+- **First release number:** the mechanics are wired, but no one has actually cut a
+  release yet, so `release:prepare` will currently default to releasing `0.1.0` and
+  bumping `main` to `0.1.1-SNAPSHOT`. Confirm that's the intended first version before
+  the first real (non-dry-run) `release:prepare` — pass `-DreleaseVersion=`/
+  `-DdevelopmentVersion=` explicitly to pick something else (see `docs/RELEASING.md`).
 - Does the published API count as stable (1.0.0) yet, or stay 0.x while the
   multi-hart feature work (`docs/FEATURE_REQUEST_PLAN.md`) lands? The feature plan
   is explicitly additive/backward-compatible, so 1.0.0 now is defensible.
@@ -103,25 +104,29 @@ inherit).
 - javadoc + source jars are already wired in the parent build — Central requires
   both; confirm they attach for `core`.
 
-## R5 — Versioning mechanics  *(code — needs R2 decision)*
+## R5 — Versioning mechanics  *(done)*
 
-- Move `main` to `<version>X.Y.Z-SNAPSHOT</version>` per R2.
-- Decide: hand-edit the version in the 3 poms, or adopt
-  `versions:set` / the `maven-release-plugin`. Checkpoint says "no automated
-  semantic versioning" — hand-edit + a documented checklist is the current intent.
+- `main` moved to `0.1.0-SNAPSHOT` in all 3 poms.
+- Adopted `maven-release-plugin` (not hand-edited versions) — supersedes the earlier
+  "no automated semantic versioning" checkpoint note. Configured `autoVersionSubmodules`,
+  `tagNameFormat=v@{project.version}`, `pushChanges=false`, `localCheckout=true`,
+  and `goals=install` on `perform` (no Central deploy wired yet — see R4).
+  `pom.xml.*`/`release.properties` working files gitignored.
+- Procedure documented in `docs/RELEASING.md` (supersedes this item's original scope,
+  which folds into R8 below).
 
-## R6 — Fix / replace `release.sh`  *(code)*
+## R6 — Fix `release.sh`  *(done)*
 
-Current `release.sh` is **weaker than `./mvnw clean verify`**: it runs
-`clean test` then `install -DskipTests`, so Spotless, Checkstyle, SpotBugs, and
-the packaged-CLI smoke test (all bound to `verify`) never run. It also hardcodes
-`0.1.0` jar paths twice.
+Was **weaker than `./mvnw clean verify`**: ran `clean test` then `install -DskipTests`,
+so Spotless, Checkstyle, SpotBugs, and the packaged-CLI smoke test (all bound to
+`verify`) never ran. Also hardcoded `0.1.0` jar paths twice, which the R5 SNAPSHOT
+bump would have broken outright.
 
-- [ ] Replace step 1+2 with `./mvnw clean verify` (single invocation, all gates).
-- [ ] Derive jar paths/version from the pom rather than hardcoding `0.1.0`.
-- [ ] Keep the baremetal rebuild + final validation run.
-- [ ] Add the deploy step (`./mvnw -Prelease deploy`) gated behind an explicit flag
-      or a separate script so a normal build never publishes.
+- [x] Replaced steps 1–2 with a single `./mvnw clean verify`.
+- [x] Jar paths now derived via `help:evaluate -Dexpression=project.version`.
+- [x] Kept the baremetal rebuild + final validation run.
+- [ ] Deploy step intentionally **not** added — `release.sh` validates a build, it
+      doesn't publish one; see R4/R8 for the eventual deploy path.
 
 ## R7 — CI workflow  *(new — no `.github/workflows/` exists)*
 
@@ -129,19 +134,22 @@ the packaged-CLI smoke test (all bound to `verify`) never run. It also hardcodes
 - Optional: a release workflow triggered on tag push that builds, signs, deploys
   to Central, and uploads the CLI fat jar to the GitHub Release.
 
-## R8 — Release-process document  *(doc — write after R1–R7 shape is known)*
+## R8 — Release-process document  *(partially done)*
 
-`docs/RELEASING.md`: branch/PR flow, version bump, changelog, tag naming (`vX.Y.Z`),
-which gates must be green, `-Prelease deploy`, Central Portal "publish" step,
-GitHub Release creation + CLI jar upload, post-release SNAPSHOT bump, smoke-test
-of the published artifact from a clean `~/.m2`.
+`docs/RELEASING.md` **done** for the local scope: version bump mechanics, tag naming
+(`vX.Y.Z`), which gates must be green, `release:prepare`/`release:perform`/`rollback`,
+GitHub push as an explicit final step. **Still open**, once R1/R2/R4 land: the Central
+Portal "publish" step, `-Prelease deploy`, GitHub Release creation + CLI jar upload
+(could be manual or via R7 CI), and a smoke-test of the *published* artifact from a
+clean `~/.m2` (distinct from `release:perform`'s local-install smoke test, which only
+proves the build, not that Central actually served it back).
 
 ---
 
 ## Suggested order
 
-1. **R3** (POM metadata) — no external dependency, unblocks nothing but needed anyway.
-2. **R2 decision** (Nate) → **R5** (SNAPSHOT on main).
-3. **R6** (release.sh) + **R7** (CI verify workflow) — independent of Central.
-4. **R1 + R2 keys** (Nate) → **R4** (deploy wiring), tested against a real staging deploy.
-5. **R8** (RELEASING.md) once the mechanics are proven end-to-end.
+1. ~~**R3** (POM metadata)~~ done. ~~**R5** (versioning) + **R6** (release.sh) + **R8**
+   local scope~~ done — see `docs/RELEASING.md`.
+2. **R7** (CI verify workflow) — independent of Central, no blocker.
+3. **R1 + R2 keys** (Nate) → **R4** (deploy wiring), tested against a real staging deploy.
+4. **R8** Central-publish section, once R4 is proven end-to-end.

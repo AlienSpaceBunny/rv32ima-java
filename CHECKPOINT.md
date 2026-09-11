@@ -31,7 +31,11 @@ Two tasks completed this session; a cleanup pass is now **in progress**.
 
 ---
 
-## Cleanup Pass (`CLEANUP_TODO.md`) — DONE in the working tree, NOT yet committed
+## Cleanup Pass (`CLEANUP_TODO.md`) — DONE, committed and pushed
+
+Commits (on `main`, pushed): `0943a48` docs (C1+C2) · `1d45c2b` checkstyle+renames (C3+C4) ·
+`1c3248d` named constants (C5) · `f14def6` API tidy (C6+C7) · `55f5c54` `.java-version`.
+The JUnit 6.1.3 bump is in `90f7997` (whose message misleadingly says ".java-version").
 
 | Item | What | Status |
 |---|---|---|

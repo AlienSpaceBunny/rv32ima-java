@@ -12,8 +12,9 @@ Work items in priority order.
 
 ## Status — 2026-09-10
 
-**C1–C7 all applied in the working tree; `./mvnw clean verify` green (259 core + 1 cli tests,
-SpotBugs/Checkstyle clean, CLI smoke passes). Not yet committed.**
+**C1–C7 all done, committed, and pushed to `main`; `./mvnw clean verify` green (259 core + 1
+cli tests, SpotBugs/Checkstyle clean, CLI smoke passes).** Commits: `0943a48` (C1+C2),
+`1d45c2b` (C3+C4), `1c3248d` (C5), `f14def6` (C6+C7).
 
 | Item | Status | Notes |
 |---|---|---|
@@ -25,8 +26,7 @@ SpotBugs/Checkstyle clean, CLI smoke passes). Not yet committed.**
 | C6 | Done | `MemoryBus.readIntSigned` removed |
 | C7 | Done | Both `catch (Exception)` sites narrowed |
 
-Remaining decision: commit granularity, and whether anything here warrants escalating to a
-comprehensive review (nothing surfaced that suggests it does).
+Nothing in the pass surfaced anything that warrants escalating to a comprehensive review.
 
 ---
 

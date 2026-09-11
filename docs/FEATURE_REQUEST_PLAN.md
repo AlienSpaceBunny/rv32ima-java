@@ -368,6 +368,40 @@ and recovery path (for example, a protected AP trap handler that signals the IOP
 application execution to U-mode. AP initialization alone does not keep application execution
 confined to U-mode across traps. Trap handling must remain within the AP's bus protection policy.
 
+### 8. F/D Forward Compatibility (baked in ahead of Phase 5)
+
+Before starting Phase 5 (F extension), Nate asked whether implementing F and D (double-precision)
+together now would be cheaper than F now, D later. Estimate (not measured): D's non-RNE rounding
+arithmetic doesn't inherit F's "compute in `double`, round once" shortcut (there's no wider
+primitive to hide behind for double-precision — directed/RMM rounding needs real correctly-rounded
+arithmetic, e.g. `Math.fma`-based error-free transformations), so the two extensions' hardest work
+doesn't share. Rough bands: F alone is the plan's existing **L**, at its low end given the
+float-via-double shortcut; D added later is ~0.7–0.9× of F; both together now is ~1.7–1.8× of F
+alone (shares `fcsr`/decode skeleton/register file/test harness, not the rounding work). Conclusion:
+**not meaningfully cheaper together — implement F now, defer D** — but three shape decisions are
+cheap to make now and avoid an API-breaking retrofit tax later (which would otherwise land on
+published API, not just effort, since `RV32IMAState.regs` is a public field and the precedent here
+is the same):
+
+1. **FP register file stored as `long[] fregs = new long[32]`, not `float[]`,** even though F alone
+   only ever needs the low 32 bits. Every FP-producing instruction NaN-boxes on write (sets the
+   upper 32 bits to all-ones, per the standard RISC-V convention for a register wider than the
+   value it holds), matching what a real `FLEN=64` implementation does; reads simply take the low
+   32 bits, since nothing under F-only decode can write an improperly-boxed value. `RV32IMAState`'s
+   existing style (`public final int[] regs`) means a later `float[]` → `long[]` migration would be
+   a breaking change for downstream consumers (V-32) rather than an internal refactor — this is
+   free to avoid now.
+2. **`IsaConfig.hasD` added now as a misa-only flag** (bit 3, the "D" letter), following exactly the
+   pattern `hasF` used from Phase 1 through Phase 4: it only changes the `misa()` value the guest
+   observes, and does not unlock any instruction decode. The record's compact constructor validates
+   `hasD ⇒ hasF` (D implies F per the RISC-V spec — there is no D-without-F configuration). Avoids
+   adding a third compatibility-constructor layer to `IsaConfig` when D is eventually decoded.
+3. **`MemoryBus.readLong`/`writeLong` (8-byte access, needed by `FLD`/`FSD`) is explicitly NOT
+   added now.** Unlike the two decisions above, this one has no consumer under F alone — `FLW`/`FSW`
+   are word-width and use the existing `readInt`/`writeInt` context-bearing overloads. Adding an
+   unused width to a public interface ahead of any caller is speculative surface, not free
+   forward-compatibility; it's deferred to whenever D is actually implemented.
+
 ---
 
 ## ISA Extension Implementation Details
@@ -509,8 +543,10 @@ half-word- but not word-aligned address is exercised). 400 core + 1 cli tests.
 
 Effort: **L**. Planned here at interface depth only; full decode design is deferred.
 
-**State additions (`RV32IMAState`):**
-- `float[] fregs = new float[32]` — FP register file.
+**State additions (`RV32IMAState`):** see Design Decision §8 for why the register file is
+`long`-backed even though only the low 32 bits are used under F alone.
+- `long[] fregs = new long[32]` — FP register file, NaN-boxed on every write (upper 32 bits set to
+  all-ones); reads take the low 32 bits.
 - `int fcsr` — FP control and status (bits 7–5: rounding mode `frm`; bits 4–0: accrued
   exception flags `fflags`).
 
@@ -533,6 +569,8 @@ arithmetic and are the primary source of F-extension test failures. Dedicated te
 each rounding mode and each `fflags` bit are required before declaring F complete.
 
 Guard with `IsaConfig.hasF`. All new opcodes with F disabled → illegal instruction trap.
+`IsaConfig.hasD` exists (misa-only, see Design Decision §8) but decodes nothing — D itself remains
+out of scope for this phase.
 
 ---
 

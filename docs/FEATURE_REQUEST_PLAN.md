@@ -3,6 +3,10 @@
 Revision: **r6**, 2026-09-10. See [PLAN_REVIEW_RESPONSE.md](PLAN_REVIEW_RESPONSE.md)
 for the application-context review of r5 and answers B1–B7.
 
+**Implementation progress:** Phase 2 item 7 (interrupt gating fix, MSIP/MEIP dispatch,
+`injectInterrupt`) is done — see the inline "done" notes in §6/§7 and the Staging Plan. Rolling
+status lives in [`../CHECKPOINT.md`](../CHECKPOINT.md).
+
 ## Overall Verdict
 
 The requested feature set is **fully implementable** within the current architecture. Nothing in the
@@ -30,7 +34,7 @@ Estimated relative effort (rough):
 | ISA config + hart ID | P1 | XS |
 | Instruction-fetch fault via bus | P1 | XS |
 | U-mode CSR access privilege check | P1 | XS |
-| Interrupt injection and MSIP/MEIP delivery | P1 | S |
+| Interrupt injection and MSIP/MEIP delivery | P1 | S — **done** (`5620de0`) |
 | Bus access metadata (AccessContext) | P1 | S |
 | `atomicRmw` + `tryScAndStore` / bus-internal tracking | P1 | M |
 | Zba (3 instructions) | P2 | XS |
@@ -261,13 +265,15 @@ must be called while holding whatever synchronization guards the AP's `RV32IMASt
 including execution through `step()`. Pending-bit clearing/acknowledgement uses the same
 synchronization. No callback or synchronous trap delivery inside the helper is required.
 
-**Required Phase 2 delivery work:** the current core dispatches only MTIP. Extend dispatch
-for MSIP and MEIP with their correct interrupt causes and architectural priority, preserving
-core-managed MTIP updates without losing other pending bits. Wakeup is not delivery: after
-injection, the execution path must actually take an eligible interrupt, and pending interrupts
-must be reevaluated at the architectural points required by changes to interrupt controls and
-trap return. Verify masked interrupts remain pending and acknowledgement prevents repeated
-unwanted delivery. Use the privilege-dependent gating rules in §7.
+**Required Phase 2 delivery work — done (`5620de0`).** MSIP/MEIP dispatch (constants
+`MIP_MSIP`/`MIP_MEIP`, causes `INT_MACHINE_SOFTWARE`/`INT_MACHINE_EXTERNAL`) and
+`RV32IMACore.injectInterrupt(state, bit)` landed ahead of the rest of Phase 2, since it was a
+defect in already-shipped behavior (see §7) rather than new multi-hart surface. Priority is
+external > software > timer, gated by the corrected rule in §7. `CoreTest` covers delivery,
+non-delivery when disabled, U-vs-M-mode gating, three-way priority, and the injection helper's
+pending-bit-set + WFI-wake behavior. Pending-bit acknowledgement is exercised only via manual
+`mip` clears in tests, not yet against a real mailbox device — that remains Phase 2 integration
+work.
 
 ### 7. Privilege-Mode Semantics
 
@@ -300,12 +306,14 @@ sets `mcause = 8`. Already correct at line 489.
 **Trap entry (existing).** All traps and interrupts enter M-mode unconditionally (`extraflags |= 3`),
 saving the prior privilege in `mstatus.MPP`. Already correct at line 621.
 
-**Interrupt gating (new fix).** For this U/M-only core, a pending machine interrupt is
+**Interrupt gating — done (`5620de0`).** For this U/M-only core, a pending machine interrupt is
 eligible when its bit is set in both `mip` and `mie`, and either execution is in U-mode or
-execution is in M-mode with `mstatus.MIE = 1`. Do not require `mstatus.MIE` while running
-U-mode. The existing timer model's `mtimecmp != 0` condition concerns generation of MTIP;
-it must not gate software/external interrupts. See the
-[machine interrupt rules](https://docs.riscv.org/reference/isa/priv/machine.html).
+execution is in M-mode with `mstatus.MIE = 1`. `mstatus.MIE` is not required while running
+U-mode. The existing timer model's `mtimecmp != 0` condition concerns generation of MTIP only;
+it does not gate software/external interrupts. See the
+[machine interrupt rules](https://docs.riscv.org/reference/isa/priv/machine.html). This was a
+latent defect in already-shipped code (nothing previously ran below M-mode to trigger it), not
+new behavior — see `RV32IMACore.java` and `CoreTest` for the fix and its regression coverage.
 
 **AP / IOP privilege assignment.** The embedder sets `state.extraflags & 3` before first use:
 `0` for AP (U-mode), `3` for IOP (M-mode). The core does not configure this — it is embedder
@@ -445,8 +453,9 @@ The following order is recommended. Each step is independently committable and t
    → illegal-instruction trap.
 6. Add `AccessContext` record and `AccessKind` enum; add default-method overloads to
    `MemoryBus`; plumb context through all core load/store/fetch calls.
-7. Add `injectInterrupt`, MSIP/MEIP delivery, acknowledgement documentation, and the
-   privilege-dependent interrupt gating fix (§6–§7).
+7. ~~Add `injectInterrupt`, MSIP/MEIP delivery, and the privilege-dependent interrupt gating
+   fix (§6–§7).~~ **Done (`5620de0`)**, landed ahead of the rest of this phase as a standalone
+   correctness fix. Acknowledgement against a real mailbox device is still open (§6).
 8. Add `atomicRmw` default method to `MemoryBus`; route all AMO instructions through it.
 9. Add `tryScAndStore` default method to `MemoryBus`; route SC.W through it (core retains
    local fast-path reservation check in state; bus makes final atomic decision for multi-hart).

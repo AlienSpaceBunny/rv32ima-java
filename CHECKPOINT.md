@@ -7,7 +7,11 @@ source jars) in place. Public API Javadoc **done** (commits `b8a1fa8`, `a6e5fa7`
 test layers 1 & 2 **done** (`3c9be5b`, `22c0e30`) — 259 core + 1 cli tests.
 
 JUnit 6.1.3 upgrade, architectural review, and the C1–C7 cleanup pass are all done and
-pushed. Next up: release readiness (`RELEASE_TODO.md`).
+pushed. Release readiness is documented but deliberately paused (`RELEASE_TODO.md`) — no
+Central publish until after multi-hart Phase 1–2. `docs/FEATURE_REQUEST_PLAN.md` r6 has
+been reviewed and conditionally signed off by the originating LLM (`docs/PLAN_REVIEW_RESPONSE.md`);
+the one condition (real MSIP/MEIP interrupt delivery, not just injection) is now done
+(`5620de0`). Feature-plan implementation can proceed.
 
 ---
 
@@ -59,14 +63,44 @@ Committed one-per-unit and pushed to `origin/main` (`0943a48`, `1d45c2b`, `1c324
 ## After the Cleanup Pass
 
 1. ~~Decide whether anything warrants a comprehensive review.~~ Done — no.
-2. **Release readiness → `RELEASE_TODO.md`** (R1–R8). Decisions locked: keep groupId
-   `com.alienspacebunny` (Nate owns the domain, Central Portal registration started);
-   publish `rv32emu-core` only; CLI fat jar goes to GitHub Releases. **Open: versioning
-   scheme (R2)** — `0.1.0` is hardcoded, no SNAPSHOT, no tags; needs Nate's call.
-3. Feature work per `docs/FEATURE_REQUEST_PLAN.md` (multi-hart Phase 1 — `IsaConfig`,
-   `hartId`, instruction-fetch fault fix, U-mode CSR privilege check). **Not yet
-   implementation-ready**: the plan's own "Combined Review Notes" list 6 consistency
-   fixes, and OQ-1 ("Zab" naming) is still open pending the originating LLM.
+2. **Release readiness → `RELEASE_TODO.md`** (R1–R8). **Recommendation: hold** — Central
+   artifacts are immutable and the public API is about to move under the feature-plan work
+   below; no rush cost since namespace registration (`com.alienspacebunny`, also
+   `us.n8l`) is already done. Revisit after Phase 1–2 land and an explicit API-freeze
+   review happens. Decisions locked meanwhile: publish `rv32emu-core` only; CLI fat jar
+   to GitHub Releases; JitPack covers any interim consumer. **Open: versioning scheme
+   (R2)** — `0.1.0` is hardcoded, no SNAPSHOT, no tags.
+3. Feature work per `docs/FEATURE_REQUEST_PLAN.md` r6. **Reviewed and conditionally
+   signed off** by the originating LLM (`docs/PLAN_REVIEW_REQUEST.md` →
+   `docs/PLAN_REVIEW_RESPONSE.md`, B1–B7). The one condition (real MSIP/MEIP delivery)
+   is done. Remaining before/during implementation:
+   - AP-to-IOP trap notification (B7): the emulator repo, not this one, needs a
+     deliberate mechanism — AP traps enter M-mode *on the AP hart* and do not
+     auto-notify the IOP. Nothing to do here; flagged for Nate.
+   - Cross-hart LR/SC reservations must key off *translated* backing addresses (B3),
+     since AP/IOP use different bus wrappers — a real design point for Phase 2, not yet
+     coded.
+   - `aq`/`rl` memory-ordering semantics are explicitly out of `AccessContext`'s scope
+     (B6) — acceptable only if the eventual bus implementation supplies stronger
+     ordering; flag before declaring shared-memory IPC safe.
+   - Start with Phase 1 (`IsaConfig`, `hartId`, instruction-fetch-fault fix, `misa` from
+     config) — independently committable, no multi-hart bus design needed yet.
+
+---
+
+## Interrupt Gating Fix (`5620de0`) — done
+
+While triaging the plan review, verified two real (if latent) defects directly in
+`RV32IMACore.step()`, not hypothetical future ones: only `MTIP` was ever dispatched, and
+`mstatus.MIE` unconditionally gated it — wrong per the RISC-V priv spec, which says
+`mstatus.MIE` masks machine interrupts only while executing in machine mode. Dormant until
+now because `Main.java` always runs the CLI in machine mode.
+
+- Added `MIP_MSIP`/`MIP_MEIP`, `INT_MACHINE_SOFTWARE`/`INT_MACHINE_EXTERNAL`, and
+  `RV32IMACore.injectInterrupt(state, bit)`.
+- Corrected gating rule + external > software > timer priority.
+- 8 new `CoreTest` cases (267 total, was 259). `./mvnw clean verify` green.
+- `docs/FEATURE_REQUEST_PLAN.md` and `docs/API.md` updated with "done" markers.
 
 ---
 

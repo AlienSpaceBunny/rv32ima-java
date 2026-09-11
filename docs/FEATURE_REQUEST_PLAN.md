@@ -1,21 +1,25 @@
 # Feature Request Plan: V-32 AP/IOP Support
 
+Revision: **r6**, 2026-09-10. See [PLAN_REVIEW_RESPONSE.md](PLAN_REVIEW_RESPONSE.md)
+for the application-context review of r5 and answers B1–B7.
+
 ## Overall Verdict
 
 The requested feature set is **fully implementable** within the current architecture. Nothing in the
 request requires redesigning the core; it requires extending it in well-defined, layered increments.
 The base `RV32IMA_Zicsr` use case is preserved throughout: new ISA features gate on a config
-object, new bus callbacks have backward-compatible defaults, and all existing embedder code
-compiles and behaves identically without changes.
+object, new bus callbacks have backward-compatible defaults, and existing embedder code remains
+source-compatible. Correctness fixes to faults,
+privilege checks, and interrupt delivery intentionally correct prior behavior.
 
 The work is organized into three ordered priority lanes. Later lanes do not unblock earlier ones
 and may be deferred, but each lane is internally ordered.
 
 - **P1 — Safe multi-hart operation (top priority):** ISA config, hart ID, fetch-fault fix,
   privilege-mode semantics (U-mode CSR access fix), AccessContext bus metadata, interrupt
-  injection, `atomicRmw`, `tryScAndStore`/`ReservationTable`. Unblocks the AP/IOP interrupt and
-  synchronized MMIO mailbox path.
-- **P2 — Non-F ISA extensions:** C (compressed), Zba, Zbb, optional Zabha. Valuable ISA
+  injection and delivery, `atomicRmw`, `tryScAndStore` plus bus-internal reservation tracking.
+  Unblocks the AP/IOP interrupt and synchronized MMIO mailbox path.
+- **P2 — Non-F ISA extensions:** C (compressed), Zba, Zbb, Zabha. Valuable ISA
   coverage but not prerequisites for safe AP/IOP operation.
 - **P3 — AP-only floating-point:** F extension. Largest effort, deferred to a separate phase.
 
@@ -26,39 +30,32 @@ Estimated relative effort (rough):
 | ISA config + hart ID | P1 | XS |
 | Instruction-fetch fault via bus | P1 | XS |
 | U-mode CSR access privilege check | P1 | XS |
-| Interrupt injection API | P1 | XS |
+| Interrupt injection and MSIP/MEIP delivery | P1 | S |
 | Bus access metadata (AccessContext) | P1 | S |
-| `atomicRmw` + `tryScAndStore` / ReservationTable | P1 | M |
+| `atomicRmw` + `tryScAndStore` / bus-internal tracking | P1 | M |
 | Zba (3 instructions) | P2 | XS |
 | Zbb (~18 instructions) | P2 | S |
-| Zabha sub-word AMOs (if confirmed) | P2 | S |
+| Zabha sub-word AMOs | P2 | S |
 | C extension (fetch loop refactor) | P2 | M |
 | F extension (new register file + ~50 instrs) | P3 | L |
 
 ---
 
-## Open Questions
+## Confirmed Scope
 
-### OQ-1: "Zab" naming
+B1 resolves the original “Zab” ambiguity as **Zabha byte/halfword AMOs**:
+`AMO[ADD|AND|OR|XOR|SWAP|MIN[U]|MAX[U]].[B|H]`. Sub-word LR/SC
+(`LR.B`, `LR.H`, `SC.B`, `SC.H`) is excluded. Word LR/SC remains available for
+shared-memory synchronization. Zba and Zbb remain separately in scope.
+See the [ratified Zabha specification](https://docs.riscv.org/reference/isa/v20260120/unpriv/zabha.html).
 
-The feature request uses the name "Zab", which is not a standard RISC-V extension name.
-Three likely intended meanings, with different scope and effort:
+Zabha is independently configurable but is confirmed implementation scope, not
+an unresolved option. Mailbox v1 requires none of C, Zba, Zbb, Zabha, or F.
+The application's current guest build uses `rv32ima_zicsr` / `ilp32`, so F can
+remain last and C can follow the integer extensions.
 
-| Candidate | What it adds | Effort |
-|---|---|---|
-| **Zba** | Address generation: `SH1ADD`, `SH2ADD`, `SH3ADD` | XS (3 instrs) |
-| **Zba + Zbb** | Both bit-manipulation extensions | S combined |
-| **Zabha** | Byte/halfword AMOs: `AMOADD.B/H`, `AMOSWAP.B/H`, etc. | S (extends existing AMO decoder) |
-
-"Zba" and "Zbb" are both ratified. "Zabha" (byte/halfword AMOs) was ratified in 2024.
-Sub-word LR/SC (`LR.B`, `LR.H`, `SC.B`, `SC.H`) is **not** part of any ratified RISC-V spec
-as of 2025 and is excluded from this plan unless explicitly requested.
-
-**Action:** Confirm with the originating LLM whether all three are needed or only Zba+Zbb.
-This plan designs for all three but treats Zabha as independently optional. The specific
-questions for that review are in [`PLAN_REVIEW_REQUEST.md`](PLAN_REVIEW_REQUEST.md) (B1);
-`Zba` and `Zbb` are named explicitly in the request, so only the byte/halfword-atomic scope
-(Zabha, and whether unratified sub-word LR/SC is expected) is actually open.
+The review accepts the API boundaries and phasing. Phase 2 must include actual
+software/external interrupt delivery, not just pending-bit injection and WFI wakeup.
 
 ---
 
@@ -68,7 +65,7 @@ The current `step()` loop does not wrap `mem.readInt(pc)` in a try/catch. An
 `IndexOutOfBoundsException` from a fetch would propagate uncaught to the caller rather than
 converting to an instruction access-fault trap (cause 1). This is a latent correctness issue
 today and is directly blocking for the AP MPU model (IOP must be able to reject AP instruction
-fetches with the correct guest trap). Fixing this is a prerequisite for Track A.
+fetches with the correct guest trap). Fixing this is a prerequisite for P1.
 
 **Fix:** Wrap the fetch call in try/catch, convert `IndexOutOfBoundsException` → `trap = 1 + 1`
 (the codebase's `+1` internal encoding for instruction access-fault; `mcause` receives `1` after
@@ -109,7 +106,8 @@ for base configs.
 
 Add `int hartId` to `RV32IMAState` (defaults to 0). The embedder sets it before first use.
 The core passes `hartId` through to access-context callbacks (see §3). No other core behavior
-depends on the hart ID; it is purely an observable label.
+depends on the hart ID internally; the bus uses it as a reservation-owner identity.
+Embedders must assign distinct, stable IDs to concurrently participating harts.
 
 ### 3. Bus Access Metadata — `AccessContext` via Default Method Overloads
 
@@ -132,10 +130,15 @@ default void   writeInt  (int addr, int   v, AccessContext ctx) { writeInt(addr,
 
 The core calls the context-bearing versions internally; all existing `MemoryBus` implementations
 continue to work without modification because the defaults delegate to the no-context methods.
-An embedder implementing the AP MPU overrides the context-bearing versions only.
+An embedder implementing the AP MPU supplies the legacy interface methods and overrides
+the context-bearing versions for enforcement. Bus wrappers must preserve context and forward
+atomic primitives, rather than accidentally falling back to split read/write defaults.
 
 Access faults are still signalled by throwing `IndexOutOfBoundsException` from any version of the
-method; the core's existing catch paths convert this to the correct trap.
+method; the core converts it to the correct guest trap, including the new fetch catch path.
+Preserve the guest logical fault address for `mtval`, even when the bus translates it.
+LR faults are load access faults; SC and other AMO faults are store/AMO access faults.
+`width` is the guest access width in bytes (1, 2, or 4); authorize the entire range.
 
 The `privilege` field in `AccessContext` is the hart's current privilege level (from
 `extraflags & 3`). The `atomicOp` field is the `funct5` encoding for AMOs, or 0 for
@@ -145,6 +148,13 @@ The `atomicOp` field is also the signal a multi-hart bus uses to register LR.W r
 `ctx.kind == AMO && ctx.atomicOp == 2` identifies a load-reserve, allowing the bus override
 of `readInt(addr, ctx)` to record `(ctx.hartId, addr)` in its private cross-hart table without
 any additional parameter on the call.
+
+The record is sufficient for the V-32 MPU but does not carry `aq`/`rl` ordering bits.
+Before declaring shared-memory IPC safe, the core/bus implementation must document and verify
+how it honors guest acquire/release and FENCE ordering for ordinary payload accesses as well
+as atomic queue metadata. A sufficiently stronger ordering implementation permits keeping this
+record shape. Per-granule exclusion alone is not a payload-publication guarantee; if stronger
+ordering is not supplied, the ordering interface must be extended before that milestone.
 
 ### 4. AMO Atomicity — `atomicRmw` Bus Primitive
 
@@ -156,7 +166,7 @@ but it breaks cross-hart AMO correctness.
 Add an optional bus primitive:
 
 ```java
-// On MemoryBus — default is non-atomic, existing implementations unaffected:
+// On MemoryBus — word-operation sketch; atomic correctness is single-hart-only:
 default int atomicRmw(int addr, int funct5, int operand, AccessContext ctx) {
     int old = readInt(addr, ctx);
     int result = computeAmo(funct5, old, operand); // extracted helper
@@ -170,6 +180,9 @@ implementation overrides `atomicRmw` to hold a per-granule lock around the read-
 AND the invalidation of any overlapping LR/SC reservations in its internal reservation table
 (see §5). The default preserves today's single-hart behavior; no `ReservationTable` parameter
 is needed because cross-hart coordination is owned by the bus, not exposed through `step()`.
+The default does not provide multi-hart atomic correctness. A multi-hart implementation must
+coordinate all overlapping accesses, including ordinary reads/writes, with the atomic operation.
+The sketch above is for words; Zabha requires width-aware dispatch as described below.
 
 ### 5. Cross-Hart LR/SC Reservations
 
@@ -185,18 +198,22 @@ and requires no new parameter on `step()`.
 - `LR.W`: the core reads through the bus with `ctx.kind == AMO && ctx.atomicOp == 2` (LR's
   funct5). The core records the reservation locally in `state`. A multi-hart bus override also
   records `(ctx.hartId, addr)` in its own private `ReservationTable` on this same call, keyed
-  by the context it already receives.
-- `SC.W`: the core checks `state.reservationValid` as a fast-path local pre-check. If false,
-  returns failure immediately (no bus call). If true, calls
+  by the context it already receives. Reading the value and registering the reservation must
+  occur in one critical section ordered against competing stores.
+- `SC.W`: the core checks `state.reservationValid` and the reserved address as a local pre-check.
+  If either check fails, it returns failure immediately (no bus call). If both pass, it calls
   `mem.tryScAndStore(hartId, addr, value, ctx)` — the bus makes the final atomic decision,
   checking its private table under a granule lock. The bus may reject even if the local state
-  says valid (cross-hart invalidation happened between the LR and SC). After a successful store,
-  the core clears `state.reservationValid`.
+  says valid (cross-hart invalidation happened between the LR and SC). After every SC attempt,
+  successful or unsuccessful, the core clears `state.reservationValid`; a bus-side SC attempt
+  also consumes its tracked reservation regardless of success.
 - `AMO`: core calls `mem.atomicRmw(...)`. The bus override holds the granule lock, performs the
   RMW, and invalidates any overlapping reservation entries in its private table atomically.
-- **Plain stores**: the bus's `writeInt(addr, value, ctx)` override (with `ctx.kind == STORE`)
-  automatically invalidates matching entries in its private table. The core requires no explicit
-  invalidation call for plain stores.
+- **Plain stores**: the bus's `writeByte`, `writeShort`, and `writeInt` overrides invalidate
+  overlapping reservations. The write and invalidation occur under the same per-granule lock
+  used by `tryScAndStore`. A competing overlapping store ordered between LR and SC must cause
+  that SC to fail; a store before LR does not require failure. Future DMA/host writes to shared
+  IPC memory must participate in this protocol too.
 - Single-hart use: `tryScAndStore` default just writes; bus does not override; behavior is
   identical to today.
 
@@ -212,6 +229,12 @@ default int tryScAndStore(int hartId, int addr, int value, AccessContext ctx) {
 
 `step()` gains no new parameter for this mechanism. Cross-hart reservation management is
 entirely encapsulated in the bus implementation.
+
+V-32 has distinct AP/IOP bus wrappers, not identical address views. AP logical RAM addresses
+are translated before coordination. Both paths must converge on one reservation/locking domain
+keyed by backing-memory identity and translated physical granule. Sharing an allocation alone
+is insufficient. MPU remapping/reset must not allow stale reservations to authorize an SC in a
+new mapping; the embedder must invalidate affected reservations as part of that transition.
 
 ### 6. Interrupt Injection API
 
@@ -234,7 +257,17 @@ Document standard interrupt bit assignments:
 - Bit 11: external interrupt (MEIP)
 
 For a multi-threaded host where Hart 0 (IOP) injects an interrupt into Hart 1 (AP), this method
-must be called while holding whatever synchronization guards the AP's `RV32IMAState`.
+must be called while holding whatever synchronization guards the AP's `RV32IMAState`,
+including execution through `step()`. Pending-bit clearing/acknowledgement uses the same
+synchronization. No callback or synchronous trap delivery inside the helper is required.
+
+**Required Phase 2 delivery work:** the current core dispatches only MTIP. Extend dispatch
+for MSIP and MEIP with their correct interrupt causes and architectural priority, preserving
+core-managed MTIP updates without losing other pending bits. Wakeup is not delivery: after
+injection, the execution path must actually take an eligible interrupt, and pending interrupts
+must be reevaluated at the architectural points required by changes to interrupt controls and
+trap return. Verify masked interrupts remain pending and acknowledgement prevents repeated
+unwanted delivery. Use the privilege-dependent gating rules in §7.
 
 ### 7. Privilege-Mode Semantics
 
@@ -267,13 +300,20 @@ sets `mcause = 8`. Already correct at line 489.
 **Trap entry (existing).** All traps and interrupts enter M-mode unconditionally (`extraflags |= 3`),
 saving the prior privilege in `mstatus.MPP`. Already correct at line 621.
 
-**Interrupt gating (existing).** Interrupts are only delivered when `mstatus.MIE = 1` and the
-corresponding bit in `mie` is set. Timer interrupt additionally requires `mtimecmp != 0`. All
-correct.
+**Interrupt gating (new fix).** For this U/M-only core, a pending machine interrupt is
+eligible when its bit is set in both `mip` and `mie`, and either execution is in U-mode or
+execution is in M-mode with `mstatus.MIE = 1`. Do not require `mstatus.MIE` while running
+U-mode. The existing timer model's `mtimecmp != 0` condition concerns generation of MTIP;
+it must not gate software/external interrupts. See the
+[machine interrupt rules](https://docs.riscv.org/reference/isa/priv/machine.html).
 
 **AP / IOP privilege assignment.** The embedder sets `state.extraflags & 3` before first use:
 `0` for AP (U-mode), `3` for IOP (M-mode). The core does not configure this — it is embedder
-responsibility.
+responsibility. AP exceptions and interrupts enter M-mode on the AP hart; they do not
+transfer execution or trap state to the IOP. The emulator must provide a deliberate notification
+and recovery path (for example, a protected AP trap handler that signals the IOP) and return
+application execution to U-mode. AP initialization alone does not keep application execution
+confined to U-mode across traps. Trap handling must remain within the AP's bus protection policy.
 
 ---
 
@@ -312,13 +352,20 @@ Java standard library provides efficient hardware-backed implementations for the
 
 The `legalEncoding` guard must be relaxed for these funct7 values when `IsaConfig.hasZbb`.
 
-### Zabha (Byte/Halfword AMOs — conditional on OQ-1)
+### Zabha (Byte/Halfword AMOs — confirmed scope)
 
 Extend the existing AMO decoder at opcode `0x2F`. Currently funct3 must be 2 (word). Zabha
 adds funct3 0 (byte) and 1 (halfword) with the same funct5 operations. Byte/halfword AMOs
-require read-modify-write with sub-word masking:
-- Read full word, mask the target byte/halfword, apply operation, write back.
-- The `atomicRmw` bus primitive handles synchronization.
+require width-aware `atomicRmw` handling:
+
+- Preserve byte/halfword width through authorization and MMIO dispatch.
+- A containing-word RMW with masking is allowed only as an internal RAM technique that
+  preserves neighboring bytes, synchronization, and guest access/fault semantics. Do not widen
+  MMIO accesses or bypass MPU boundaries.
+- Use the low operand bits, perform signed/unsigned comparisons at the selected width, and
+  sign-extend the old byte/halfword returned in `rd`. Enforce natural alignment.
+- The bus primitive handles synchronization with overlapping word LR/SC and all store widths.
+  No byte/halfword LR/SC is introduced.
 
 Guard with `IsaConfig.hasZabha`. No fetch or state changes.
 
@@ -398,24 +445,28 @@ The following order is recommended. Each step is independently committable and t
    → illegal-instruction trap.
 6. Add `AccessContext` record and `AccessKind` enum; add default-method overloads to
    `MemoryBus`; plumb context through all core load/store/fetch calls.
-7. Add `injectInterrupt` helper; document MSIP/MEIP bit assignments.
+7. Add `injectInterrupt`, MSIP/MEIP delivery, acknowledgement documentation, and the
+   privilege-dependent interrupt gating fix (§6–§7).
 8. Add `atomicRmw` default method to `MemoryBus`; route all AMO instructions through it.
 9. Add `tryScAndStore` default method to `MemoryBus`; route SC.W through it (core retains
    local fast-path reservation check in state; bus makes final atomic decision for multi-hart).
 10. Define `ReservationTable` as a bus-internal type; document how a multi-hart bus override
     manages it privately via `readInt` (LR detection), `tryScAndStore`, `atomicRmw`, and
-    `writeInt` overrides. `step()` gains no new parameter.
+    all store-width overrides. Cover translated aliases, indivisible LR registration, and
+    SC reservation consumption. Specify the memory-ordering contract in §3.
+    `step()` gains no new parameter.
 
-At the end of Phase 2, interrupt-capable synchronized MMIO mailboxes are fully supported
-(covering the mailbox v1 path from the feature request's "Current Workaround"). Cross-hart
-LR/SC and AMO correctness are also complete, providing the foundation for future shared-memory
-IPC queues; mailbox v1 does not depend on guest atomics.
+At the end of Phase 2, the core supplies the processor support for interrupt-capable
+synchronized MMIO mailboxes. The emulator supplies the mailbox device, synchronization,
+acknowledgement, and AP trap/IOP notification path. No later ISA phase is required for mailbox v1.
+Cross-hart LR/SC and AMO correctness requires a conforming multi-hart bus implementation and
+verification of the ordering contract; adding default methods alone does not establish it.
 
 ### Phase 3 — Integer ISA Extensions (P2)
 
 11. Zba (3 instructions in OP decode).
 12. Zbb (~18 instructions; extend OP/OP-IMM decode, update `legalEncoding` guard).
-13. Zabha byte/halfword AMOs (conditional on OQ-1 answer; extend AMO decoder).
+13. Zabha byte/halfword AMOs (confirmed; extend AMO decoder and width-aware bus handling).
 
 ### Phase 4 — Compressed Instructions (P2)
 
@@ -432,11 +483,11 @@ IPC queues; mailbox v1 does not depend on guest atomics.
 All changes are additive with respect to the existing public API:
 
 - `RV32IMACore()` zero-arg constructor preserved; internally uses `IsaConfig.RV32IMA_ZICSR`
-  as default, identical to current behavior.
+  as default, preserving the base ISA configuration while applying the correctness fixes above.
 - `MemoryBus` implementations are unaffected; new context-bearing methods have defaults.
 - `RV32IMAState` gains new fields (`hartId`, `fregs`, `fcsr`) at zero/null defaults.
-- `step()` signature gains one new optional parameter (`ReservationTable`); existing callers
-  use an overload that passes `null`.
+- `step()` remains source-compatible with no new reservation parameter. Cross-hart
+  reservation coordination is implemented by bus overrides.
 - `misa` CSR value will change for non-base configs; for the default config it stays
   `0x40401101`.
 
@@ -450,15 +501,23 @@ without modification after each phase.
 Each phase should be verified before the next begins:
 
 - **Phase 1:** `mvn test` passes; `misa` value reflects config for a constructed extended core.
-- **Phase 2:** Unit test: two `RV32IMAState` instances sharing a `ReservationTable` and an
-  `atomicRmw`-aware `MemoryBus`; verify LR/SC cross-hart invalidation and AMO ordering.
-  Interrupt injection test: inject MEIP while core is in WFI; verify WFI flag clears.
-  AccessContext test: custom `MemoryBus` asserts `hartId`, `privilege`, `kind` per access.
-  Privilege tests: U-mode CSR access raises illegal-instruction trap; `ECALL` from U-mode sets
-  `mcause = 8`; `MRET` correctly restores prior privilege level and `MIE`; `mie`/`mip`/
-  `mstatus.MIE` gating blocks and delivers interrupts as expected.
+- **Phase 2:** Two states share a multi-hart-aware bus with private reservation tracking,
+  including AP/IOP wrappers that alias the same translated physical RAM. Verify LR detection
+  via `ctx.kind == AMO && ctx.atomicOp == 2`, indivisible read/reservation registration,
+  `atomicRmw`, `tryScAndStore`, and byte/halfword/word store-vs-SC races. Verify local SC address
+  checking and reservation consumption on success and failure. Verify ordinary payload
+  publication under the documented acquire/release/FENCE ordering contract.
+  Interrupt tests must check actual MSIP/MEIP trap delivery and causes, not just WFI clearing:
+  cover pending masked interrupts, acknowledgement, U-mode with `mstatus.MIE = 0`, M-mode with
+  MIE both clear/set, and coexistence with timer interrupts.
+  AccessContext tests assert hart ID, privilege, kind, width, and atomic operation across wrappers;
+  denied fetch/load/store/LR/SC/AMO accesses must produce the correct cause and logical `mtval`.
+  Privilege tests cover U-mode CSR rejection, U-mode ECALL cause 8, MRET restoration, and
+  same-hart M-mode trap entry. Emulator integration validates AP trap notification to the IOP
+  and return to U-mode without bypassing AP bus protection.
 - **Phases 3–4:** Extend `RV32IComplianceTest` with new instruction vectors (style already
-  established in the existing compliance suite).
+  established in the existing compliance suite). Zabha tests cover width, sign extension,
+  alignment, neighboring-byte preservation, MPU boundaries, and absence of widened MMIO accesses.
 - **Phase 5:** Dedicated FP compliance vectors; NaN canonicalization and rounding mode tests
   required before declaring F complete.
 
@@ -466,13 +525,11 @@ Each phase should be verified before the next begins:
 
 ## Revision History
 
-- **r1** — Initial plan.
-- **r2** — Incorporated review from originating LLM: clarified internal trap encoding (`trap = 1 + 1`)
-  to prevent spec-number confusion; added two-layer fetch-authorization note; tightened
-  `tryScAndClear` atomicity requirement; softened Phase 2 mailbox claim; added privilege-mode
-  verification items to Phase 2. Correction 1 of the review (trap cause numbering) identified an
-  ambiguity in wording rather than a semantic error — the codebase's `+1` internal encoding was
-  correct throughout.
+- **r6** — Application-context review resolves B1 as Zabha AMOs with sub-word LR/SC excluded;
+  confirms F deferral and mailbox-first phasing. Applies the six r5 consistency fixes. Adds
+  MSIP/MEIP delivery and privilege-dependent interrupt gating to Phase 2; clarifies translated
+  bus coordination, all-width store ordering, LR/SC lifecycle, guest fault addresses, sub-word
+  MMIO behavior, payload memory ordering, and AP-to-IOP trap notification responsibility.
 - **r5** — Architectural boundary review: removed `ReservationTable` from `step()` and from
   `atomicRmw`/`tryScAndStore` signatures. Cross-hart LR/SC coordination is now entirely
   bus-internal; the bus detects LR.W via `ctx.kind==AMO && ctx.atomicOp==2` in its `readInt`
@@ -492,50 +549,25 @@ Each phase should be verified before the next begins:
   with `tryScAndStore` as the correct atomic SC.W primitive (the prior design had a TOCTOU window
   between reservation check and memory write); corrected the F-extension rounding note (Java
   primitive float uses RNE, matching RISC-V's default; the risk is the four non-default modes).
+- **r2** — Incorporated review from originating LLM: clarified internal trap encoding (`trap = 1 + 1`)
+  to prevent spec-number confusion; added two-layer fetch-authorization note; tightened
+  `tryScAndClear` atomicity requirement; softened Phase 2 mailbox claim; added privilege-mode
+  verification items to Phase 2. Correction 1 of the review (trap cause numbering) identified an
+  ambiguity in wording rather than a semantic error — the codebase's `+1` internal encoding was
+  correct throughout.
+- **r1** — Initial plan.
 
 ---
 
-## Combined Review Notes
+## Review Status
 
-v5 fixes the major architectural-boundary issue from the prior plan: `ReservationTable` should not
-be threaded through `step()` or exposed as a core-level coordination parameter. Cross-hart LR/SC
-coordination belongs in the shared bus implementation, using `AccessContext` to identify hart,
-access kind, and atomic operation. The plan now correctly makes the core responsible for local
-per-hart reservation state and makes the bus responsible for final cross-hart arbitration.
+The r5 review and B1–B7 answers are preserved in
+[PLAN_REVIEW_RESPONSE.md](PLAN_REVIEW_RESPONSE.md). The six consistency fixes listed in
+section A of the review request are incorporated in r6. The original review request remains
+an r5 historical document; the five phases in this plan are the authoritative r6 numbering.
 
-The `ramOffset`/`ramSize` fetch window remains a borderline system-level concern, but keeping it as
-a legacy coarse compatibility precheck is acceptable. Fine-grained fetch/load/store authorization
-still belongs in the context-aware bus path.
-
-Before treating v5 as implementation-ready, address these remaining items:
-
-1. **Remove stale `step()`/`ReservationTable` compatibility text.** The Backward Compatibility
-   section still says `step()` gains a `ReservationTable` parameter and existing callers use an
-   overload passing `null`. That contradicts v5's core design, which says `step()` gains no new
-   reservation parameter. Replace it with: `step()` remains source-compatible; cross-hart
-   reservation coordination is implemented by bus overrides.
-2. **Update verification to match bus-owned reservations.** The Phase 2 test still describes two
-   states "sharing a `ReservationTable`." That should become two states sharing a multi-hart-aware
-   `MemoryBus` with private reservation tracking. The test should explicitly cover
-   `atomicRmw`, `tryScAndStore`, LR.W detection via `ctx.kind == AMO && ctx.atomicOp == 2`, and a
-   plain-store-vs-`SC.W` race.
-3. **Make plain-store ordering explicit.** v5 says a bus `writeInt(..., ctx)` override with
-   `ctx.kind == STORE` automatically invalidates matching reservations. It should also state that
-   multi-hart bus implementations must order plain store write + reservation invalidation against
-   `tryScAndStore` using the same reservation/granule lock. Otherwise this invalid interleaving is
-   still possible: Hart A has a valid LR reservation; Hart B performs a plain store but has not yet
-   invalidated; Hart A executes `SC.W` and succeeds; Hart B invalidates. The store happened before
-   the `SC.W`, so the `SC.W` should have failed.
-4. **Clarify default methods are single-hart only for atomic correctness.** The `atomicRmw` and
-   `tryScAndStore` defaults preserve current single-hart behavior, but they must not be presented as
-   multi-hart safe. Multi-hart correctness requires bus overrides that lock RMW/check/store/
-   invalidation as one critical section for the relevant granule.
-5. **Clean up stale priority wording if desired.** The summary still says P1 includes
-   `tryScAndStore`/`ReservationTable`; this is acceptable if `ReservationTable` is understood as a
-   bus-internal implementation detail, but clearer wording would be "`tryScAndStore` plus
-   bus-internal reservation tracking."
-6. **Clean up revision ordering.** The revision history lists `r5`, then `r4`, then `r3`; this is
-   editorial only.
-
-Net assessment: v5 is the best shape so far. The public API boundary is now right, and the remaining
-work is mostly consistency cleanup plus making the plain-store/SC ordering contract unambiguous.
+The requested scope and API boundaries are accepted for implementation with the contracts
+above. This is plan-level acceptance, not a claim that the features are implemented or verified.
+In particular, Phase 2 completion requires actual software/external interrupt delivery, a
+conforming bus for cross-hart atomics, and verification of memory ordering. The emulator owns
+the mailbox device and AP trap-to-IOP notification/recovery path.

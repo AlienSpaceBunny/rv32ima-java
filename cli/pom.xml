@@ -12,6 +12,12 @@
 
     <artifactId>rv32emu-cli</artifactId>
 
+    <name>RV32IMA Emulator CLI</name>
+    <description>
+        Command-line reference runner for rv32emu-core: loads a flat RISC-V binary, wires UART /
+        CLINT / SYSCON hooks, and executes. Distributed as a fat jar via GitHub Releases, not Maven.
+    </description>
+
     <dependencies>
         <dependency>
             <groupId>com.alienspacebunny</groupId>

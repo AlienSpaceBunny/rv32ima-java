@@ -9,6 +9,36 @@
     <version>0.1.0</version>
     <packaging>pom</packaging>
 
+    <name>RV32IMA Emulator (parent)</name>
+    <description>
+        Platform-agnostic RISC-V RV32IMA emulator for Java 25 — a port of cnlohr's mini-rv32ima.
+        Multi-module build: rv32emu-core (the library) and rv32emu-cli (a reference runner).
+    </description>
+    <url>https://github.com/nkedel/rv32ima-java</url>
+    <inceptionYear>2025</inceptionYear>
+
+    <licenses>
+        <license>
+            <name>MIT License</name>
+            <url>https://opensource.org/licenses/MIT</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <name>Nate Edel</name>
+            <email>nate.edel@gmail.com</email>
+            <url>https://github.com/nkedel</url>
+        </developer>
+    </developers>
+
+    <scm>
+        <connection>scm:git:https://github.com/nkedel/rv32ima-java.git</connection>
+        <developerConnection>scm:git:git@github.com:nkedel/rv32ima-java.git</developerConnection>
+        <url>https://github.com/nkedel/rv32ima-java</url>
+    </scm>
+
     <modules>
         <module>core</module>
         <module>cli</module>

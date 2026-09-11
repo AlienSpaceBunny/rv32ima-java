@@ -12,6 +12,13 @@
 
     <artifactId>rv32emu-core</artifactId>
 
+    <name>RV32IMA Emulator Core</name>
+    <description>
+        Platform-agnostic RISC-V RV32IMA_Zicsr emulator library: interpreter core, FFM-backed
+        off-heap memory bus, MMIO/CSR hook interfaces. No runtime dependencies.
+    </description>
+    <url>https://github.com/nkedel/rv32ima-java</url>
+
     <dependencies>
         <dependency>
             <groupId>org.junit.jupiter</groupId>

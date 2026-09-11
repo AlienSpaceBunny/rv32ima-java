@@ -7,13 +7,41 @@ Baseline: `./mvnw clean verify` green — 259 core + 1 cli tests, SpotBugs/Check
 clean, CLI smoke passes, on JUnit 6.1.3. No git tags, no release history. Every
 commit on `main` currently claims version `0.1.0` (not a SNAPSHOT).
 
+## Recommendation: not yet (2026-09-10)
+
+Hold the Central release until after multi-hart Phase 1–2. Reasons:
+
+- **Central artifacts are immutable and permanent.** A published `0.1.0` can never
+  be replaced or withdrawn.
+- **The public API is about to move.** `docs/FEATURE_REQUEST_PLAN.md` Phase 1–2 add
+  default methods and an `AccessContext` record to `MemoryBus`, add fields to
+  `RV32IMAState`, add an `IsaConfig` constructor to `RV32IMACore`, and change how
+  `misa` is derived. It's designed to be source-compatible, but it hasn't been
+  built yet, and publishing now freezes today's surface — including known warts
+  (`step()`'s 8-arg signature, the `ramOffset`/`ramSize` fetch-window params the
+  plan itself calls a "legacy wart").
+- **No API-freeze review has happened.** The C1–C7 pass was explicitly *not*
+  comprehensive. Central publication deserves one deliberate "is this the API we
+  want to commit to?" pass.
+- **Release mechanics don't exist yet** — no SNAPSHOT discipline, no tags, no CI.
+  First Central release with none of that in place is how immutable mistakes ship.
+- **No demand signal.** Nobody is blocked waiting to `mvn` this. Interim consumers
+  can use **JitPack** (`com.github.nkedel:rv32ima-java:<tag-or-SHA>`) with zero
+  publishing setup, zero signing, and no permanence commitment.
+
+Good sequence: land Phase 1–2 → API-freeze review → set up versioning + CI (R5–R7)
+→ publish, straight at a considered `0.2.0` or `1.0.0`. Namespace registration
+(the slow bureaucratic step) is already done, so there's no rush cost to waiting.
+
 ## Decisions locked in (2026-09-10)
 
 | Question | Decision |
 |---|---|
-| groupId / namespace | Keep **`com.alienspacebunny`**. Nate owns the domain and started Central Portal registration at some point — needs to be confirmed/finished (R1). |
-| What publishes to Central | **`rv32emu-core` only.** |
+| Publish to Central now? | **No — see recommendation above.** Revisit after multi-hart Phase 1–2. |
+| groupId / namespace | **`com.alienspacebunny`** — registered (so is `us.n8l`). Keep it. |
+| What publishes to Central (eventually) | **`rv32emu-core` only.** |
 | CLI distribution | **`rv32emu-cli` fat jar → GitHub Releases** as an asset, not a Maven artifact. Avoids the duplicate-classes problem (shade bundles core's classes; a published cli POM would also declare core as a dependency). |
+| Interim dependency access | **JitPack**, on demand — no repo changes required. |
 | Versioning scheme | **UNRESOLVED — see R2.** Need to decide SemVer policy, SNAPSHOT-on-main, and pick the first published version. |
 
 ## Open questions
@@ -29,14 +57,14 @@ commit on `main` currently claims version `0.1.0` (not a SNAPSHOT).
 
 ---
 
-## R1 — Central Portal account / namespace verification  *(blocker, Nate)*
+## R1 — Central Portal account / namespace  *(done / Nate)*
 
-- Confirm the `com.alienspacebunny` namespace registration on the **Central Portal**
-  (central.sonatype.com — the modern path; legacy OSSRH / `oss.sonatype.org` is
-  sunset and does not apply to new namespaces).
-- Verify domain ownership via the DNS TXT challenge the Portal issues.
-- Generate a Portal **publishing token** (user token) for CI / local deploy auth;
-  store in `~/.m2/settings.xml` under the Portal server id, never in the repo.
+- `com.alienspacebunny` and `us.n8l` are both already registered on the **Central
+  Portal** (central.sonatype.com — the modern path; legacy OSSRH / `oss.sonatype.org`
+  is sunset). Namespace verification is complete.
+- Still needed at publish time: generate a Portal **publishing token** (user token)
+  for CI / local deploy auth; store in `~/.m2/settings.xml` under the Portal server
+  id, never in the repo.
 
 ## R2 — GPG signing key  *(blocker, Nate)*
 

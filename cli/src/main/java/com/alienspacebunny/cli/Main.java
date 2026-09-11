@@ -145,7 +145,7 @@ public class Main {
         try {
             int ir = ram.readInt(state.pc);
             System.out.printf("[0x%08x] ", ir);
-        } catch (Exception e) {
+        } catch (IndexOutOfBoundsException e) {
             System.out.print("[xxxxxxxxxx] ");
         }
         for (int i = 0; i < 32; i++) {

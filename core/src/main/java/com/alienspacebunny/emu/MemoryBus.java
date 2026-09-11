@@ -83,20 +83,6 @@ public interface MemoryBus {
     void writeInt(int address, int value);
 
     /**
-     * Reads a 32-bit word and returns it as-is.
-     *
-     * <p>Provided for symmetry with the other signed read methods. For RV32, the word is the
-     * native register width, so no sign extension is needed.
-     *
-     * @param address the unsigned 32-bit guest address.
-     * @return the word.
-     * @throws IndexOutOfBoundsException if the address is not mapped.
-     */
-    default int readIntSigned(int address) {
-        return readInt(address);
-    }
-
-    /**
      * Reads a 16-bit halfword and sign-extends it to 32 bits.
      *
      * <p>Used by the LH (load halfword, signed) instruction.

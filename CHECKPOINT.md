@@ -6,7 +6,8 @@ All P0–P7 bugs fixed and tested. Release tooling (Spotless, Checkstyle, SpotBu
 source jars) in place. Public API Javadoc **done** (commits `b8a1fa8`, `a6e5fa7`). Compliance
 test layers 1 & 2 **done** (`3c9be5b`, `22c0e30`) — 259 core + 1 cli tests.
 
-Two tasks completed this session; a cleanup pass is now **in progress**.
+JUnit 6.1.3 upgrade, architectural review, and the C1–C7 cleanup pass are all done and
+pushed. Next up: release readiness (`RELEASE_TODO.md`).
 
 ---
 
@@ -50,18 +51,22 @@ The JUnit 6.1.3 bump is in `90f7997` (whose message misleadingly says ".java-ver
 `./mvnw clean verify` green after the full pass: 259 core + 1 cli tests, SpotBugs/Checkstyle
 clean, CLI smoke passes. Spotless applied (no manual reformat needed).
 
-**Not yet committed** — awaiting the user's call on commit granularity (docs vs. code vs.
-all-in-one). C1–C7 are one logical cleanup unit; C3+C4 must land together (rule + fix).
+Committed one-per-unit and pushed to `origin/main` (`0943a48`, `1d45c2b`, `1c3248d`,
+`f14def6`, `55f5c54`, `0d004dc`). Review verdict stands: no comprehensive review warranted.
 
 ---
 
 ## After the Cleanup Pass
 
-1. Decide whether anything left warrants a comprehensive review.
-2. Maven Central prep: GPG signing, Sonatype namespace (`com.alienspacebunny`), staging.
-3. Manual release-process doc: branch, version bump, tag, CI gates, GitHub release, smoke test.
-4. Then: feature work per `docs/FEATURE_REQUEST_PLAN.md` (multi-hart Phase 1 — `IsaConfig`, `hartId`,
-   instruction-fetch fault fix, U-mode CSR privilege check).
+1. ~~Decide whether anything warrants a comprehensive review.~~ Done — no.
+2. **Release readiness → `RELEASE_TODO.md`** (R1–R8). Decisions locked: keep groupId
+   `com.alienspacebunny` (Nate owns the domain, Central Portal registration started);
+   publish `rv32emu-core` only; CLI fat jar goes to GitHub Releases. **Open: versioning
+   scheme (R2)** — `0.1.0` is hardcoded, no SNAPSHOT, no tags; needs Nate's call.
+3. Feature work per `docs/FEATURE_REQUEST_PLAN.md` (multi-hart Phase 1 — `IsaConfig`,
+   `hartId`, instruction-fetch fault fix, U-mode CSR privilege check). **Not yet
+   implementation-ready**: the plan's own "Combined Review Notes" list 6 consistency
+   fixes, and OQ-1 ("Zab" naming) is still open pending the originating LLM.
 
 ---
 

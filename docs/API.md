@@ -14,32 +14,41 @@ should be composed around the core through `MemoryBus`, `HardwareHook`,
 `RV32IMACore()` configures the base RV32IMA_Zicsr ISA. `RV32IMACore(IsaConfig)`
 accepts an `IsaConfig` for the additional extensions being layered on for the
 V-32 multi-hart feature work (`RV32IMFC_ZBA_ZBB_ZICSR`, `RV32IMC_ZBB_ZICSR`, or
-a custom combination). As of Phase 3, `hasZba`, `hasZbb`, and `hasZabha` are
-decoded — enabling one unlocks the corresponding instructions, and the
-un-gated encodings still raise an illegal-instruction trap even when the
+a custom combination). As of Phase 4, `hasZba`, `hasZbb`, `hasZabha`, and
+`hasC` are decoded — enabling one unlocks the corresponding instructions, and
+the un-gated encodings still raise an illegal-instruction trap even when the
 config would otherwise support them (see the `IsaConfig`/`RV32IMACore` class
-Javadoc for the exact instruction list per flag). `hasC` and `hasF` are not
-decoded yet: enabling either only changes the `misa` CSR value the guest reads
-back, until the phase that implements them lands. `misa` is derived from the
-config (`IsaConfig.misa()`); `Zba`/`Zbb`/`Zabha` have no bit of their own in
-`misa` and don't affect it regardless of decode support. `hasU` picks which of
-two mutually exclusive bits `misa` reports: `false` (the default,
-`RV32IMA_ZICSR`) reproduces the exact value this core hardcoded before
-`IsaConfig` existed, including a non-standard bit 22 with no architected
-meaning; `true` (both V-32 presets) reports the standard U-mode bit (20)
-instead. Use `true` for any config whose guest code actually runs in user
-mode.
+Javadoc for the exact instruction list per flag). `hasF` is not decoded yet:
+enabling it only changes the `misa` CSR value the guest reads back, until
+Phase 5 lands. `misa` is derived from the config (`IsaConfig.misa()`);
+`Zba`/`Zbb`/`Zabha` have no bit of their own in `misa` and don't affect it
+regardless of decode support; `C` does have a `misa` bit and `hasC` sets it.
+`hasU` picks which of two mutually exclusive bits `misa` reports: `false` (the
+default, `RV32IMA_ZICSR`) reproduces the exact value this core hardcoded
+before `IsaConfig` existed, including a non-standard bit 22 with no
+architected meaning; `true` (both V-32 presets) reports the standard U-mode
+bit (20) instead. Use `true` for any config whose guest code actually runs in
+user mode.
 
 `RV32IMACore.step(...)` executes up to `count` guest instructions against the
 provided mutable `RV32IMAState` and `MemoryBus`.
 
 - `state.pc` is the guest program counter at entry and is updated before return.
 - `ramOffset` and `ramSize` define the legal instruction-fetch window as a
-  coarse precheck. Within that window, `mem.readInt(pc)` is still called, and an
-  `IndexOutOfBoundsException` it throws (for example, a bus enforcing
-  finer-grained access control) is converted into the same instruction
-  access-fault trap as a PC outside the window, with `mtval` set to the
-  faulting PC.
+  coarse precheck. Without `IsaConfig.hasC`, a PC not 4-byte aligned within
+  that window still traps misaligned, and `mem.readInt(pc)` is called exactly
+  as before — nothing here changes for a non-`C` config. With `hasC`, the
+  alignment requirement drops to 2 bytes, and fetch first calls
+  `mem.readShort(pc)`: if its low two bits are `11`, `mem.readInt(pc)` is
+  called for the full 32-bit instruction (possibly at a non-word-aligned
+  address, if the previous instruction was compressed); otherwise the 16 bits
+  already read are the whole instruction, expanded internally into an
+  equivalent 32-bit RV32I/M operation (see `RV32IMACore`'s `decodeCompressed`
+  Javadoc). Either way, an `IndexOutOfBoundsException` from any of these calls
+  (for example, a bus enforcing finer-grained access control, or a 32-bit
+  fetch whose last bytes fall past the window) is converted into the same
+  instruction access-fault trap as a PC outside the window, with `mtval` set
+  to the faulting PC.
 - Data loads and stores are delegated to `MemoryBus`; bus range failures should
   throw `IndexOutOfBoundsException`, which the core converts into guest load or
   store access-fault traps.
@@ -48,10 +57,15 @@ provided mutable `RV32IMAState` and `MemoryBus`.
 - Return value `1` means the CPU is waiting for interrupt and no instruction was
   executed.
 - `postExec`, when provided, is called once per instruction cycle: after a
-  non-trapping instruction commits its result but before the PC advances, or
-  before a trapping instruction's trap state is committed. It is not called when
+  non-trapping instruction commits its result but before the PC advances (by 2
+  or 4 bytes, depending on whether the instruction was compressed), or before a
+  trapping instruction's trap state is committed. It is not called when
   instruction fetch itself fails — PC outside the window, misaligned, or the bus
-  rejecting the fetch as described above.
+  rejecting the fetch as described above. For a compressed instruction, the
+  `ir` value passed to `postExec` (and used for `mtval` on an
+  illegal-instruction trap raised from a bad compressed encoding) is
+  `RV32IMACore`'s internal 32-bit expansion of the 16-bit encoding, not the
+  original 16 bits.
 
 Timer behavior (see the `RV32IMACore` class Javadoc for the rationale behind
 the two intentional spec deviations):

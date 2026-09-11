@@ -4,11 +4,11 @@ Revision: **r6**, 2026-09-10. See [PLAN_REVIEW_RESPONSE.md](PLAN_REVIEW_RESPONSE
 for the application-context review of r5 and answers B1–B7.
 
 **Implementation progress:** Phase 1 (items 1–4: `IsaConfig`, `misa` derivation, `hartId`,
-instruction-fetch fault handling) and Phase 2 (items 5–10: privilege/interrupt correctness fixes,
-`AccessContext`, `atomicRmw`, `tryScAndStore`) are done, and so is Phase 3 (items 11–13: Zba, Zbb,
-Zabha) — see the inline "done" notes in the Existing Gap section, Design Decisions §1–§5, the
-ISA Extension Implementation Details section, and the Staging Plan. Rolling status lives in
-[`../CHECKPOINT.md`](../CHECKPOINT.md).
+instruction-fetch fault handling), Phase 2 (items 5–10: privilege/interrupt correctness fixes,
+`AccessContext`, `atomicRmw`, `tryScAndStore`), Phase 3 (items 11–13: Zba, Zbb, Zabha), and Phase 4
+(item 14: the C extension) are all done — see the inline "done" notes in the Existing Gap section,
+Design Decisions §1–§5, the ISA Extension Implementation Details section, and the Staging Plan.
+Rolling status lives in [`../CHECKPOINT.md`](../CHECKPOINT.md).
 
 ## Overall Verdict
 
@@ -43,7 +43,7 @@ Estimated relative effort (rough):
 | Zba (3 instructions) | P2 | XS — **done** (`590a4c9`) |
 | Zbb (18 instructions) | P2 | S — **done** (`590a4c9`) |
 | Zabha sub-word AMOs | P2 | S — **done** (`590a4c9`) |
-| C extension (fetch loop refactor) | P2 | M |
+| C extension (fetch loop refactor) | P2 | M — **done** (`b224ac3`) |
 | F extension (new register file + ~50 instrs) | P3 | L |
 
 ---
@@ -442,7 +442,7 @@ So the existing signed (`Math.min`/`Math.max`) and unsigned (`compareUnsigned`) 
 `computeAmo` did not need separate sub-word variants. See `MemoryBus.atomicRmw`'s updated Javadoc
 and `ZabhaTest`.
 
-### C Extension (Compressed Instructions)
+### C Extension (Compressed Instructions) — done (`b224ac3`)
 
 This is the most structurally significant ISA change. It affects the instruction-fetch loop in
 `step()` rather than just the decode switch.
@@ -469,6 +469,41 @@ handled directly in `decodeCompressed` before falling through to the switch.
 
 Guard the 16-bit fetch path with `IsaConfig.hasC`. Without C, the alignment and fetch logic
 are unchanged.
+
+**Landed, with two refinements over this sketch:**
+
+- **`instrLen`, not implied by this section but required by it.** Every place in `step()` that
+  computes "the PC after this instruction" (JAL/JALR/branch targets, `MRET`, `WFI`, the loop's PC
+  advance, and the pending-interrupt PC correction) previously used a literal `4`. All of them now
+  use a local `instrLen` variable (4 normally, 2 for a compressed instruction) instead, so a
+  compressed jump's link value and a compressed branch's fall-through PC are correct structurally
+  rather than by the coincidence of no compressed instruction ever reaching those specific literals
+  (`MRET`/`WFI` in particular: there is no `C.MRET`/`C.WFI`, but converting them anyway removes a
+  correctness argument that depended on that absence rather than on the code itself).
+- **§5's `ir` design not implemented as sketched.** Nothing in this repo's `PostExecHook` contract
+  or its tests actually depends on `ir` holding the original 16 bits for a compressed instruction
+  (checked before implementing, not assumed) — `ir` holds `RV32IMACore`'s internal 32-bit
+  expansion instead, which is the simpler of two viable designs and avoids threading a second
+  "original fetched bits" variable through the entire opcode switch. `mtval` on an
+  illegal-instruction trap from a bad compressed encoding is the same value. See
+  `PostExecHook`'s Javadoc.
+
+`decodeCompressed` takes an `int` (the 16-bit encoding zero-extended), not a `short` as sketched
+above — plain `int` bit arithmetic throughout the method, no sign-extension surprises from a
+`short` parameter. It expands every base RV32C (Zca) instruction, `C.ADDI4SPN` included, into a
+standard 32-bit RV32I/M word via direct field placement for register/immediate forms and
+inverse-encoded scrambled immediates for `JAL`/`JALR`/branches, always re-entering the existing
+opcode switch — no RVC instruction needed a direct-compute exception. Every bit-shuffle formula
+was taken from the reference simulator's decoder (`riscv-isa-sim`, not hand-derived) and
+cross-checked against the authoritative `riscv-opcodes` tables; a reserved 16-bit pattern returns
+an opcode with no case in the switch, reusing its existing illegal-instruction `default` arm.
+`C.FLW`/`C.FSW` (quadrant 0, funct3 3/7) stay illegal since `F` isn't decoded yet — Phase 5's
+scope, not an oversight. New `CompressedInstructionTest` (34 tests) covers every instruction
+differentially against its hand-assembled 32-bit equivalent, reserved/illegal patterns in both
+directions, jump link values, a compressed breakpoint trap's `mtval`, RAM-window-edge fetch
+faulting instead of overrunning the backing store, and mixed compressed/32-bit instruction streams
+in both orderings (the actual point of the extension, and the one place `mem.readInt` at a
+half-word- but not word-aligned address is exercised). 400 core + 1 cli tests.
 
 ### F Extension (Single-Precision Floating-Point — lowest priority, AP only)
 
@@ -585,9 +620,12 @@ exist in this repo, and `aq`/`rl` memory-ordering semantics remain explicitly ou
 still owns sub-word RMW/lock granularity, exactly as for the word-width AMOs in Phase 2 — nothing
 here changes that division of responsibility or narrows it to word-only.
 
-### Phase 4 — Compressed Instructions (P2)
+### Phase 4 — Compressed Instructions (P2) — done (`b224ac3`)
 
-14. C extension: halfword alignment, 16-bit fetch path, `decodeCompressed`, PC advance.
+14. ~~C extension: halfword alignment, 16-bit fetch path, `decodeCompressed`, PC advance.~~
+    **Done.** See the "Landed, with two refinements" note under the C Extension design section
+    above for what changed versus this staging note's sketch (`instrLen` threading, and
+    `PostExecHook.ir`'s actual behavior for a compressed instruction).
 
 ### Phase 5 — Floating-Point (P3 — AP only, separate effort)
 

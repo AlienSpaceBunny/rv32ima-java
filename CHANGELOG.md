@@ -9,6 +9,14 @@ for how this file is updated as part of cutting a release.
 ## [Unreleased]
 
 ### Added
+- RV32C (compressed instruction) decode (multi-hart Phase 4), gated by `IsaConfig.hasC`.
+  Instruction fetch gains a halfword-probe stage and halfword alignment when `hasC` is set
+  (unchanged, word-only fetch and alignment otherwise); every base RV32C instruction is
+  expanded internally into an equivalent standard 32-bit RV32I/M encoding and executed
+  through the existing opcode decode unmodified. **Behavioral note:** `PostExecHook.ir` — and
+  `mtval` on an illegal-instruction trap raised from a bad compressed encoding — now holds
+  this internal 32-bit expansion for a compressed instruction, not its original 16 bits; see
+  `PostExecHook`'s updated Javadoc and `docs/API.md`.
 - `IsaConfig`, an immutable RISC-V extension configuration (`hasC`, `hasF`, `hasZba`,
   `hasZbb`, `hasZabha`) accepted by a new `RV32IMACore(IsaConfig)` constructor. The
   `misa` CSR is now derived from it instead of a hardcoded constant; the zero-argument

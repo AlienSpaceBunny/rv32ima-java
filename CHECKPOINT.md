@@ -13,8 +13,8 @@ been reviewed and conditionally signed off by the originating LLM (`docs/PLAN_RE
 the one condition (real MSIP/MEIP interrupt delivery, not just injection) is done (`5620de0`).
 **Phase 1 (foundation) is done (`c92045e`)** — see below. **Phase 2 is done** (items 5, 6, 7,
 8, 9, 10 all complete; final pieces `4aeec77`) — see below. **Phase 3 is done** (items 11, 12,
-13 — Zba, Zbb, Zabha — `590a4c9`) — see below. Phase 4 (C extension) is next, pending Nate's
-go-ahead.
+13 — Zba, Zbb, Zabha — `590a4c9`) — see below. **Phase 4 is done** (item 14 — the C extension —
+`b224ac3`) — see below. Phase 5 (F extension, AP-only) is next, pending Nate's go-ahead.
 
 ---
 
@@ -198,6 +198,47 @@ alongside `legalEncoding`, so an unsupported combination still falls through to 
 **Phase 3 is ISA decode only** — it doesn't change the multi-hart bus contract. A
 multi-hart-aware `MemoryBus`'s `atomicRmw` override still owns sub-word lock granularity for
 Zabha, the same way it already owns word-width AMO/LR/SC coordination from Phase 2.
+
+---
+
+## Phase 4 — C extension decode (`b224ac3`) — done
+
+Item 14. The most structurally significant ISA change so far: it touches `step()`'s
+instruction-fetch and PC-arithmetic logic, not just the decode switch.
+
+- **Fetch and alignment**, gated by `IsaConfig.hasC`: unchanged (word-only fetch, 4-byte
+  alignment) when `hasC` is false. When `hasC` is true, alignment drops to 2 bytes, and fetch
+  first calls `mem.readShort(pc)`; if its low two bits are `11` it's a 32-bit instruction (a
+  further `mem.readInt(pc)` call, possibly at a non-word-aligned address if the previous
+  instruction was compressed — `FFMMemoryBus` uses `JAVA_INT_UNALIGNED`, verified by a new
+  mixed-stream test), otherwise the 16 bits already read are the whole instruction.
+- **`decodeCompressed(int)`** expands every base RV32C (Zca) instruction into an equivalent
+  standard 32-bit RV32I/M word — direct field placement for register/immediate forms
+  (`ADDI`/`LI`/`LUI`/`ANDI`/`SUB`/`XOR`/`OR`/`AND`/`LW`/`SW`/`SLLI`/`SRLI`/`SRAI`/`MV`/`ADD`),
+  inverse-encoded scrambled immediates for `JAL`/`JALR`/branches — so the existing opcode switch
+  runs it unmodified; no RVC instruction needed a direct-compute exception, contrary to the
+  plan's expectation for `C.ADDI4SPN`. A reserved 16-bit pattern returns an opcode with no case
+  in the switch, reusing its existing illegal-instruction `default` arm — no new trap-dispatch
+  code needed. All bit-shuffle formulas came from the reference simulator's decoder
+  (`riscv-isa-sim`), cross-checked against `riscv-opcodes`, not hand-derived.
+- **`instrLen`** (4 or 2) replaces every literal instruction-length constant used for PC-target
+  arithmetic: `JAL`/`JALR`/branch targets, `MRET`, `WFI`, the loop's PC advance, and the
+  pending-interrupt PC correction. `MRET`/`WFI` are converted too even though there's no
+  `C.MRET`/`C.WFI` — the point is that the code no longer depends on that absence to be correct.
+- **`PostExecHook.ir`** now holds the internal 32-bit expansion for a compressed instruction, not
+  the original 16 bits (checked first: nothing in this repo's tests or Javadoc depended on the
+  original bits) — same value used for `mtval` on an illegal-instruction trap from a bad
+  compressed encoding. Documented on `PostExecHook`'s Javadoc, `docs/API.md`, and `CHANGELOG.md`
+  as the one user-visible behavioral note in this phase.
+- New `CompressedInstructionTest` (34 tests): every instruction checked *differentially*
+  against its hand-assembled 32-bit equivalent (deliberately not by re-deriving expected values
+  from the same formulas `decodeCompressed` uses) — caught three real bugs in the test's own
+  compressed-encoder helpers (missing quadrant bits on `C.BEQZ`/`C.BNEZ`/`C.LWSP`, and a missing
+  shift-amount-overflow bit on `C.SRLI`/`C.SRAI`) before they could hide behind a shared mistake.
+  Also covers reserved/illegal patterns in both directions, jump link values (`pc+2`, not
+  `pc+4`), a compressed breakpoint's `mtval`, RAM-window-edge fetch faulting instead of
+  overrunning the backing store, and mixed compressed/32-bit streams in both orderings. 400
+  core + 1 cli tests.
 
 ---
 

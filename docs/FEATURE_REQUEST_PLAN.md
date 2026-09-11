@@ -55,7 +55,10 @@ Sub-word LR/SC (`LR.B`, `LR.H`, `SC.B`, `SC.H`) is **not** part of any ratified 
 as of 2025 and is excluded from this plan unless explicitly requested.
 
 **Action:** Confirm with the originating LLM whether all three are needed or only Zba+Zbb.
-This plan designs for all three but treats Zabha as independently optional.
+This plan designs for all three but treats Zabha as independently optional. The specific
+questions for that review are in [`PLAN_REVIEW_REQUEST.md`](PLAN_REVIEW_REQUEST.md) (B1);
+`Zba` and `Zbb` are named explicitly in the request, so only the byte/halfword-atomic scope
+(Zabha, and whether unratified sub-word LR/SC is expected) is actually open.
 
 ---
 

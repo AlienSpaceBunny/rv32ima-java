@@ -6,7 +6,8 @@
 |---|---|
 | [API.md](API.md) | Public API contracts for embedders. Narrative summary; the Javadoc on the five core types is authoritative. |
 | [FEATURE_REQUEST.md](FEATURE_REQUEST.md) | Original feature request: V-32 AP/IOP support (multi-hart, extra ISA extensions). |
-| [FEATURE_REQUEST_PLAN.md](FEATURE_REQUEST_PLAN.md) | Implementation plan for the feature request. Staged P1–P3 lanes. |
+| [FEATURE_REQUEST_PLAN.md](FEATURE_REQUEST_PLAN.md) | Implementation plan for the feature request. Staged P1–P3 lanes. At r5; not yet implementation-ready. |
+| [PLAN_REVIEW_REQUEST.md](PLAN_REVIEW_REQUEST.md) | Questions for the originating LLM to sign off FEATURE_REQUEST_PLAN.md r5 before implementation. |
 | [TEST_PLAN.md](TEST_PLAN.md) | Test-suite expansion plan. Layers 1 & 2 done; Layer 3 (system-level scenarios) not started. |
 
 Rolling status lives in [`../CHECKPOINT.md`](../CHECKPOINT.md); the current cleanup pass is

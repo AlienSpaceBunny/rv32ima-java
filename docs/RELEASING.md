@@ -8,9 +8,10 @@ not the eventual publish-to-Central process.
 
 ## Model
 
-`main` always carries a `-SNAPSHOT` version (currently `0.1.1-SNAPSHOT` — the first real
-release will be `0.1.1`; `0.1.0` is skipped because that version number is already
-referenced by the downstream V-32 project). Cutting a release:
+`main` always carries a `-SNAPSHOT` version (currently `0.1.2-SNAPSHOT` — the first real
+release will still be `0.1.1`, whichever `-SNAPSHOT` `main` is on when it's cut; `0.1.0`
+is skipped because that version number is already referenced by the downstream V-32
+project). Cutting a release:
 
 1. Bumps to the release version (drops `-SNAPSHOT`), commits.
 2. Tags `vX.Y.Z`.

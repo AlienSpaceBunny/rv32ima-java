@@ -115,10 +115,23 @@ public class RV32IMACore {
 
     // ---- F extension (fcsr / fflags) support: Phase 5 ----------------------------------------
     private static final int FFLAGS_NV = 1 << 4; // invalid operation
+    private static final int FFLAGS_DZ = 1 << 3; // divide by zero
+    private static final int FFLAGS_OF = 1 << 2; // overflow
+    private static final int FFLAGS_UF = 1 << 1; // underflow
+    private static final int FFLAGS_NX = 1; // inexact
     private static final int FFLAGS_MASK = 0x1f;
     private static final int FCSR_FRM_SHIFT = 5;
     private static final int FCSR_FRM_FIELD_MASK = 0x7;
     private static final int FCSR_MASK = 0xff;
+
+    // rm field / frm encodings (Phase 5b). 5 and 6 are reserved; 7 selects frm dynamically and is
+    // itself reserved there. See resolveRoundingMode.
+    private static final int RM_RNE = 0;
+    private static final int RM_RTZ = 1;
+    private static final int RM_RDN = 2;
+    private static final int RM_RUP = 3;
+    private static final int RM_RMM = 4;
+    private static final int RM_DYN = 7;
 
     /** Canonical quiet NaN bit pattern RISC-V mandates in place of any NaN payload it produces. */
     private static final int CANONICAL_NAN_BITS = 0x7fc00000;
@@ -320,6 +333,362 @@ public class RV32IMACore {
             return (aNegativeZero == max) ? bBits : aBits;
         }
         return (max ? (a > b) : (a < b)) ? aBits : bBits;
+    }
+
+    // ---- F extension (single-precision floating-point) support: Phase 5b --------------------
+    //
+    // Covers the rounding-mode-dependent RV32F instructions deferred from Phase 5a:
+    // FADD/FSUB/FMUL/FDIV/FSQRT.S, the FMADD family, and FCVT.{W,WU}.S/FCVT.S.{W,WU}.
+    //
+    // Numerical approach (advisor-reviewed): every basic op is computed as a double-precision
+    // approximation `approx` of the true (infinite-precision) result, paired with the sign of the
+    // residual `true - approx` (`residualSign`: -1/0/+1). `approx` is always within half a
+    // double-ulp of the true result -- exact for FMUL (a float product needs at most 48 significant
+    // bits) and FMADD's multiply term, and correctly-rounded via TwoSum (FADD/FSUB, and the FMA
+    // family's addend step) or a residual-via-fma trick (FDIV, FSQRT) otherwise -- which is what
+    // lets roundToFloat derive the float immediately below and above the true result (`lower`/
+    // `upper`) without ever needing more than double precision, including at overflow (where
+    // Math.nextUp(Float.MAX_VALUE) is +infinity) and subnormal boundaries. This does NOT extend to
+    // computing an FMA as a double-rounded multiply-then-add: the multiply term is exact in double,
+    // so folding the addend in via the same TwoSum used for FADD/FSUB gives a single correctly
+    // rounded result for the whole fused expression, with no separate FMA machinery needed.
+
+    /** Resolves an instruction's {@code rm} field to an effective rounding mode, consulting {@code
+     * frm} for the dynamic selector (7). Returns -1 for a reserved mode (5, 6, or a dynamic
+     * selector when {@code frm} itself holds a reserved value) -- the caller must trap
+     * illegal-instruction without performing the operation or touching any register or flag. */
+    private static int resolveRoundingMode(RV32IMAState state, int instrRm) {
+        int rm = instrRm;
+        if (rm == RM_DYN) {
+            rm = (state.fcsr >>> FCSR_FRM_SHIFT) & FCSR_FRM_FIELD_MASK;
+        }
+        return (rm <= RM_RMM) ? rm : -1;
+    }
+
+    private static boolean isZero32(int bits) {
+        return (bits & 0x7fffffff) == 0;
+    }
+
+    private static boolean isNegative32(int bits) {
+        return bits < 0;
+    }
+
+    /** A double-precision approximation of an exact real result, paired with the sign of its
+     * residual against the true value (see the Phase 5b design note above). */
+    private record ExactApprox(double approx, int residualSign) {}
+
+    /** Knuth's TwoSum: {@code s + e == a + b} exactly, for any doubles {@code a}, {@code b}. */
+    private static ExactApprox exactSum(double a, double b) {
+        double s = a + b;
+        double v = s - a;
+        double e = (a - (s - v)) + (b - v);
+        int residualSign = e == 0.0 ? 0 : (e > 0.0 ? 1 : -1);
+        return new ExactApprox(s, residualSign);
+    }
+
+    /** Exact: a float product needs at most 48 significant bits, well within double's 53. */
+    private static ExactApprox exactMul(double a, double b) {
+        return new ExactApprox(a * b, 0);
+    }
+
+    private static ExactApprox exactDiv(double a, double b) {
+        double q = a / b;
+        double r = Math.fma(-q, b, a); // exact residual of the numerator: a - q*b
+        int rSign = r == 0.0 ? 0 : (r > 0.0 ? 1 : -1);
+        int bSign = b >= 0.0 ? 1 : -1;
+        return new ExactApprox(q, rSign * bSign); // true - q == r/b
+    }
+
+    private static ExactApprox exactSqrt(double a) {
+        double s = Math.sqrt(a); // a >= 0 guaranteed by the caller
+        double r = Math.fma(-s, s, a); // exact residual: a - s*s == (true - s)(true + s)
+        int residualSign = r == 0.0 ? 0 : (r > 0.0 ? 1 : -1);
+        return new ExactApprox(s, residualSign);
+    }
+
+    /** The multiply term of a*b+c is exact, so folding in c via TwoSum yields one correctly
+     * rounded approximation of the whole fused expression -- no separate FMA rounding needed. */
+    private static ExactApprox exactFma(double a, double b, double c) {
+        return exactSum(exactMul(a, b).approx(), c);
+    }
+
+    /**
+     * Rounds the double-precision approximation {@code approx} of an exact real result to the
+     * nearest representable {@code float} per {@code rm}, given {@code residualSign} (the sign of
+     * the true result minus {@code approx}). Accrues {@code NX}/{@code OF}/{@code UF} on {@code
+     * state.fcsr}; the caller is responsible for {@code NV}/{@code DZ} and any special-value
+     * short-circuiting (NaN, infinities, exact-cancellation zero sign) before calling this.
+     *
+     * <p>Because {@code approx} is always within half a double-ulp of the true result (see the
+     * Phase 5b design note above), and a float midpoint is always exactly representable in double
+     * (float's precision is far below double's), the true result can never fall strictly between
+     * {@code approx} and the nearer of the two floats surrounding it -- so {@code lower}/{@code
+     * upper} below are always the correct bracket.
+     */
+    private static float roundToFloat(RV32IMAState state, double approx, int residualSign, int rm) {
+        float rne = (float) approx; // Java's narrowing conversion is round-to-nearest-even.
+        double rneAsDouble = rne;
+        int cmp = (approx != rneAsDouble) ? Double.compare(approx, rneAsDouble) : residualSign;
+        if (cmp == 0) {
+            return rne; // the true result is exactly representable as rne.
+        }
+        boolean trueAboveRne = cmp > 0;
+        float lower = trueAboveRne ? rne : Math.nextDown(rne);
+        float upper = trueAboveRne ? Math.nextUp(rne) : rne;
+        boolean nonNegative = Double.doubleToRawLongBits(approx) >= 0;
+        float result =
+                switch (rm) {
+                    case RM_RTZ -> nonNegative ? lower : upper;
+                    case RM_RDN -> lower;
+                    case RM_RUP -> upper;
+                    case RM_RMM -> {
+                        boolean tie = residualSign == 0 && approx == (((double) lower + (double) upper) / 2.0);
+                        yield tie ? (nonNegative ? upper : lower) : rne;
+                    }
+                    default -> rne; // RM_RNE
+                };
+        state.fcsr |= FFLAGS_NX;
+        if (Math.abs(approx) > Float.MAX_VALUE) {
+            state.fcsr |= FFLAGS_OF;
+        } else if (Math.abs(result) < Float.MIN_NORMAL) {
+            state.fcsr |= FFLAGS_UF;
+        }
+        return result;
+    }
+
+    private static int fAddSubS(RV32IMAState state, int aBits, int bBits, boolean subtract, int rm) {
+        if (isSignalingNaN32(aBits) || isSignalingNaN32(bBits)) {
+            state.fcsr |= FFLAGS_NV;
+        }
+        if (isNaN32(aBits) || isNaN32(bBits)) {
+            return CANONICAL_NAN_BITS;
+        }
+        int bEffBits = subtract ? (bBits ^ 0x80000000) : bBits;
+        float a = Float.intBitsToFloat(aBits);
+        float bEff = Float.intBitsToFloat(bEffBits);
+        boolean aInf = Float.isInfinite(a);
+        boolean bInf = Float.isInfinite(bEff);
+        if (aInf || bInf) {
+            if (aInf && bInf) {
+                if (isNegative32(aBits) == isNegative32(bEffBits)) {
+                    return aBits; // same-signed infinities: result is that infinity
+                }
+                state.fcsr |= FFLAGS_NV;
+                return CANONICAL_NAN_BITS; // (+inf) + (-inf)
+            }
+            return aInf ? aBits : bEffBits;
+        }
+        boolean aZero = isZero32(aBits);
+        boolean bZero = isZero32(bEffBits);
+        if (aZero && bZero) {
+            if (isNegative32(aBits) == isNegative32(bEffBits)) {
+                return aBits; // same-signed zeros keep that sign in every rounding mode
+            }
+            return (rm == RM_RDN) ? 0x80000000 : 0x00000000;
+        }
+        if (aZero) {
+            return bEffBits; // adding zero is exact
+        }
+        if (bZero) {
+            return aBits;
+        }
+        if (a == -bEff) {
+            // Exact cancellation of like-magnitude, opposite-signed nonzero operands: +0 in every
+            // rounding mode except round-toward-negative (IEEE 754).
+            return (rm == RM_RDN) ? 0x80000000 : 0x00000000;
+        }
+        ExactApprox exact = exactSum(a, bEff);
+        return Float.floatToRawIntBits(roundToFloat(state, exact.approx(), exact.residualSign(), rm));
+    }
+
+    private static int fMulS(RV32IMAState state, int aBits, int bBits, int rm) {
+        if (isSignalingNaN32(aBits) || isSignalingNaN32(bBits)) {
+            state.fcsr |= FFLAGS_NV;
+        }
+        if (isNaN32(aBits) || isNaN32(bBits)) {
+            return CANONICAL_NAN_BITS;
+        }
+        boolean resultNegative = isNegative32(aBits) != isNegative32(bBits);
+        boolean aInf = Float.isInfinite(Float.intBitsToFloat(aBits));
+        boolean bInf = Float.isInfinite(Float.intBitsToFloat(bBits));
+        boolean aZero = isZero32(aBits);
+        boolean bZero = isZero32(bBits);
+        if ((aInf && bZero) || (aZero && bInf)) {
+            state.fcsr |= FFLAGS_NV;
+            return CANONICAL_NAN_BITS; // 0 * infinity
+        }
+        if (aInf || bInf) {
+            return resultNegative ? 0xff800000 : 0x7f800000;
+        }
+        if (aZero || bZero) {
+            return resultNegative ? 0x80000000 : 0x00000000;
+        }
+        ExactApprox exact = exactMul(Float.intBitsToFloat(aBits), Float.intBitsToFloat(bBits));
+        return Float.floatToRawIntBits(roundToFloat(state, exact.approx(), exact.residualSign(), rm));
+    }
+
+    private static int fDivS(RV32IMAState state, int aBits, int bBits, int rm) {
+        if (isSignalingNaN32(aBits) || isSignalingNaN32(bBits)) {
+            state.fcsr |= FFLAGS_NV;
+        }
+        if (isNaN32(aBits) || isNaN32(bBits)) {
+            return CANONICAL_NAN_BITS;
+        }
+        boolean resultNegative = isNegative32(aBits) != isNegative32(bBits);
+        boolean aInf = Float.isInfinite(Float.intBitsToFloat(aBits));
+        boolean bInf = Float.isInfinite(Float.intBitsToFloat(bBits));
+        boolean aZero = isZero32(aBits);
+        boolean bZero = isZero32(bBits);
+        if (aInf && bInf) {
+            state.fcsr |= FFLAGS_NV;
+            return CANONICAL_NAN_BITS; // infinity / infinity
+        }
+        if (aZero && bZero) {
+            state.fcsr |= FFLAGS_NV;
+            return CANONICAL_NAN_BITS; // 0 / 0
+        }
+        if (bZero) {
+            state.fcsr |= FFLAGS_DZ;
+            return resultNegative ? 0xff800000 : 0x7f800000; // finite nonzero / 0
+        }
+        if (aInf) {
+            return resultNegative ? 0xff800000 : 0x7f800000;
+        }
+        if (bInf || aZero) {
+            return resultNegative ? 0x80000000 : 0x00000000;
+        }
+        ExactApprox exact = exactDiv(Float.intBitsToFloat(aBits), Float.intBitsToFloat(bBits));
+        return Float.floatToRawIntBits(roundToFloat(state, exact.approx(), exact.residualSign(), rm));
+    }
+
+    private static int fSqrtS(RV32IMAState state, int aBits, int rm) {
+        if (isSignalingNaN32(aBits)) {
+            state.fcsr |= FFLAGS_NV;
+        }
+        if (isNaN32(aBits)) {
+            return CANONICAL_NAN_BITS;
+        }
+        float a = Float.intBitsToFloat(aBits);
+        if (a < 0f) { // excludes -0.0, for which sqrt(-0.0) == -0.0 with no flag
+            state.fcsr |= FFLAGS_NV;
+            return CANONICAL_NAN_BITS;
+        }
+        if (a == 0f || Float.isInfinite(a)) {
+            return aBits; // sqrt(+-0) == +-0 (sign preserved); sqrt(+inf) == +inf
+        }
+        ExactApprox exact = exactSqrt(a);
+        return Float.floatToRawIntBits(roundToFloat(state, exact.approx(), exact.residualSign(), rm));
+    }
+
+    /**
+     * RISC-V fused multiply-add family: computes {@code (negA ? -a : a) * b + (negC ? -c : c)},
+     * correctly rounded as a single operation (see the Phase 5b design note above). {@code negA}/
+     * {@code negC} let the four FMADD/FMSUB/FNMSUB/FNMADD opcodes share one implementation.
+     */
+    private static int fmaS(RV32IMAState state, int aBits, int bBits, int cBits, boolean negA, boolean negC, int rm) {
+        if (isSignalingNaN32(aBits) || isSignalingNaN32(bBits) || isSignalingNaN32(cBits)) {
+            state.fcsr |= FFLAGS_NV;
+        }
+        if (isNaN32(aBits) || isNaN32(bBits) || isNaN32(cBits)) {
+            return CANONICAL_NAN_BITS;
+        }
+        int effABits = negA ? (aBits ^ 0x80000000) : aBits;
+        int effCBits = negC ? (cBits ^ 0x80000000) : cBits;
+        boolean productNegative = isNegative32(effABits) != isNegative32(bBits);
+        boolean aInf = Float.isInfinite(Float.intBitsToFloat(effABits));
+        boolean bInf = Float.isInfinite(Float.intBitsToFloat(bBits));
+        boolean aZero = isZero32(effABits);
+        boolean bZero = isZero32(bBits);
+        if ((aInf && bZero) || (aZero && bInf)) {
+            state.fcsr |= FFLAGS_NV;
+            return CANONICAL_NAN_BITS; // 0 * infinity in the product term
+        }
+        boolean productInf = aInf || bInf;
+        boolean cInf = Float.isInfinite(Float.intBitsToFloat(effCBits));
+        if (productInf && cInf && productNegative != isNegative32(effCBits)) {
+            state.fcsr |= FFLAGS_NV;
+            return CANONICAL_NAN_BITS; // (+-infinity product) + (opposite-signed infinity addend)
+        }
+        if (productInf) {
+            return productNegative ? 0xff800000 : 0x7f800000;
+        }
+        if (cInf) {
+            return effCBits;
+        }
+        boolean productZero = aZero || bZero;
+        if (productZero) {
+            if (isZero32(effCBits)) {
+                if (productNegative == isNegative32(effCBits)) {
+                    return productNegative ? 0x80000000 : 0x00000000;
+                }
+                return (rm == RM_RDN) ? 0x80000000 : 0x00000000;
+            }
+            return effCBits; // adding zero is exact
+        }
+        double a = Float.intBitsToFloat(effABits);
+        double b = Float.intBitsToFloat(bBits);
+        double c = Float.intBitsToFloat(effCBits);
+        ExactApprox exact = exactFma(a, b, c);
+        if (exact.approx() == 0.0 && exact.residualSign() == 0) {
+            // Exact cancellation of a finite nonzero product against a finite nonzero addend.
+            return (rm == RM_RDN) ? 0x80000000 : 0x00000000;
+        }
+        return Float.floatToRawIntBits(roundToFloat(state, exact.approx(), exact.residualSign(), rm));
+    }
+
+    /** {@code true - d} where {@code true} is the mathematical integer {@code d} rounds to per
+     * {@code rm}. {@code d} always fits exactly in a double, so this is exact. */
+    private static double roundToIntegerDouble(double d, int rm) {
+        return switch (rm) {
+            case RM_RTZ -> (d < 0) ? Math.ceil(d) : Math.floor(d);
+            case RM_RDN -> Math.floor(d);
+            case RM_RUP -> Math.ceil(d);
+            case RM_RMM -> (d < 0) ? -Math.floor(-d + 0.5) : Math.floor(d + 0.5); // ties away from 0
+            default -> Math.rint(d); // RM_RNE: ties to even
+        };
+    }
+
+    /**
+     * RISC-V {@code fcvt.w.s}/{@code fcvt.wu.s}: rounds {@code aBits} to an integer per {@code rm},
+     * then range-checks the rounded value (not the pre-rounded one -- see class Javadoc example:
+     * {@code fcvt.wu.s(-0.5)} is in range under RTZ, which rounds to {@code -0}, but out of range
+     * under RDN, which rounds to {@code -1}). Saturates and sets {@code NV} (never {@code NX}) on
+     * a NaN or out-of-range input; sets {@code NX} (never {@code NV}) when in range but inexact.
+     */
+    private static int fcvtWS(RV32IMAState state, int aBits, boolean unsigned, int rm) {
+        if (isNaN32(aBits)) {
+            state.fcsr |= FFLAGS_NV;
+            return unsigned ? 0xffffffff : 0x7fffffff;
+        }
+        float a = Float.intBitsToFloat(aBits);
+        if (Float.isInfinite(a)) {
+            state.fcsr |= FFLAGS_NV;
+            if (a > 0) {
+                return unsigned ? 0xffffffff : 0x7fffffff;
+            }
+            return unsigned ? 0x00000000 : 0x80000000;
+        }
+        double d = a;
+        double rounded = roundToIntegerDouble(d, rm);
+        long min = unsigned ? 0L : Integer.MIN_VALUE;
+        long max = unsigned ? 0xffffffffL : Integer.MAX_VALUE;
+        if (rounded < min || rounded > max) {
+            state.fcsr |= FFLAGS_NV;
+            return (rounded < min) ? (unsigned ? 0x00000000 : 0x80000000) : (unsigned ? 0xffffffff : 0x7fffffff);
+        }
+        if (rounded != d) {
+            state.fcsr |= FFLAGS_NX;
+        }
+        return (int) (long) rounded;
+    }
+
+    /** RISC-V {@code fcvt.s.w}/{@code fcvt.s.wu}: {@code value} widens to double exactly (an int32
+     * always fits), so rounding it to float via {@link #roundToFloat} needs no residual machinery
+     * -- only {@code NX} can ever be accrued here (the magnitude is always far inside float's
+     * normal range). */
+    private static int fcvtSW(RV32IMAState state, int value, boolean unsigned, int rm) {
+        double d = unsigned ? (double) Integer.toUnsignedLong(value) : (double) value;
+        return Float.floatToRawIntBits(roundToFloat(state, d, 0, rm));
     }
 
     // ---- RV32C (compressed instruction) support: Phase 4 ------------------------------------
@@ -1151,6 +1520,40 @@ public class RV32IMACore {
                         case 0x0f: // FENCE
                             rdid = 0;
                             break;
+                        case 0x43: // FMADD.S
+                        case 0x47: // FMSUB.S
+                        case 0x4B: // FNMSUB.S
+                        case 0x4F: // FNMADD.S
+                        {
+                            // bits 26:25 are the fmt field (00=S, 01=D, 10=H, 11=Q); D/H/Q are not
+                            // implemented, so anything but S traps illegal-instruction below.
+                            if (!isaConfig.hasF() || ((ir >>> 25) & 0x3) != 0) {
+                                trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
+                                break;
+                            }
+                            int fmaRs1 = (ir >> 15) & 0x1f;
+                            int fmaRs2 = (ir >> 20) & 0x1f;
+                            int fmaRs3 = (ir >>> 27) & 0x1f;
+                            int rm = resolveRoundingMode(state, (ir >> 12) & 0x7);
+                            if (rm < 0) {
+                                trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
+                                break;
+                            }
+                            int fRd = rdid;
+                            rdid = 0;
+                            boolean negA = opcode == 0x4B || opcode == 0x4F; // FNMSUB / FNMADD
+                            boolean negC = opcode == 0x47 || opcode == 0x4F; // FMSUB / FNMADD
+                            int result = fmaS(
+                                    state,
+                                    readFReg(state, fmaRs1),
+                                    readFReg(state, fmaRs2),
+                                    readFReg(state, fmaRs3),
+                                    negA,
+                                    negC,
+                                    rm);
+                            writeFReg(state, fRd, result);
+                            break;
+                        }
                         case 0x53: // OP-FP (Phase 5a subset; rounding-mode-dependent ops are Phase 5b)
                         {
                             if (!isaConfig.hasF()) {
@@ -1169,6 +1572,65 @@ public class RV32IMACore {
                             int bBits = readFReg(state, fRs2);
 
                             switch (funct7) {
+                                case 0x00: // FADD.S
+                                case 0x04: // FSUB.S
+                                case 0x08: // FMUL.S
+                                case 0x0C: // FDIV.S
+                                {
+                                    int rm = resolveRoundingMode(state, fFunct3);
+                                    if (rm < 0) {
+                                        trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
+                                        break;
+                                    }
+                                    rdid = 0;
+                                    int result =
+                                            switch (funct7) {
+                                                case 0x00 -> fAddSubS(state, aBits, bBits, false, rm);
+                                                case 0x04 -> fAddSubS(state, aBits, bBits, true, rm);
+                                                case 0x08 -> fMulS(state, aBits, bBits, rm);
+                                                default -> fDivS(state, aBits, bBits, rm); // 0x0C
+                                            };
+                                    writeFReg(state, fRd, result);
+                                    break;
+                                }
+                                case 0x2C: // FSQRT.S -- fRs2 must be 0 (fixed operand slot, unused)
+                                    if (fRs2 != 0) {
+                                        trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
+                                        break;
+                                    }
+                                    int sqrtRm = resolveRoundingMode(state, fFunct3);
+                                    if (sqrtRm < 0) {
+                                        trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
+                                        break;
+                                    }
+                                    rdid = 0;
+                                    writeFReg(state, fRd, fSqrtS(state, aBits, sqrtRm));
+                                    break;
+                                case 0x60: // FCVT.W.S / FCVT.WU.S -- integer destination
+                                    if (fRs2 > 1) {
+                                        trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION); // 2/3: RV64 forms
+                                        break;
+                                    }
+                                    int cvtWRm = resolveRoundingMode(state, fFunct3);
+                                    if (cvtWRm < 0) {
+                                        trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
+                                        break;
+                                    }
+                                    rval = fcvtWS(state, aBits, fRs2 == 1, cvtWRm);
+                                    break;
+                                case 0x68: // FCVT.S.W / FCVT.S.WU -- fRs1 is an INTEGER register
+                                    if (fRs2 > 1) {
+                                        trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION); // 2/3: RV64 forms
+                                        break;
+                                    }
+                                    int cvtSRm = resolveRoundingMode(state, fFunct3);
+                                    if (cvtSRm < 0) {
+                                        trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
+                                        break;
+                                    }
+                                    rdid = 0;
+                                    writeFReg(state, fRd, fcvtSW(state, state.regs[fRs1], fRs2 == 1, cvtSRm));
+                                    break;
                                 case 0x10: // FSGNJ.S / FSGNJN.S / FSGNJX.S
                                     rdid = 0;
                                     switch (fFunct3) {
@@ -1239,8 +1701,6 @@ public class RV32IMACore {
                                     writeFReg(state, fRd, state.regs[fRs1]);
                                     break;
                                 default:
-                                    // Covers Phase 5b's rounding-mode-dependent opcodes (FADD/FSUB/FMUL/
-                                    // FDIV/FSQRT.S, FCVT.{W,WU}.S, FCVT.S.{W,WU}) until that phase lands.
                                     trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
                             }
                             break;

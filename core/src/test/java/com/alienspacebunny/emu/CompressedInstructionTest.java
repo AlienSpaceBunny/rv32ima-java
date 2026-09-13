@@ -28,6 +28,8 @@ public class CompressedInstructionTest {
     private static final int RAM_OFFSET = 0x80000000;
     private static final int RAM_SIZE = 256;
     private static final IsaConfig HAS_C = new IsaConfig(true, false, false, false, false);
+    private static final IsaConfig HAS_C_F = new IsaConfig(true, true, false, false, false);
+    private static final IsaConfig HAS_F = new IsaConfig(false, true, false, false, false);
 
     // ---- 16-bit compressed instruction encoders (independent of RV32IMACore's internals) ----
 
@@ -160,6 +162,27 @@ public class CompressedInstructionTest {
         return (6 << 13) | c | ((rs2 & 0x1f) << 2) | 0x2;
     }
 
+    private static int cFlw(int rdP, int rs1P, int imm) {
+        return (3 << 13) | lwSwImmBits(imm) | (((rs1P - 8) & 0x7) << 7) | (((rdP - 8) & 0x7) << 2);
+    }
+
+    private static int cFsw(int rs1P, int rs2P, int imm) {
+        return (7 << 13) | lwSwImmBits(imm) | (((rs1P - 8) & 0x7) << 7) | (((rs2P - 8) & 0x7) << 2);
+    }
+
+    private static int cFlwsp(int rd, int imm) {
+        int c = ((imm >>> 2) & 0x7) << 4;
+        c |= ((imm >>> 5) & 0x1) << 12;
+        c |= ((imm >>> 6) & 0x3) << 2;
+        return (3 << 13) | c | ((rd & 0x1f) << 7) | 0x2;
+    }
+
+    private static int cFswsp(int rs2, int imm) {
+        int c = ((imm >>> 2) & 0xf) << 9;
+        c |= ((imm >>> 6) & 0x3) << 7;
+        return (7 << 13) | c | ((rs2 & 0x1f) << 2) | 0x2;
+    }
+
     private static int cJr(int rs1) {
         return (4 << 13) | ((rs1 & 0x1f) << 7) | 0x2;
     }
@@ -220,6 +243,18 @@ public class CompressedInstructionTest {
         RV32IMAState viaCompressed = run(HAS_C, chalf, true, stateSetup, memSetup);
         RV32IMAState via32 = run(new IsaConfig(false, false, false, false, false), word32, false, stateSetup, memSetup);
         assertArrayEquals(via32.regs, viaCompressed.regs);
+    }
+
+    /**
+     * Like {@link #assertSameEffect}, but for the C.FLW/C.FLWSP compressed loads: compares {@code
+     * fregs} (both sides configured with {@code hasF}, since the 32-bit comparison instruction is
+     * itself FLW) instead of {@code regs}.
+     */
+    private static void assertSameFregEffect(
+            int chalf, int word32, Consumer<RV32IMAState> stateSetup, Consumer<FFMMemoryBus> memSetup) {
+        RV32IMAState viaCompressed = run(HAS_C_F, chalf, true, stateSetup, memSetup);
+        RV32IMAState via32 = run(HAS_F, word32, false, stateSetup, memSetup);
+        assertArrayEquals(via32.fregs, viaCompressed.fregs);
     }
 
     /**
@@ -461,6 +496,89 @@ public class CompressedInstructionTest {
         }
     }
 
+    // ---- F extension: C.FLW/C.FSW/C.FLWSP/C.FSWSP (Phase 5's follow-up to this phase) ----
+
+    @Test
+    public void cFlwMatchesFlw() {
+        int bits = Float.floatToRawIntBits(3.5f);
+        assertSameFregEffect(
+                cFlw(9, 8, 8),
+                flw(9, 8, 8),
+                s -> s.regs[8] = RAM_OFFSET + 0x40,
+                ram -> ram.writeInt(RAM_OFFSET + 0x48, bits));
+    }
+
+    @Test
+    public void cFlwspMatchesFlwAndAllowsRdZero() {
+        // f0 is an ordinary FP register, not hardwired zero (unlike x0/C.LWSP): rd == 0 must NOT
+        // be reserved here.
+        int bits = Float.floatToRawIntBits(-2.5f);
+        assertSameFregEffect(
+                cFlwsp(0, 8),
+                flw(0, 2, 8),
+                s -> s.regs[2] = RAM_OFFSET + 0x40,
+                ram -> ram.writeInt(RAM_OFFSET + 0x48, bits));
+    }
+
+    @Test
+    public void cFswStoresToMemoryLikeFsw() {
+        int bits = Float.floatToRawIntBits(-1.25f);
+        int viaCompressed;
+        int via32;
+        try (FFMMemoryBus ram = new FFMMemoryBus(RAM_SIZE, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[8] = RAM_OFFSET + 0x40;
+            setFReg(state, 9, bits);
+            ram.writeShort(RAM_OFFSET, (short) cFsw(8, 9, 8));
+            new RV32IMACore(HAS_C_F).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            viaCompressed = ram.readInt(RAM_OFFSET + 0x48);
+        }
+        try (FFMMemoryBus ram = new FFMMemoryBus(RAM_SIZE, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[8] = RAM_OFFSET + 0x40;
+            setFReg(state, 9, bits);
+            ram.writeInt(RAM_OFFSET, fsw(8, 9, 8));
+            new RV32IMACore(HAS_F).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            via32 = ram.readInt(RAM_OFFSET + 0x48);
+        }
+        assertEquals(bits, viaCompressed);
+        assertEquals(via32, viaCompressed);
+    }
+
+    @Test
+    public void cFswspStoresToMemoryLikeFsw() {
+        int bits = Float.floatToRawIntBits(4.0f);
+        int viaCompressed;
+        int via32;
+        try (FFMMemoryBus ram = new FFMMemoryBus(RAM_SIZE, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[2] = RAM_OFFSET + 0x40;
+            setFReg(state, 9, bits);
+            ram.writeShort(RAM_OFFSET, (short) cFswsp(9, 8));
+            new RV32IMACore(HAS_C_F).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            viaCompressed = ram.readInt(RAM_OFFSET + 0x48);
+        }
+        try (FFMMemoryBus ram = new FFMMemoryBus(RAM_SIZE, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.regs[2] = RAM_OFFSET + 0x40;
+            setFReg(state, 9, bits);
+            ram.writeInt(RAM_OFFSET, fsw(2, 9, 8));
+            new RV32IMACore(HAS_F).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            via32 = ram.readInt(RAM_OFFSET + 0x48);
+        }
+        assertEquals(bits, viaCompressed);
+        assertEquals(via32, viaCompressed);
+    }
+
+    @Test
+    public void quadrant0FlwFswSlotsTrapIllegalWithoutHasFEvenWithHasC() {
+        // decodeCompressed itself is IsaConfig-agnostic: funct3 3/7 at quadrant 0 always expand
+        // into FLW/FSW, and it's the ordinary opcode switch's own IsaConfig.hasF check that traps
+        // illegal-instruction here, since HAS_C has hasC but not hasF.
+        assertIllegal(3 << 13); // funct3 = 3, quadrant = 0
+        assertIllegal(7 << 13); // funct3 = 7, quadrant = 0
+    }
+
     // ---- Reserved / illegal 16-bit patterns ----
 
     @Test
@@ -478,15 +596,6 @@ public class CompressedInstructionTest {
         // bits 11:10 == 3 (the SUB/XOR/OR/AND cluster), bit 12 == 1: RV64's C.SUBW/C.ADDW live
         // here; RV32 has no instruction in this slot.
         assertIllegal(cArithReg(0, 9, 10) | (1 << 12));
-    }
-
-    @Test
-    public void quadrant0FlwFswSlotsStayIllegalUntilFIsDecoded() {
-        // funct3 3 and 7 at quadrant 0 are C.FLW/C.FSW (F extension) and C.FLD/C.FSD (D, not part
-        // of RV32 at all). F is not decoded by this core yet (Phase 5), so both stay illegal
-        // regardless of IsaConfig.hasC -- see decodeCompressed's block comment.
-        assertIllegal(3 << 13); // funct3 = 3, quadrant = 0
-        assertIllegal(7 << 13); // funct3 = 7, quadrant = 0
     }
 
     @Test
@@ -527,13 +636,18 @@ public class CompressedInstructionTest {
     }
 
     @Test
-    public void quadrant0Funct3OneIsReserved() {
-        assertIllegal((1 << 13)); // funct3=1, quadrant=0: C.FLD/C.LD territory, N/A on RV32
+    public void quadrant0Funct3OneAndFiveAreReservedForD() {
+        // funct3=1 (C.FLD) and funct3=5 (C.FSD): valid on RV32DC, but D isn't decoded by this
+        // core (only IsaConfig.hasD's misa bit exists) -- reserved regardless of IsaConfig.
+        assertIllegal(1 << 13);
+        assertIllegal(5 << 13);
     }
 
     @Test
-    public void quadrant2Funct3OneIsReserved() {
-        assertIllegal((1 << 13) | 0x2); // funct3=1, quadrant=2: C.FLDSP/C.LDSP territory, N/A
+    public void quadrant2Funct3OneAndFiveAreReservedForD() {
+        // funct3=1 (C.FLDSP) and funct3=5 (C.FSDSP): same D-not-decoded story as above.
+        assertIllegal((1 << 13) | 0x2);
+        assertIllegal((5 << 13) | 0x2);
     }
 
     private static void assertIllegal(int chalf) {
@@ -599,6 +713,18 @@ public class CompressedInstructionTest {
 
     private static int store(int funct3, int rs1, int rs2, int imm) {
         return (((imm >> 5) & 0x7f) << 25) | (rs2 << 20) | (rs1 << 15) | (funct3 << 12) | ((imm & 0x1f) << 7) | 0x23;
+    }
+
+    private static int flw(int rd, int rs1, int imm12) {
+        return ((imm12 & 0xfff) << 20) | (rs1 << 15) | (2 << 12) | (rd << 7) | 0x07;
+    }
+
+    private static int fsw(int rs1, int rs2, int imm12) {
+        return (((imm12 >> 5) & 0x7f) << 25) | (rs2 << 20) | (rs1 << 15) | (2 << 12) | ((imm12 & 0x1f) << 7) | 0x27;
+    }
+
+    private static void setFReg(RV32IMAState state, int idx, int bits) {
+        state.fregs[idx] = 0xFFFFFFFF00000000L | (bits & 0xFFFFFFFFL);
     }
 
     private static int luiInstr(int rd, int imm20) {

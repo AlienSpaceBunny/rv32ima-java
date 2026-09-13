@@ -704,10 +704,14 @@ public class RV32IMACore {
     // unimplemented 16-bit pattern returns 0 -- an opcode with no case in the switch below, so its
     // default branch produces the same illegal-instruction trap a bad 32-bit encoding would.
     //
-    // Quadrant-0 funct3 3 and 7 are the F/D-extension C.FLW/C.FSW/C.FLD/C.FSD slots. C.FLD/C.FSD
-    // (D extension) are not part of RV32 at all; C.FLW/C.FSW would be legal once F is decoded, but
-    // F is not implemented by this core yet (Phase 5) -- both fall through to the reserved case
-    // below on purpose, not by oversight.
+    // Quadrant-0 funct3 1/5 (C.FLD/C.FSD) and quadrant-2 funct3 1/5 (C.FLDSP/C.FSDSP) are the
+    // D-extension slots -- valid encodings on RV32DC, but D is not decoded by this core (only its
+    // misa bit exists, see IsaConfig.hasD), so they still fall through to the reserved case below.
+    // Quadrant-0 funct3 3/7 (C.FLW/C.FSW) and quadrant-2 funct3 3/7 (C.FLWSP/C.FSWSP) are the
+    // F-extension slots and expand into FLW/FSW below (same immediate-decode helpers as the
+    // integer C.LW/C.SW/C.LWSP/C.SWSP forms they're structurally identical to); the resulting
+    // 32-bit FLW/FSW re-enters the ordinary opcode switch, whose own IsaConfig.hasF check traps
+    // illegal-instruction if F isn't enabled -- decodeCompressed itself stays IsaConfig-agnostic.
 
     private static int encodeRType(int opcode, int funct3, int funct7, int rd, int rs1, int rs2) {
         return (funct7 << 25) | (rs2 << 20) | (rs1 << 15) | (funct3 << 12) | (rd << 7) | opcode;
@@ -832,8 +836,10 @@ public class RV32IMACore {
                         yield imm == 0 ? 0 : encodeIType(0x13, 0, primeLow, 2, imm); // ADDI rd', x2, imm
                     }
                     case 2 -> encodeIType(0x03, 2, primeLow, primeHigh, rvcLwImm(c)); // LW rd', imm(rs1')
+                    case 3 -> encodeIType(0x07, 2, primeLow, primeHigh, rvcLwImm(c)); // C.FLW: FLW rd', imm(rs1')
                     case 6 -> encodeSType(0x23, 2, primeHigh, primeLow, rvcLwImm(c)); // SW rs2', imm(rs1')
-                    default -> 0; // reserved, or C.FLD/C.FSD/C.FLW/C.FSW (D/F, not implemented)
+                    case 7 -> encodeSType(0x27, 2, primeHigh, primeLow, rvcLwImm(c)); // C.FSW: FSW rs2', imm(rs1')
+                    default -> 0; // reserved, or C.FLD/C.FSD (D, not implemented)
                 };
             case 1:
                 return switch (funct3) {
@@ -861,9 +867,13 @@ public class RV32IMACore {
                                 : encodeIType(0x13, 1, rdRs1Full, rdRs1Full, (c >>> 2) & 0x1f);
                     case 2 -> // C.LWSP
                         rdRs1Full == 0 ? 0 : encodeIType(0x03, 2, rdRs1Full, 2, rvcLwspImm(c));
+                    // C.FLWSP: FLW rd, imm(x2) -- unlike C.LWSP, rd == 0 (f0) is legal: f0 is an
+                    // ordinary FP register, not hardwired zero (see RV32IMAState.fregs's Javadoc).
+                    case 3 -> encodeIType(0x07, 2, rdRs1Full, 2, rvcLwspImm(c));
                     case 4 -> decodeCompressedJumpMoveCluster(c, rdRs1Full, rs2Full);
                     case 6 -> encodeSType(0x23, 2, 2, rs2Full, rvcSwspImm(c)); // C.SWSP
-                    default -> 0; // reserved, or C.FLWSP/C.FSWSP (F, not implemented)
+                    case 7 -> encodeSType(0x27, 2, 2, rs2Full, rvcSwspImm(c)); // C.FSWSP: FSW rs2, imm(x2)
+                    default -> 0; // reserved, or C.FLDSP/C.FSDSP (D, not implemented)
                 };
             default: // quadrant 3: not a compressed encoding; the caller never reaches this
                 return 0;

@@ -13,11 +13,20 @@ for how this file is updated as part of cutting a release.
   Phase 5a), gated by `IsaConfig.hasF`: `RV32IMAState.fregs` (FP register file) and `fcsr`
   (rounding mode / accrued exception flags), the `fflags`/`frm`/`fcsr` CSRs, `FLW`/`FSW`,
   `FMV.X.W`/`FMV.W.X`, `FSGNJ[N|X].S`, `FCLASS.S`, `FEQ/FLT/FLE.S`, and `FMIN/FMAX.S`.
-  `FADD`/`FSUB`/`FMUL`/`FDIV`/`FSQRT.S`, the FMADD family, and `FCVT` conversions all consult the
-  rounding mode and remain undecoded (Phase 5b). **Behavioral note:** `RV32IMAState.fregs` is
-  `long[32]`, not `float[32]`, even though only the low 32 bits are used under F alone — see
-  `docs/FEATURE_REQUEST_PLAN.md` Design Decision §8. Every FP-producing instruction NaN-boxes its
-  write (upper 32 bits set to all-ones); nothing under F-only decode reads the upper bits.
+  **Behavioral note:** `RV32IMAState.fregs` is `long[32]`, not `float[32]`, even though only the
+  low 32 bits are used under F alone — see `docs/FEATURE_REQUEST_PLAN.md` Design Decision §8.
+  Every FP-producing instruction NaN-boxes its write (upper 32 bits set to all-ones); nothing
+  under F-only decode reads the upper bits.
+- RV32F rounding-mode layer (multi-hart Phase 5b): `FADD`/`FSUB`/`FMUL`/`FDIV`/`FSQRT.S`, the
+  FMADD/FMSUB/FNMSUB/FNMADD.S family, and `FCVT.{W,WU}.S`/`FCVT.S.{W,WU}`, all consulting the
+  `rm` instruction field or dynamic `frm`. Every op is computed as a double-precision
+  approximation of the true result plus the sign of its residual, correctly rounded to `float`
+  in any of the five rounding modes (`RNE`/`RTZ`/`RDN`/`RUP`/`RMM`) — including at overflow and
+  subnormal boundaries — without a software arbitrary-precision fallback; the FMA family fuses
+  its multiply and add into one rounding rather than double-rounding through an intermediate
+  `float`. Full `fflags` accrual (`NV`/`DZ`/`OF`/`UF`/`NX`). `FCVT` saturates (never wraps) on a
+  NaN or out-of-range input, rounding first and range-checking the rounded value. A reserved `rm`
+  encoding (5, 6, or a dynamic selector pointing at a reserved `frm`) traps illegal-instruction.
 - `IsaConfig.hasD`: a misa-only flag (bit 3) for the double-precision D extension, added ahead of
   any D decode work to avoid a later breaking change to `IsaConfig`'s constructors (see Design
   Decision §8). Validated `hasD ⇒ hasF` in the record's compact constructor. Decodes nothing.

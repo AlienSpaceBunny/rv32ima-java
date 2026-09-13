@@ -9,8 +9,8 @@ instruction-fetch fault handling), Phase 2 (items 5–10: privilege/interrupt co
 (item 14: the C extension) are all done — see the inline "done" notes in the Existing Gap section,
 Design Decisions §1–§5, the ISA Extension Implementation Details section, and the Staging Plan.
 Phase 5 (item 15, the F extension) is split into 5a (register file, `fcsr`, and every
-rounding-mode-independent instruction — done, `f50e0a8`) and 5b (the rounding-mode layer;
-open) — see Design Decision §8 and the F Extension section. Rolling status lives in
+rounding-mode-independent instruction — done, `f50e0a8`) and 5b (the rounding-mode layer —
+done, `814bde6`) — see Design Decision §8 and the F Extension section. Rolling status lives in
 [`../CHECKPOINT.md`](../CHECKPOINT.md).
 
 ## Overall Verdict
@@ -47,7 +47,7 @@ Estimated relative effort (rough):
 | Zbb (18 instructions) | P2 | S — **done** (`590a4c9`) |
 | Zabha sub-word AMOs | P2 | S — **done** (`590a4c9`) |
 | C extension (fetch loop refactor) | P2 | M — **done** (`b224ac3`) |
-| F extension (new register file + ~50 instrs) | P3 | L — 5a **done** (`f50e0a8`), 5b open |
+| F extension (new register file + ~50 instrs) | P3 | L — 5a **done** (`f50e0a8`), 5b **done** (`814bde6`) |
 
 ---
 
@@ -546,7 +546,7 @@ half-word- but not word-aligned address is exercised). 400 core + 1 cli tests.
 
 Effort: **L**. Split into two sub-phases (see Design Decision §8's estimate discussion for why F
 is cheaper than this section originally implied): **5a is rounding-mode-independent and done
-(`f50e0a8`)**; **5b is the rounding-mode layer and remains open.**
+(`f50e0a8`)**; **5b is the rounding-mode layer and done** (item 15 complete).
 
 **State additions (`RV32IMAState`) — done:** see Design Decision §8 for why the register file is
 `long`-backed even though only the low 32 bits are used under F alone.
@@ -570,28 +570,58 @@ number (silent no-op / `CSRHook` passthrough, never illegal-instruction).
   `funct7` match already excludes the D/Q-format encodings of these same operations without a
   separate check.
 
-**5b opcodes — open, all consult `frm`:**
-- `0x43`–`0x4B` — FMADD/FMSUB/FNMSUB/FNMADD.S (fused multiply-add family).
+**5b opcodes — done, all consult `frm`:**
+- `0x43`/`0x47`/`0x4B`/`0x4F` — FMADD/FMSUB/FNMSUB/FNMADD.S (fused multiply-add family; these are
+  their own top-level opcodes, not `0x53` `funct7` cases — the R4 instruction format repurposes
+  that field as `{rs3, fmt}`).
 - `0x53`, `funct7` `0x00`/`0x04`/`0x08`/`0x0C`/`0x2C` — FADD/FSUB/FMUL/FDIV/FSQRT.S.
 - `0x53`, `funct7` `0x60`/`0x68` — FCVT.{W,WU}.S / FCVT.S.{W,WU} (int↔float conversions; also
   consult `frm`, and int-producing conversions saturate rather than wrap on NaN/out-of-range input
-  — NaN → `INT_MAX`/`UINT_MAX`, too-large → max, too-negative → min, `NV` set).
+  — NaN → `INT_MAX`/`UINT_MAX`, too-large → max, too-negative → min, `NV` set). `rs2` field 2/3
+  (the RV64 long forms) trap illegal-instruction.
 
-**5b numerical approach (not yet implemented):** for FADD/FSUB/FMUL/FDIV/FSQRT.S, computing in
-Java `double` and rounding to `float` once is provably safe for RNE (Java's default) *and* all
-three directed modes (RTZ/RDN/RUP) — double has enough extra precision (53 vs. 24 mantissa bits,
-comfortably past the 2p+2 threshold) that double-rounding introduces no error, and directed
-rounding survives a second rounding step in the same direction. A double-then-adjust-by-one-ulp
-construction (`Math.nextUp`/`Math.nextDown` against the true `double` value) implements RTZ/RDN/RUP
-correctly including at overflow boundaries; RMM (round-to-nearest, ties away from zero) needs one
-extra tie check beyond Java's native ties-to-even. **This shortcut does not extend to
-FMADD/FMSUB/FNMSUB/FNMADD.S** — RISC-V FMA is a single rounding of the exact `a*b+c`, and
-`(float)((double)a*(double)b+(double)c)` double-rounds at the `+c` step; use `Math.fma` on the
-`float` operands directly for RNE, and the double-based residual approach only for directed modes.
-`NX` (inexact) detection needs no error-free-transformation machinery: compare the correctly
-rounded `float` result back against the `double` (or residual-checked) true value. Full `fflags`
-accrual (`NV`/`DZ`/`OF`/`UF`/`NX`) is 5b scope; 5a sets only `NV`, and only where it can arise from
-sign-agnostic bit inspection (comparisons, min/max) rather than rounding.
+**5b numerical approach — done, corrected from this section's original sketch during
+implementation (advisor-reviewed):** the original idea above — treat the native `double` result
+`d` of a Java double-precision operation as *the* true result and round it to `float` once — is
+**not** safe for FADD/FSUB/FDIV/FSQRT.S under directed rounding modes. `d` is itself already a
+*rounded* (correctly-rounded-to-double) approximation of the true infinite-precision result `X`,
+not `X` itself, and `d` can equal a representable `float` exactly while `X` does not (e.g.
+`1.0f + (-2^-149f)`: `d == 1.0` exactly, but `X = 1.0 - 2^-149 < 1.0`, so round-toward-negative
+must produce `nextDown(1.0f)`, not `1.0f`). Directed rounding needs to bracket `X`, not `d`.
+
+The implemented fix: every arithmetic op returns a `(approx, residualSign)` pair — `approx` is the
+same correctly-rounded `double` as before, but paired with the *sign* of the exact residual
+`X - approx`, computed exactly wherever the op allows:
+- **FMUL** — exact; a float product needs at most 48 significant bits, well inside `double`'s 53.
+- **FADD/FSUB** — Knuth's TwoSum on the two (already-exact, promoted-from-`float`) `double`
+  operands gives an exact residual.
+- **FDIV**/**FSQRT** — `Math.fma` computes an exact residual against the numerator (`a - q*b` /
+  `a - s*s`) in one fused operation.
+- **FMADD family** — the multiply term is exact (as for FMUL), so folding in the addend via the
+  same TwoSum used for FADD/FSUB gives one correctly-rounded approximation of the *whole* fused
+  expression. This means **the FMA family needs no special-casing at all** beyond sign handling
+  for the four opcodes' `±(a*b) ± c` combinations — contrary to this section's original
+  expectation that a double-intermediate expression "double-rounds at the `+c` step" for FMA;
+  that concern applies to computing `a*b` then rounding *before* adding `c`, which this
+  implementation never does.
+
+Given `(approx, residualSign)`, rounding to `float` derives the two candidate floats bracketing
+the true result (`lower`/`upper`, via `Math.nextUp`/`Math.nextDown` off the RNE-rounded `float`)
+and picks the one each mode calls for — this also handles overflow and subnormal boundaries for
+free, since `Math.nextUp(Float.MAX_VALUE)` is `+infinity` and `nextUp`/`nextDown` walk the
+subnormal grid correctly. RMM (ties away from zero) needs one additional exact-midpoint check,
+valid because a float midpoint is always exactly representable in `double`. `NX` is set whenever
+the true result isn't exactly representable as the rounded `float`; `OF`/`UF` follow from the
+rounded magnitude. `FCVT.{W,WU}.S` rounds the input to an integer per `rm` *first*, then
+range-checks the rounded value (not the pre-rounded one) before saturating — this ordering matters
+at the boundary (e.g. `FCVT.WU.S(-0.5)` is in range under RTZ, which rounds to `-0`, but out of
+range under RDN, which rounds to `-1`).
+
+`NV`/`DZ` for special values (NaN, infinities, zero) are handled per-operation before any of the
+above, matching the standard IEEE 754 rules (e.g. `0/0` and `inf/inf` are invalid, not
+divide-by-zero; `finite/0` is divide-by-zero; opposite-signed-infinity addition is invalid).
+Full `fflags` accrual (`NV`/`DZ`/`OF`/`UF`/`NX`) is complete; 5a set only `NV`, and only where it
+could arise from sign-agnostic bit inspection (comparisons, min/max) rather than rounding.
 
 Guard with `IsaConfig.hasF`. All new opcodes with F disabled → illegal instruction trap.
 `IsaConfig.hasD` exists (misa-only, see Design Decision §8) but decodes nothing — D itself remains
@@ -693,10 +723,11 @@ here changes that division of responsibility or narrows it to word-only.
 ### Phase 5 — Floating-Point (P3 — AP only, separate effort)
 
 15. F extension: register file, fcsr, opcode decode for FLW/FSW/arithmetic/conversion.
-    **Split into 5a/5b** (see the F Extension design section below): **5a done (`f50e0a8`)** —
-    register file, `fcsr`, and every rounding-mode-independent instruction. 5b — the
-    rounding-mode layer, FADD/FSUB/FMUL/FDIV/FSQRT.S, the FMADD family, and FCVT
-    conversions — remains open.
+    **Split into 5a/5b, both done** (see the F Extension design section below): **5a
+    (`f50e0a8`)** — register file, `fcsr`, and every rounding-mode-independent instruction.
+    **5b (`814bde6`)** — the rounding-mode layer: FADD/FSUB/FMUL/FDIV/FSQRT.S, the
+    FMADD family, and FCVT conversions, all five IEEE 754 rounding modes, and full `fflags`
+    accrual.
 
 ---
 

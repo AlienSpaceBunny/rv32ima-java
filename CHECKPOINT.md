@@ -1,4 +1,4 @@
-# Session Checkpoint — 2026-09-10
+# Session Checkpoint — 2026-09-12
 
 ## Where We Are
 
@@ -14,7 +14,16 @@ the one condition (real MSIP/MEIP interrupt delivery, not just injection) is don
 **Phase 1 (foundation) is done (`c92045e`)** — see below. **Phase 2 is done** (items 5, 6, 7,
 8, 9, 10 all complete; final pieces `4aeec77`) — see below. **Phase 3 is done** (items 11, 12,
 13 — Zba, Zbb, Zabha — `590a4c9`) — see below. **Phase 4 is done** (item 14 — the C extension —
-`b224ac3`) — see below. **Phase 5a is done** (item 15's rounding-mode-independent subset — register file, `fcsr`, FLW/FSW, moves, sign injection, classify, comparisons, min/max — `f50e0a8`) — see below. Phase 5b (the rounding-mode layer: FADD/FSUB/FMUL/FDIV/FSQRT.S, the FMADD family, FCVT conversions, full `fflags`) is next, pending Nate's go-ahead.
+`b224ac3`) — see below. **Phase 5a is done** (item 15's rounding-mode-independent subset — register file, `fcsr`, FLW/FSW, moves, sign injection, classify, comparisons, min/max — `f50e0a8`) — see below. **Phase 5b is done** (item 15's rounding-mode layer — FADD/FSUB/FMUL/FDIV/FSQRT.S, the FMADD family, FCVT conversions, full `fflags` — `814bde6`) — see below. **The F extension (item 15) is now fully decoded; Phase 5, and the whole `docs/FEATURE_REQUEST_PLAN.md` staging plan, is complete.**
+
+**What's plausibly next** (no go-ahead yet on any of these — flagging, not starting): release
+readiness (`RELEASE_TODO.md`, R1–R8 — Central publish has been paused pending an explicit
+API-freeze review, which the staging plan's completion now makes timely to actually hold); the
+three items flagged throughout the plan as belonging to the *emulator* repo, not this one (AP-to-
+IOP trap notification, cross-hart LR/SC reservations keyed on translated addresses, and `aq`/`rl`
+memory-ordering semantics for a real multi-hart `MemoryBus` — none of which exist in this repo
+yet); or D (double-precision) extension work, deliberately deferred out of Phase 5 (`hasD` is
+misa-only today, see Design Decision §8).
 
 ---
 
@@ -266,18 +275,71 @@ file; `MemoryBus` 64-bit access explicitly deferred, since FLW/FSW don't need it
   are hand-rolled (not `Math.min`/`Math.max`, which get NaN propagation wrong for RISC-V's
   semantics). `NV` is the only `fflags` bit that can arise here (signaling-NaN operands to a
   comparison or min/max); `DZ`/`OF`/`UF`/`NX` are all rounding-related and wait for 5b.
-- **Not yet decoded (Phase 5b, all consult `frm`):** FADD/FSUB/FMUL/FDIV/FSQRT.S, the FMADD
-  family, FCVT.{W,WU}.S/FCVT.S.{W,WU}. Advisor-reviewed numerical approach recorded in the F
-  Extension design section: double-as-intermediate is provably safe for RNE and all three directed
-  rounding modes on the basic arithmetic ops (double has enough precision margin over float — 53
-  vs. 24 mantissa bits — that double-rounding introduces no error), implemented as one native
-  `(float)` cast plus a `Math.nextUp`/`nextDown` correction for directed modes; this shortcut does
-  **not** extend to the fused multiply-add family (RISC-V FMA is a single rounding of `a*b+c`,
-  which `Math.fma` on the float operands gets right for RNE but a double-intermediate expression
-  does not, since the `+c` step double-rounds). `NX` detection needs no error-free-transformation
-  machinery — compare the rounded result back against the true (or residual-checked) value.
+- **Not yet decoded at this point (Phase 5b, below):** FADD/FSUB/FMUL/FDIV/FSQRT.S, the FMADD
+  family, FCVT.{W,WU}.S/FCVT.S.{W,WU}. The numerical approach sketched at the time (a native
+  `double` intermediate rounded to `float` once) turned out to be unsafe for directed rounding
+  modes and was corrected during Phase 5b's implementation — see below.
 - New `FExtensionTest` (39 tests) plus 6 new `IsaConfigTest` cases for `hasD`. 446 core + 1 cli
   tests.
+
+---
+
+## Phase 5b — F extension, rounding-mode layer (`814bde6`) — done
+
+Item 15's remaining half: FADD/FSUB/FMUL/FDIV/FSQRT.S, the FMADD/FMSUB/FNMSUB/FNMADD.S family
+(their own top-level opcodes, not `OP-FP` `funct7` cases — the R4 format repurposes that field as
+`{rs3, fmt}`), and FCVT.{W,WU}.S/FCVT.S.{W,WU}. **The F extension, and the whole Phase 1–5 staging
+plan in `docs/FEATURE_REQUEST_PLAN.md`, is now complete.**
+
+- **The Phase 5a numerical sketch was wrong, caught by advisor review before implementation.**
+  Rounding the native `double` result of a Java double-precision operation to `float` a second
+  time is *not* safe for directed rounding modes: the `double` result is itself already a rounded
+  approximation of the true infinite-precision result, not the true value. Counterexample:
+  `1.0f + (-2^-149f)` — the `double` sum is exactly `1.0`, but the true value
+  `1.0 - 2^-149` is strictly below `1.0`, so round-toward-negative must produce
+  `Math.nextDown(1.0f)`, not `1.0f`. A naive "cast the double result once" implementation would
+  have silently gotten every directed-mode boundary case wrong.
+- **The fix:** every arithmetic op computes a `(double approx, int residualSign)` pair — `approx`
+  is the same correctly-rounded `double` as before, `residualSign` is the exact sign of the true
+  result minus `approx`. This is exact and cheap per op: `FMUL` needs no computation at all (a
+  float product needs at most 48 significant bits, well inside `double`'s 53); `FADD`/`FSUB` use
+  Knuth's TwoSum on the two (losslessly widened) `double` operands; `FDIV`/`FSQRT` use a
+  `Math.fma`-computed exact residual against the numerator. `roundToFloat` then derives the two
+  candidate floats bracketing the true result from that pair and picks the one each of the five
+  modes calls for — RTZ/RDN/RUP/RNE directly, RMM via one additional exact-midpoint tie check
+  (valid because a float midpoint is always exactly representable in `double`). Overflow and
+  subnormal boundaries fall out for free (`Math.nextUp(Float.MAX_VALUE)` is `+infinity`).
+- **The FMA family needed no special-casing at all, contrary to the Phase 5a sketch's
+  expectation.** The multiply term `a*b` is exact in `double` (as for `FMUL`), so folding the
+  addend `c` in via the same TwoSum used for `FADD`/`FSUB` gives one correctly-rounded
+  approximation of the whole fused expression directly — there's no double-rounding-unsafe
+  intermediate step to avoid, because this implementation never rounds the product before adding
+  `c`. `FMADD`/`FMSUB`/`FNMSUB`/`FNMADD.S` share one `fmaS` implementation, parameterized by which
+  of `a`/`c` gets negated.
+- **`FCVT.{W,WU}.S` rounds to an integer per `rm` first, then range-checks the rounded value** —
+  not the pre-rounded one. This ordering is observable at boundaries: `FCVT.WU.S(-0.5)` is in
+  range under RTZ (rounds to `-0`, `NX` set, `NV` clear) but out of range under RDN (rounds to
+  `-1`, saturates to `0`, `NV` set, `NX` clear).
+- Full `fflags` accrual: `NV`/`DZ` per-operation for special values (NaN, infinities, zero — e.g.
+  `0/0` and `inf/inf` are invalid, not divide-by-zero; opposite-signed-infinity addition is
+  invalid), `OF`/`UF`/`NX` generically from `roundToFloat`'s rounded magnitude and exactness.
+  Exact-cancellation zero sign (`+0` in every mode except round-toward-negative, where it's `-0`)
+  is handled explicitly for `FADD`/`FSUB`/`FMADD`-family, matching IEEE 754 rather than whatever
+  sign Java's own default-rounding `double` zero arithmetic happens to produce.
+- A reserved `rm` encoding (5, 6, or a dynamic selector when `frm` itself holds a reserved value)
+  traps illegal-instruction before touching any register or flag; this check applies only to
+  instructions with an actual `rm` field (the five arithmetic ops, the FMA family, all four FCVT
+  forms) — Phase 5a's FSGNJ/FMIN/FMAX/FEQ/FCLASS/FMV use `funct3` as an opcode selector, not `rm`,
+  and are untouched.
+- New `FExtensionRoundingTest` (48 tests): basic wiring and NaN/infinity/zero special cases per
+  op; the `1.0f + (-2^-149f)` RDN/RNE divergence from the advisor's counterexample; overflow and
+  underflow flag/saturation behavior across rounding modes; the FCVT round-then-range-check
+  ordering; reserved and dynamic rounding-mode traps; and a randomized differential suite for
+  FADD/FSUB/FMUL/FDIV/FSQRT against `BigDecimal`-exact arithmetic, plus an FMA differential
+  suite against `Math.fma` — both deliberately independent of this class's own TwoSum/`Math.fma`-
+  residual formulas, per Phase 4's differential-testing discipline. One SpotBugs suppression
+  added (`config/spotbugs-exclude.xml`) for the RMM tie-detection equality check, which is exact
+  by construction. 494 core + 1 cli tests.
 
 ---
 

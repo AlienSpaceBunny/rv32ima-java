@@ -14,17 +14,21 @@ should be composed around the core through `MemoryBus`, `HardwareHook`,
 `RV32IMACore()` configures the base RV32IMA_Zicsr ISA. `RV32IMACore(IsaConfig)`
 accepts an `IsaConfig` for the additional extensions being layered on for the
 V-32 multi-hart feature work (`RV32IMFC_ZBA_ZBB_ZICSR`, `RV32IMC_ZBB_ZICSR`, or
-a custom combination). As of Phase 5a, `hasZba`, `hasZbb`, `hasZabha`, `hasC`,
-and `hasF` (partially — see below) are decoded — enabling one unlocks the
-corresponding instructions, and the un-gated encodings still raise an
-illegal-instruction trap even when the config would otherwise support them
-(see the `IsaConfig`/`RV32IMACore` class Javadoc for the exact instruction
-list per flag). `hasF` currently unlocks `FLW`/`FSW`, the FP moves
+a custom combination). As of Phase 5b, `hasZba`, `hasZbb`, `hasZabha`, `hasC`,
+and `hasF` are fully decoded — enabling one unlocks the corresponding
+instructions, and the un-gated encodings still raise an illegal-instruction
+trap even when the config would otherwise support them (see the
+`IsaConfig`/`RV32IMACore` class Javadoc for the exact instruction list per
+flag). `hasF` unlocks all of RV32F: `FLW`/`FSW`, the FP moves
 (`FMV.X.W`/`FMV.W.X`), sign injection (`FSGNJ[N|X].S`), `FCLASS.S`,
-comparisons (`FEQ`/`FLT`/`FLE.S`), and `FMIN`/`FMAX.S` — every RV32F
-instruction with no rounding-mode dependence. `FADD`/`FSUB`/`FMUL`/`FDIV`/
-`FSQRT.S`, the FMADD family, and `FCVT` conversions all consult the rounding
-mode and are not decoded yet (Phase 5b). `hasD` is not decoded at all: it
+comparisons (`FEQ`/`FLT`/`FLE.S`), `FMIN`/`FMAX.S` (all rounding-mode
+independent, Phase 5a), and `FADD`/`FSUB`/`FMUL`/`FDIV`/`FSQRT.S`, the FMADD
+family, and `FCVT.{W,WU}.S`/`FCVT.S.{W,WU}` (all rounding-mode dependent,
+Phase 5b). An instruction's `rm` field selects one of the five IEEE 754
+rounding modes statically, or `frm` (CSR `0x002`) dynamically when `rm` is 7;
+a reserved encoding (`rm` 5 or 6, or a dynamic selector when `frm` itself
+holds a reserved value) traps illegal-instruction before touching any
+register or flag. `hasD` is not decoded at all: it
 only changes the `misa` CSR value the guest reads back. `misa` is derived
 from the config (`IsaConfig.misa()`); `Zba`/`Zbb`/`Zabha` have no bit of
 their own in `misa` and don't affect it regardless of decode support; `C`,
@@ -43,9 +47,16 @@ FP-producing instruction NaN-boxes its write (sets the upper 32 bits to
 all-ones); read the low 32 bits directly, or via `Float.intBitsToFloat((int)
 state.fregs[i])`. `state.fcsr` holds the rounding mode (bits 7–5, `frm`) and
 accrued exception flags (bits 4–0, `fflags`); also addressable piecewise as
-CSRs `0x001` and `0x002`. Currently only `NV` (invalid operation) can be set,
-from a signaling-NaN operand to a comparison or `FMIN`/`FMAX`; the other four
-flags are all rounding-related and wait for Phase 5b.
+CSRs `0x001` and `0x002`. All five `fflags` bits (`NV`/`DZ`/`OF`/`UF`/`NX`)
+are accrued now: `NV` from a signaling-NaN operand (or, for FCVT, any NaN
+input, or an out-of-range input) to any FP-consuming instruction; `DZ` from a
+finite nonzero dividend divided by zero (not `0/0`, which is `NV`); `OF`/`UF`
+from a rounded result that overflows to infinity/saturates at the largest
+finite magnitude, or underflows to a subnormal or zero; `NX` whenever the
+mathematically exact result isn't exactly representable in the destination
+type. `fflags`/`frm`/`fcsr` are never cleared by the core itself — the guest
+CSR-writes them directly (typically before a sequence it wants to check
+afterward).
 
 `RV32IMACore.step(...)` executes up to `count` guest instructions against the
 provided mutable `RV32IMAState` and `MemoryBus`.
@@ -208,6 +219,27 @@ comparison (only a signaling NaN operand sets `fcsr`'s `NV` bit); `FLT.S`/
 `FLE.S` are signaling (any NaN operand, quiet or not, sets `NV`). See
 `FExtensionTest` for the full instruction-by-instruction coverage, including
 the NaN-boxing, `IsaConfig` gating, and `fcsr`/`fflags`/`frm` CSR behavior.
+
+F extension, rounding-mode layer (Phase 5b): `FADD`/`FSUB`/`FMUL`/`FDIV`/
+`FSQRT.S`, the FMADD/FMSUB/FNMSUB/FNMADD.S family, and
+`FCVT.{W,WU}.S`/`FCVT.S.{W,WU}` are all computed by pairing a
+correctly-rounded `double`-precision approximation of the true result with
+the exact sign of its residual (via Knuth's TwoSum for FADD/FSUB and the FMA
+family's addend step, or a `Math.fma`-computed exact residual for FDIV and
+FSQRT), then rounding that pair to `float` in whichever of the five IEEE 754
+modes the instruction's `rm` field (or dynamic `frm`) selects — this is
+deliberately *not* "round the native `double` result once," which is unsafe
+for directed rounding modes (see `docs/FEATURE_REQUEST_PLAN.md`'s F Extension
+design section for the specific counterexample this caught in review). The
+FMA family fuses its multiply and add into that single rounding rather than
+computing `a*b` as a separately-rounded `float` first. `FCVT.{W,WU}.S` rounds
+its input to an integer per `rm`, then range-checks the *rounded* value
+before saturating — not the other way around, which matters at boundaries
+like `FCVT.WU.S(-0.5)` (in range under RTZ, which rounds to `-0`; out of
+range under RDN, which rounds to `-1`). See `FExtensionRoundingTest`,
+including its randomized differential coverage against independent
+`BigDecimal`-exact and `Math.fma` oracles (deliberately not the same
+TwoSum/`Math.fma`-residual formulas this class's implementation uses).
 
 ## MMIOBus and HardwareHook
 

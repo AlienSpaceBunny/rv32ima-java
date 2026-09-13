@@ -11,6 +11,7 @@
 | [PLAN_REVIEW_RESPONSE.md](PLAN_REVIEW_RESPONSE.md) | The originating LLM's answers (B1–B7); basis for r6 and the interrupt-gating fix. |
 | [TEST_PLAN.md](TEST_PLAN.md) | Test-suite expansion plan. Layers 1 & 2 done; Layer 3 (system-level scenarios) not started. |
 | [RELEASING.md](RELEASING.md) | Local versioning/tagging/build procedure (`maven-release-plugin`). Central publishing is a separate, on-hold step — see `../RELEASE_TODO.md`. |
+| [EMULATOR_REPO_NOTES.md](EMULATOR_REPO_NOTES.md) | Findings from directly reading the sibling emulator (V-32) repo's source — its architecture, threading model, and multi-hart `MemoryBus` gaps. A dated snapshot, not a live view; check before relying on specifics. |
 
 Rolling status lives in [`../CHECKPOINT.md`](../CHECKPOINT.md). `../CLEANUP_TODO.md` is
 closed out (see its status table); `../RELEASE_TODO.md` tracks the current release-readiness

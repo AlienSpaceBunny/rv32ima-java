@@ -534,13 +534,28 @@ opcode switch — no RVC instruction needed a direct-compute exception. Every bi
 was taken from the reference simulator's decoder (`riscv-isa-sim`, not hand-derived) and
 cross-checked against the authoritative `riscv-opcodes` tables; a reserved 16-bit pattern returns
 an opcode with no case in the switch, reusing its existing illegal-instruction `default` arm.
-`C.FLW`/`C.FSW` (quadrant 0, funct3 3/7) stay illegal since `F` isn't decoded yet — Phase 5's
-scope, not an oversight. New `CompressedInstructionTest` (34 tests) covers every instruction
-differentially against its hand-assembled 32-bit equivalent, reserved/illegal patterns in both
-directions, jump link values, a compressed breakpoint trap's `mtval`, RAM-window-edge fetch
-faulting instead of overrunning the backing store, and mixed compressed/32-bit instruction streams
-in both orderings (the actual point of the extension, and the one place `mem.readInt` at a
-half-word- but not word-aligned address is exercised). 400 core + 1 cli tests.
+`C.FLW`/`C.FSW` (quadrant 0, funct3 3/7) stayed illegal at this point since `F` wasn't decoded
+yet — Phase 5's scope, not an oversight — and were wired up once Phase 5b landed (see below).
+New `CompressedInstructionTest` (34 tests) covers every instruction differentially against its
+hand-assembled 32-bit equivalent, reserved/illegal patterns in both directions, jump link values,
+a compressed breakpoint trap's `mtval`, RAM-window-edge fetch faulting instead of overrunning the
+backing store, and mixed compressed/32-bit instruction streams in both orderings (the actual point
+of the extension, and the one place `mem.readInt` at a half-word- but not word-aligned address is
+exercised). 400 core + 1 cli tests.
+
+**Follow-up, done alongside Phase 5b (`3a42dbf`):** with `F` now fully decoded,
+`decodeCompressed` gained the four remaining F-extension slots this section originally deferred —
+`C.FLW`/`C.FSW` (quadrant 0, funct3 3/7) and `C.FLWSP`/`C.FSWSP` (quadrant 2, funct3 3/7) — each
+expanding into the equivalent `FLW`/`FSW` using the same immediate-decode helpers as the integer
+`C.LW`/`C.SW`/`C.LWSP`/`C.SWSP` forms they're structurally identical to. `decodeCompressed` itself
+stays `IsaConfig`-agnostic: the resulting 32-bit `FLW`/`FSW` re-enters the ordinary opcode switch,
+whose own `hasF` check traps illegal-instruction if `F` isn't enabled even when `hasC` is — so
+`HAS_C`-only configs see no behavior change. One real difference from `C.LWSP`: `C.FLWSP`'s `rd`
+field does *not* reserve `0`, since `f0` is an ordinary FP register, not hardwired zero, unlike
+`x0`/`C.LWSP`. Quadrant 0/2 funct3 1/5 (`C.FLD`/`C.FSD`/`C.FLDSP`/`C.FSDSP`) remain reserved — they
+require `D`, which this core still doesn't decode (only `IsaConfig.hasD`'s `misa` bit exists); the
+existing test comments describing them as "not part of RV32 at all" were wrong (they're valid
+RV32DC encodings) and have been corrected. 6 new/renamed tests. 498 core + 1 cli tests.
 
 ### F Extension (Single-Precision Floating-Point — lowest priority, AP only)
 
@@ -727,7 +742,9 @@ here changes that division of responsibility or narrows it to word-only.
     (`f50e0a8`)** — register file, `fcsr`, and every rounding-mode-independent instruction.
     **5b (`814bde6`)** — the rounding-mode layer: FADD/FSUB/FMUL/FDIV/FSQRT.S, the
     FMADD family, and FCVT conversions, all five IEEE 754 rounding modes, and full `fflags`
-    accrual.
+    accrual. **Follow-up (`3a42dbf`)** — closed the loop Phase 4 left open (item 14's
+    note above): `decodeCompressed` now decodes `C.FLW`/`C.FSW`/`C.FLWSP`/`C.FSWSP`, since `F` is
+    fully decoded. See the C Extension design section's follow-up note.
 
 ---
 

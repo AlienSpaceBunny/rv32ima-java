@@ -1,4 +1,4 @@
-# Session Checkpoint — 2026-09-12
+# Session Checkpoint — 2026-09-13
 
 ## Where We Are
 
@@ -14,16 +14,28 @@ the one condition (real MSIP/MEIP interrupt delivery, not just injection) is don
 **Phase 1 (foundation) is done (`c92045e`)** — see below. **Phase 2 is done** (items 5, 6, 7,
 8, 9, 10 all complete; final pieces `4aeec77`) — see below. **Phase 3 is done** (items 11, 12,
 13 — Zba, Zbb, Zabha — `590a4c9`) — see below. **Phase 4 is done** (item 14 — the C extension —
-`b224ac3`) — see below. **Phase 5a is done** (item 15's rounding-mode-independent subset — register file, `fcsr`, FLW/FSW, moves, sign injection, classify, comparisons, min/max — `f50e0a8`) — see below. **Phase 5b is done** (item 15's rounding-mode layer — FADD/FSUB/FMUL/FDIV/FSQRT.S, the FMADD family, FCVT conversions, full `fflags` — `814bde6`) — see below. **The F extension (item 15) is now fully decoded; Phase 5, and the whole `docs/FEATURE_REQUEST_PLAN.md` staging plan, is complete.**
+`b224ac3`) — see below. **Phase 5a is done** (item 15's rounding-mode-independent subset — register file, `fcsr`, FLW/FSW, moves, sign injection, classify, comparisons, min/max — `f50e0a8`) — see below. **Phase 5b is done** (item 15's rounding-mode layer — FADD/FSUB/FMUL/FDIV/FSQRT.S, the FMADD family, FCVT conversions, full `fflags` — `814bde6`) — see below. **The F extension (item 15) is now fully decoded; Phase 5, and the whole `docs/FEATURE_REQUEST_PLAN.md` staging plan, is complete.** A follow-up gap Phase 4 had deliberately left open — `C.FLW`/`C.FSW`/`C.FLWSP`/`C.FSWSP`, pending F's decode — is now closed too (`3a42dbf`); see below.
 
-**What's plausibly next** (no go-ahead yet on any of these — flagging, not starting): release
-readiness (`RELEASE_TODO.md`, R1–R8 — Central publish has been paused pending an explicit
-API-freeze review, which the staging plan's completion now makes timely to actually hold); the
-three items flagged throughout the plan as belonging to the *emulator* repo, not this one (AP-to-
-IOP trap notification, cross-hart LR/SC reservations keyed on translated addresses, and `aq`/`rl`
-memory-ordering semantics for a real multi-hart `MemoryBus` — none of which exist in this repo
-yet); or D (double-precision) extension work, deliberately deferred out of Phase 5 (`hasD` is
-misa-only today, see Design Decision §8).
+**Release hold extended past this repo's own staging plan (Nate, 2026-09-13, `RELEASE_TODO.md`).**
+Finishing the staging plan does **not** trigger the API-freeze review. The API stays
+deliberately unfrozen — everything through whatever `-SNAPSHOT` `main` is currently on is
+unstable — until the **emulator repo's** side of the multi-hart integration is done and has
+exercised the API in practice; only then does a real release (**`0.2.0`**, not the earlier
+`0.1.1` target — see `RELEASE_TODO.md`'s update) make sense. `main` is `0.1.2-SNAPSHOT` as of
+this session (plain bump, no tag — `8f0b6cf`); expect more plain bumps before any real release.
+
+**Multi-hart `MemoryBus` design notes handed off to the emulator repo (2026-09-13, not
+committed here — see below for where).** Two of the three items previously flagged as
+"belonging to the emulator repo" (cross-hart LR/SC reservations keyed on translated addresses,
+`aq`/`rl` memory-ordering semantics, both needing a real multi-hart-aware `MemoryBus`
+implementation that doesn't exist anywhere yet) got a detailed design writeup for whoever
+implements that bus, wherever it ends up living. AP-to-IOP trap notification remains flagged
+but undesigned — it needs a device the emulator repo owns, not a `MemoryBus` concern.
+
+**What's plausibly next in this repo specifically** (no go-ahead yet on any of these —
+flagging, not starting): D (double-precision) extension work, deliberately deferred out of
+Phase 5 (`hasD` is misa-only today, see Design Decision §8); anything the emulator-repo
+integration work surfaces as needed back here once it's underway.
 
 ---
 
@@ -340,6 +352,33 @@ plan in `docs/FEATURE_REQUEST_PLAN.md`, is now complete.**
   residual formulas, per Phase 4's differential-testing discipline. One SpotBugs suppression
   added (`config/spotbugs-exclude.xml`) for the RMM tie-detection equality check, which is exact
   by construction. 494 core + 1 cli tests.
+
+---
+
+## C.FLW/C.FSW/C.FLWSP/C.FSWSP decode (`3a42dbf`) — done
+
+A follow-up Phase 4 explicitly deferred ("would be legal once F is decoded, but F is not
+implemented by this core yet — Phase 5's scope, not an oversight") and that got missed when
+Phase 5b wrapped up last session. `decodeCompressed` now expands all four remaining
+F-extension compressed slots into `FLW`/`FSW`, using the same immediate-decode helpers as the
+structurally identical `C.LW`/`C.SW`/`C.LWSP`/`C.SWSP` integer forms.
+
+- `decodeCompressed` itself stays `IsaConfig`-agnostic (as it already was for every other
+  instruction): the generated 32-bit `FLW`/`FSW` re-enters the ordinary opcode switch, whose own
+  `hasF` check traps illegal-instruction if `F` isn't enabled even when `C` is. No new gating
+  logic needed.
+- `C.FLWSP`'s `rd` field does **not** reserve `0`, unlike `C.LWSP` — `f0` is an ordinary FP
+  register, not hardwired zero (a distinction already baked into Phase 5a's register-file
+  design). Verified explicitly in the new test (`cFlwspMatchesFlwAndAllowsRdZero`).
+- Corrected two existing test comments that turned out to be wrong: `C.FLD`/`C.FSD`/
+  `C.FLDSP`/`C.FSDSP` (the D-extension quadrant-0/2 funct3 1/5 slots) are valid RV32DC
+  encodings, not "not part of RV32 at all" as previously stated — they stay illegal because
+  this core doesn't decode `D` at all (only `IsaConfig.hasD`'s `misa` bit exists), not because
+  of an RV32-vs-RV64 distinction.
+- New differential tests (`CompressedInstructionTest`) compare `fregs` (loads) or raw memory
+  content (stores) between the compressed encoding and its hand-assembled 32-bit `FLW`/`FSW`
+  equivalent, plus a gating test confirming `HAS_C`-only configs are unaffected. 498 core + 1
+  cli tests.
 
 ---
 

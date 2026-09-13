@@ -27,6 +27,11 @@ for how this file is updated as part of cutting a release.
   `float`. Full `fflags` accrual (`NV`/`DZ`/`OF`/`UF`/`NX`). `FCVT` saturates (never wraps) on a
   NaN or out-of-range input, rounding first and range-checking the rounded value. A reserved `rm`
   encoding (5, 6, or a dynamic selector pointing at a reserved `frm`) traps illegal-instruction.
+- Compressed floating-point loads/stores `C.FLW`/`C.FSW`/`C.FLWSP`/`C.FSWSP`, closing a gap
+  Phase 4 deliberately left open pending F's decode. Requires both `IsaConfig.hasC` and `hasF`;
+  `hasC`-only configs see no behavior change (the generated `FLW`/`FSW` still traps
+  illegal-instruction via the ordinary opcode switch's own `hasF` check). `C.FLWSP`'s `rd` field
+  does not reserve `0`, unlike `C.LWSP` — `f0` is an ordinary FP register, not hardwired zero.
 - `IsaConfig.hasD`: a misa-only flag (bit 3) for the double-precision D extension, added ahead of
   any D decode work to avoid a later breaking change to `IsaConfig`'s constructors (see Design
   Decision §8). Validated `hasD ⇒ hasF` in the record's compact constructor. Decodes nothing.

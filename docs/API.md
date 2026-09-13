@@ -28,7 +28,11 @@ Phase 5b). An instruction's `rm` field selects one of the five IEEE 754
 rounding modes statically, or `frm` (CSR `0x002`) dynamically when `rm` is 7;
 a reserved encoding (`rm` 5 or 6, or a dynamic selector when `frm` itself
 holds a reserved value) traps illegal-instruction before touching any
-register or flag. `hasD` is not decoded at all: it
+register or flag. When both `hasC` and `hasF` are set, the compressed forms
+`C.FLW`/`C.FSW`/`C.FLWSP`/`C.FSWSP` are decoded too, expanding into the
+equivalent `FLW`/`FSW`; with `hasC` but not `hasF` they still trap
+illegal-instruction, via the same `hasF` check the 32-bit `FLW`/`FSW` opcodes
+go through. `hasD` is not decoded at all: it
 only changes the `misa` CSR value the guest reads back. `misa` is derived
 from the config (`IsaConfig.misa()`); `Zba`/`Zbb`/`Zabha` have no bit of
 their own in `misa` and don't affect it regardless of decode support; `C`,

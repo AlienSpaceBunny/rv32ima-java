@@ -46,7 +46,7 @@ Good sequence: land Phase 1–2 → API-freeze review → set up versioning + CI
 | CLI distribution | **`rv32emu-cli` fat jar → GitHub Releases** as an asset, not a Maven artifact. Avoids the duplicate-classes problem (shade bundles core's classes; a published cli POM would also declare core as a dependency). |
 | Interim dependency access | **JitPack**, on demand — no repo changes required. |
 | Versioning mechanics | **Done (R5).** `main` carries `0.1.1-SNAPSHOT`; `maven-release-plugin` handles the release/next-SNAPSHOT bump and `vX.Y.Z` tagging. See `docs/RELEASING.md`. |
-| First release number | **`0.1.1`** (Nate). `0.1.0` is skipped — already referenced by the downstream V-32 project. |
+| First release number | ~~`0.1.1`~~ **`0.2.0`** (Nate, 2026-09-13 — see the Update below; supersedes the original `0.1.1` call). `0.1.0` is skipped regardless — already referenced by the downstream V-32 project. |
 | Changelog | **`CHANGELOG.md`**, Keep a Changelog format, tracked per version. Maintenance instructions in `AGENTS.md`. |
 
 ## Open questions
@@ -54,6 +54,20 @@ Good sequence: land Phase 1–2 → API-freeze review → set up versioning + CI
 - Does the published API count as stable (1.0.0) yet, or stay 0.x while the
   multi-hart feature work (`docs/FEATURE_REQUEST_PLAN.md`) lands? The feature plan
   is explicitly additive/backward-compatible, so 1.0.0 now is defensible.
+
+## Update (2026-09-13): hold extended past this repo's own staging plan
+
+`docs/FEATURE_REQUEST_PLAN.md`'s Phase 1–5 staging plan (this repo's side of the multi-hart
+work) finished this session. That does **not** trigger the API-freeze review or move the
+"first release number" decision below — **Nate's call:** the API stays deliberately unfrozen,
+and every version up through whatever's current when this note is read is unstable, until the
+**emulator repo's** side of the integration (the AP/IOP application actually consuming this
+library as a multi-hart core) is done and has exercised the API in practice. Only then does an
+API-freeze review make sense, and the target for the first real release changes from `0.1.1` to
+**`0.2.0`** — reflecting that real, non-additive API shakeout may happen once a real consumer
+exists, not just this repo's own compliance-test-driven design. `main` may accumulate several
+more plain `-SNAPSHOT` bumps in the meantime (see `docs/RELEASING.md`); none of them are
+release candidates.
 
 ---
 

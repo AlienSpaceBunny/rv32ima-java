@@ -1171,7 +1171,7 @@ public class RV32IMACore {
                             AccessContext fetchCtx = new AccessContext(state.hartId, privilege, AccessKind.FETCH, 4, 0);
                             ir = mem.readInt(pc, fetchCtx);
                         }
-                    } catch (IndexOutOfBoundsException e) {
+                    } catch (IndexOutOfBoundsException _) {
                         // The ramOffset/ramSize check above is only a coarse precheck; a bus can
                         // still reject a fetch within that window (for example, fine-grained MPU
                         // enforcement, or -- with hasC -- a 32-bit fetch that starts within the
@@ -1198,7 +1198,7 @@ public class RV32IMACore {
                             int jumpOffset = ((ir & 0x80000000) >> 11)
                                     | ((ir & 0x7fe00000) >> 20)
                                     | ((ir & 0x00100000) >> 9)
-                                    | ((ir & 0x000ff000));
+                                    | (ir & 0x000ff000);
                             if ((jumpOffset & 0x00100000) != 0) jumpOffset |= 0xffe00000;
                             rval = pc + instrLen;
                             pc = pc + jumpOffset - instrLen;
@@ -1264,7 +1264,7 @@ public class RV32IMACore {
                                 int bits = mem.readInt(
                                         addr, new AccessContext(state.hartId, privilege, AccessKind.LOAD, 4, 0));
                                 writeFReg(state, fRd, bits);
-                            } catch (IndexOutOfBoundsException e) {
+                            } catch (IndexOutOfBoundsException _) {
                                 trap = exceptionTrap(EXC_LOAD_ACCESS_FAULT);
                                 rval = addr;
                             }
@@ -1311,7 +1311,7 @@ public class RV32IMACore {
                                     default:
                                         trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
                                 }
-                            } catch (IndexOutOfBoundsException e) {
+                            } catch (IndexOutOfBoundsException _) {
                                 trap = exceptionTrap(EXC_LOAD_ACCESS_FAULT);
                                 rval = addr;
                             }
@@ -1337,7 +1337,7 @@ public class RV32IMACore {
                                         fSrcBits,
                                         new AccessContext(state.hartId, privilege, AccessKind.STORE, 4, 0));
                                 state.reservationValid = false;
-                            } catch (IndexOutOfBoundsException e) {
+                            } catch (IndexOutOfBoundsException _) {
                                 trap = exceptionTrap(EXC_STORE_ACCESS_FAULT);
                                 rval = addr;
                             }
@@ -1378,7 +1378,7 @@ public class RV32IMACore {
                                 if (trap == 0) {
                                     state.reservationValid = false;
                                 }
-                            } catch (IndexOutOfBoundsException e) {
+                            } catch (IndexOutOfBoundsException _) {
                                 trap = exceptionTrap(EXC_STORE_ACCESS_FAULT);
                                 rval = addr;
                             }
@@ -1770,9 +1770,10 @@ public class RV32IMACore {
                                         case 0: // ECALL
                                             // Only M-mode (3) and U-mode (0) are modelled; any
                                             // non-user privilege is treated as machine here.
-                                            trap = ((state.extraflags & EXTRAFLAG_PRIV_MASK) != PRIV_USER)
-                                                    ? exceptionTrap(EXC_ECALL_FROM_M)
-                                                    : exceptionTrap(EXC_ECALL_FROM_U);
+                                            trap = exceptionTrap(
+                                                    ((state.extraflags & EXTRAFLAG_PRIV_MASK) != PRIV_USER)
+                                                            ? EXC_ECALL_FROM_M
+                                                            : EXC_ECALL_FROM_U);
                                             break;
                                         case 1: // EBREAK
                                             trap = exceptionTrap(EXC_BREAKPOINT);
@@ -1816,9 +1817,8 @@ public class RV32IMACore {
                             }
 
                             int width = isWordWidth ? 4 : (funct3 == 1 ? 2 : 1);
-                            int accessFaultTrap = (irmid == 2)
-                                    ? exceptionTrap(EXC_LOAD_ACCESS_FAULT)
-                                    : exceptionTrap(EXC_STORE_ACCESS_FAULT);
+                            int accessFaultTrap =
+                                    exceptionTrap(irmid == 2 ? EXC_LOAD_ACCESS_FAULT : EXC_STORE_ACCESS_FAULT);
                             // irmid is the funct5 encoding; also AccessContext.atomicOp. LR.W is irmid 2 --
                             // a multi-hart bus detects it via ctx.kind() == AMO && ctx.atomicOp() == 2 on
                             // this readInt override, per AccessContext's Javadoc.
@@ -1848,7 +1848,7 @@ public class RV32IMACore {
                                         rval = mem.atomicRmw(rs1, irmid, rs2, amoCtx);
                                         break;
                                 }
-                            } catch (IndexOutOfBoundsException e) {
+                            } catch (IndexOutOfBoundsException _) {
                                 trap = accessFaultTrap;
                                 rval = rs1;
                             }

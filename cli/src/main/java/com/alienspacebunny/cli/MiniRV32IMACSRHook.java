@@ -25,7 +25,7 @@ public class MiniRV32IMACSRHook implements CSRHook {
                 if (System.in.available() > 0) {
                     return System.in.read();
                 }
-            } catch (IOException e) {
+            } catch (IOException _) {
                 // Ignore
             }
             return -1;
@@ -54,7 +54,7 @@ public class MiniRV32IMACSRHook implements CSRHook {
                         System.out.print((char) b);
                     }
                     System.out.flush();
-                } catch (IndexOutOfBoundsException e) {
+                } catch (IndexOutOfBoundsException _) {
                     System.err.println("DEBUG PASSED INVALID PTR (" + Integer.toHexString(value) + ")");
                 }
             }

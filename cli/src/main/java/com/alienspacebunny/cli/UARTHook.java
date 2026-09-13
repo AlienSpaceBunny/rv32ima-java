@@ -20,7 +20,7 @@ public class UARTHook implements HardwareHook {
         if (address == 0x10000005) {
             try {
                 return 0x60 | (System.in.available() > 0 ? 1 : 0);
-            } catch (IOException e) {
+            } catch (IOException _) {
                 return 0x60;
             }
         } else if (address == 0x10000000) {
@@ -28,7 +28,7 @@ public class UARTHook implements HardwareHook {
                 if (System.in.available() > 0) {
                     return System.in.read();
                 }
-            } catch (IOException e) {
+            } catch (IOException _) {
                 // Ignore
             }
             return 0;

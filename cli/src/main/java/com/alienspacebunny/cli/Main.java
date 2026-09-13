@@ -61,14 +61,12 @@ public class Main {
                 }
 
                 int ret = core.step(state, bus, ramOffset, ramAmt, elapsedUs, instrsPerFlip, null, csrHook);
-                if (ret != 0) {
-                    if (ret == 1 && doSleep) {
-                        try {
-                            Thread.sleep(1);
-                        } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                            break;
-                        }
+                if (ret == 1 && doSleep) {
+                    try {
+                        Thread.sleep(1);
+                    } catch (InterruptedException _) {
+                        Thread.currentThread().interrupt();
+                        break;
                     }
                 }
 
@@ -145,7 +143,7 @@ public class Main {
         try {
             int ir = ram.readInt(state.pc);
             System.out.printf("[0x%08x] ", ir);
-        } catch (IndexOutOfBoundsException e) {
+        } catch (IndexOutOfBoundsException _) {
             System.out.print("[xxxxxxxxxx] ");
         }
         for (int i = 0; i < 32; i++) {

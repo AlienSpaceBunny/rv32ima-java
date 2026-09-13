@@ -10,7 +10,7 @@ not the eventual publish-to-Central process.
 
 ## Model
 
-`main` always carries a `-SNAPSHOT` version (currently `0.1.2-SNAPSHOT`; expect several more
+`main` always carries a `-SNAPSHOT` version (currently `0.1.3-SNAPSHOT`; expect several more
 plain bumps before a real release — see `RELEASE_TODO.md`'s 2026-09-13 update). The first
 real release will be `0.2.0`, whichever `-SNAPSHOT` `main` is on when it's eventually cut;
 `0.1.0`/`0.1.1` are both skipped (`0.1.0` because that version number is already referenced

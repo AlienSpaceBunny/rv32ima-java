@@ -7,8 +7,6 @@
 | [API.md](API.md) | Public API contracts for embedders. Narrative summary; the Javadoc on the five core types is authoritative. |
 | [FEATURE_REQUEST.md](FEATURE_REQUEST.md) | Original feature request: V-32 AP/IOP support (multi-hart, extra ISA extensions). |
 | [FEATURE_REQUEST_PLAN.md](FEATURE_REQUEST_PLAN.md) | Implementation plan for the feature request. Staged P1–P3 lanes. At r6; conditionally signed off, implementation underway. |
-| [PLAN_REVIEW_REQUEST.md](PLAN_REVIEW_REQUEST.md) | Questions sent to the originating LLM to sign off FEATURE_REQUEST_PLAN.md r5. |
-| [PLAN_REVIEW_RESPONSE.md](PLAN_REVIEW_RESPONSE.md) | The originating LLM's answers (B1–B7); basis for r6 and the interrupt-gating fix. |
 | [TEST_PLAN.md](TEST_PLAN.md) | Test-suite expansion plan. Layers 1 & 2 done; Layer 3 (system-level scenarios) not started. |
 | [RELEASING.md](RELEASING.md) | Local versioning/tagging/build procedure (`maven-release-plugin`). Central publishing is a separate, on-hold step — see `../RELEASE_TODO.md`. |
 | [CPU_INTEGRATION_RESPONSE.md](CPU_INTEGRATION_RESPONSE.md) | Response to V-32's 2026-09-15 `CPU_INTEGRATION_REVIEW.md`: per-finding fixes (`0664be7`), the `MemoryBus.checkAccess` API decision for failing-SC permission checks, alignment/reservation-lifecycle policy, and what remains V-32's. |
@@ -28,3 +26,7 @@ Superseded documents, kept for context. Do not treat as current.
 |---|---|
 | [archive/IMPLEMENTATION_TODO.md](archive/IMPLEMENTATION_TODO.md) | P0–P7 all shipped; see git history and `CHECKPOINT.md`. |
 | [archive/REMAINING_WORK.md](archive/REMAINING_WORK.md) | `CHECKPOINT.md` (release-readiness status) and `CLEANUP_TODO.md`. |
+| [archive/PLAN_REVIEW_REQUEST.md](archive/PLAN_REVIEW_REQUEST.md) / [archive/PLAN_REVIEW_RESPONSE.md](archive/PLAN_REVIEW_RESPONSE.md) | Plan-review exchange with the originating LLM (r5 → r6 sign-off, B1–B7). Its outcomes are folded into `FEATURE_REQUEST_PLAN.md` r6, which is fully implemented. |
+| [archive/MULTI_HART_BUS_NOTES.md](archive/MULTI_HART_BUS_NOTES.md) | 2026-09-13 multi-hart bus handoff to V-32, kept verbatim. Superseded by V-32's review below and by `CPU_INTEGRATION_RESPONSE.md`. |
+| [archive/CPU_INTEGRATION_REVIEW.md](archive/CPU_INTEGRATION_REVIEW.md) | V-32's 2026-09-15 review of `0.1.3-SNAPSHOT`, kept verbatim as the input to `CPU_INTEGRATION_RESPONSE.md`. |
+| [archive/CoreFeatureProbe.java](archive/CoreFeatureProbe.java) | V-32's standalone probe from that review (outside the Maven source sets; run with `java -cp <core jar> CoreFeatureProbe.java`). Expected output against `0.1.4-SNAPSHOT` is in `CPU_INTEGRATION_RESPONSE.md`. |

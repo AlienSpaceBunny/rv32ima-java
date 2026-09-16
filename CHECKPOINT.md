@@ -3,8 +3,8 @@
 ## Latest: V-32 CPU integration review answered (`0664be7`, bump to `0.1.4-SNAPSHOT`)
 
 V-32 reviewed `0.1.3-SNAPSHOT` (its `CPU_INTEGRATION_REVIEW.md`, 2026-09-15, copied into this
-repo's root along with `MULTI_HART_BUS_NOTES.md` and `CoreFeatureProbe.java` in `0a22a97` —
-V-32 artifacts kept verbatim as the review input) and found five processor defects. All fixed in `0664be7` with regressions; response for the V-32 side is
+repo along with `MULTI_HART_BUS_NOTES.md` and `CoreFeatureProbe.java` in `0a22a97`, now
+archived verbatim under `docs/archive/` as the review input) and found five processor defects. All fixed in `0664be7` with regressions; response for the V-32 side is
 `docs/CPU_INTEGRATION_RESPONSE.md`:
 
 1. U-mode `MRET` → illegal instruction (plus reserved rd/rs1 on SYSTEM funct3==0).
@@ -36,7 +36,7 @@ test layers 1 & 2 **done** (`3c9be5b`, `22c0e30`) — 259 core + 1 cli tests.
 JUnit 6.1.3 upgrade, architectural review, and the C1–C7 cleanup pass are all done and
 pushed. Release readiness is documented but deliberately paused (`RELEASE_TODO.md`) — no
 Central publish until after multi-hart Phase 1–2. `docs/FEATURE_REQUEST_PLAN.md` r6 has
-been reviewed and conditionally signed off by the originating LLM (`docs/PLAN_REVIEW_RESPONSE.md`);
+been reviewed and conditionally signed off by the originating LLM (`docs/archive/PLAN_REVIEW_RESPONSE.md`);
 the one condition (real MSIP/MEIP interrupt delivery, not just injection) is done (`5620de0`).
 **Phase 1 (foundation) is done (`c92045e`)** — see below. **Phase 2 is done** (items 5, 6, 7,
 8, 9, 10 all complete; final pieces `4aeec77`) — see below. **Phase 3 is done** (items 11, 12,
@@ -126,8 +126,8 @@ Committed one-per-unit and pushed to `origin/main` (`0943a48`, `1d45c2b`, `1c324
    started (Keep a Changelog format; maintenance rule in `AGENTS.md`). No release
    has actually been cut yet.
 3. Feature work per `docs/FEATURE_REQUEST_PLAN.md` r6. **Reviewed and conditionally
-   signed off** by the originating LLM (`docs/PLAN_REVIEW_REQUEST.md` →
-   `docs/PLAN_REVIEW_RESPONSE.md`, B1–B7). The one condition (real MSIP/MEIP delivery)
+   signed off** by the originating LLM (`docs/archive/PLAN_REVIEW_REQUEST.md` →
+   `docs/archive/PLAN_REVIEW_RESPONSE.md`, B1–B7). The one condition (real MSIP/MEIP delivery)
    is done. Remaining before/during implementation:
    - AP-to-IOP trap notification (B7): the emulator repo, not this one, needs a
      deliberate mechanism — AP traps enter M-mode *on the AP hart* and do not

@@ -1,6 +1,8 @@
 # Response to the V-32 CPU integration review — 2026-09-16
 
-Answers V-32's `CPU_INTEGRATION_REVIEW.md` (2026-09-15, written against
+Answers V-32's `CPU_INTEGRATION_REVIEW.md` (archived here verbatim as
+`archive/CPU_INTEGRATION_REVIEW.md`, with its probe and the handoff notes it answered;
+2026-09-15, written against
 `rv32emu-core:0.1.3-SNAPSHOT`, jar SHA-256 `76200a7d…`). All five processor
 findings are fixed in this repo; the SC validation API decision (finding 4) is
 made and shipped. Nothing in `../emulator` was modified; it was read only.

@@ -1,6 +1,6 @@
 # Feature Request Plan: V-32 AP/IOP Support
 
-Revision: **r6**, 2026-09-10. See [PLAN_REVIEW_RESPONSE.md](PLAN_REVIEW_RESPONSE.md)
+Revision: **r6**, 2026-09-10. See [PLAN_REVIEW_RESPONSE.md](archive/PLAN_REVIEW_RESPONSE.md)
 for the application-context review of r5 and answers B1–B7.
 
 **Implementation progress:** Phase 1 (items 1–4: `IsaConfig`, `misa` derivation, `hartId`,
@@ -273,7 +273,7 @@ default int tryScAndStore(int hartId, int addr, int value, AccessContext ctx) {
 `step()` gains no new parameter for this mechanism. Cross-hart reservation management is
 entirely encapsulated in the bus implementation.
 
-**Amended 2026-09-16 (`0664be7`, from V-32's `CPU_INTEGRATION_REVIEW.md` findings 3–5; see
+**Amended 2026-09-16 (`0664be7`, from V-32's `CPU_INTEGRATION_REVIEW.md` (now `docs/archive/`) findings 3–5; see
 `docs/CPU_INTEGRATION_RESPONSE.md`):**
 - *Locally failing SC is still permission-checked.* The A extension says no `SC.W` may retire
   without passing memory permission checks. The "no bus call at all" fast path above was
@@ -861,7 +861,7 @@ Each phase should be verified before the next begins:
 ## Review Status
 
 The r5 review and B1–B7 answers are preserved in
-[PLAN_REVIEW_RESPONSE.md](PLAN_REVIEW_RESPONSE.md). The six consistency fixes listed in
+[PLAN_REVIEW_RESPONSE.md](archive/PLAN_REVIEW_RESPONSE.md). The six consistency fixes listed in
 section A of the review request are incorporated in r6. The original review request remains
 an r5 historical document; the five phases in this plan are the authoritative r6 numbering.
 

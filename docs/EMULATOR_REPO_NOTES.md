@@ -74,7 +74,7 @@ different front-end wrappers.
   (Phase 1–5, `docs/FEATURE_REQUEST_PLAN.md`) — nothing further is needed here for the emulator
   to consume it. See `docs/API.md` for the current surface.
 - `RV32IMACore.injectInterrupt(RV32IMAState, int bit)` already exists — this is the building block
-  for AP-to-IOP trap notification. **Correction (2026-09-16, per V-32's `CPU_INTEGRATION_REVIEW.md`):
+  for AP-to-IOP trap notification. **Correction (2026-09-16, per V-32's `CPU_INTEGRATION_REVIEW.md`, archived here as `archive/CPU_INTEGRATION_REVIEW.md`):
   it is *not* inherently thread-safe.** It does a plain read-modify-write of `mip` and
   `extraflags`, the same fields `step()` mutates, and its Javadoc requires the caller to hold
   whatever synchronization guards the target `RV32IMAState`. An earlier draft of this note said

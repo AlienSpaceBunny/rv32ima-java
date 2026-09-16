@@ -19,6 +19,30 @@ repository finds the same project guidance.
   Don't pre-emptively create a version section yourself; that's the release
   procedure's job.
 
+## Finishing a Task (ways of working)
+
+When a task is done and committed cleanly (gate green, changelog entry in place), do all
+of the following without waiting to be asked. Skip the whole list if the task ended with
+failing tests, an unresolved question, or partial work — report that instead.
+
+1. **Bump the version if the change was substantive** (code or public-API change, not
+   docs-only or housekeeping): a plain `-SNAPSHOT` bump via
+   `./mvnw versions:set -DnewVersion=X.Y.Z-SNAPSHOT -DgenerateBackupPoms=false`, plus the
+   "currently `…-SNAPSHOT`" line in `docs/RELEASING.md`. Never produce a release version
+   this way; release cuts stay with `maven-release-plugin` (`docs/RELEASING.md`) and remain
+   on hold (`RELEASE_TODO.md`). One bump per task, not per commit.
+2. **Install locally after the bump**: `./mvnw install` (add `-DskipTests` only when the
+   full gate already passed on the same tree). The sibling emulator consumes the jar from
+   `~/.m2`, so an unbumped or uninstalled change is invisible to it. No remote deploy.
+3. **Archive what the task made obsolete**: move superseded docs, finished back-and-forth
+   review/handoff documents, and temporary test or probe files that were supplied as task
+   input (for example a standalone `*.java` probe outside the Maven source sets) to
+   `docs/archive/` with `git mv`, add a row to the Archive table in `docs/README.md`, and fix
+   any links. Keep in `docs/` only what a fresh session still needs to act on.
+4. **Commit and push**: commit in logical units as usual, then `git push` to `origin`.
+   Pushing is part of finishing cleanly, not a separate ask — but only when the gate is
+   green and steps 1–3 are done.
+
 ## Build / Validation Gate
 
 - Run `./mvnw clean verify` before finishing code changes, unless told to skip
@@ -66,7 +90,7 @@ repository finds the same project guidance.
   without re-deriving context.
 - `docs/FEATURE_REQUEST_PLAN.md` is the multi-hart (V-32 AP/IOP) feature plan,
   reviewed and conditionally signed off by the originating LLM
-  (`docs/PLAN_REVIEW_RESPONSE.md`). Mark items done in place (inline "done"
+  (`docs/archive/PLAN_REVIEW_RESPONSE.md`). Mark items done in place (inline "done"
   notes with the landing commit) rather than deleting the original design text
   — it's also the spec.
 

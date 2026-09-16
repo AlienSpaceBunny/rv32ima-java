@@ -107,7 +107,14 @@ the two intentional spec deviations):
   interrupt in the reset state before the guest configures `mtimecmp`.
 - `WFI` unconditionally sets `mstatus.MIE` before entering the wait state so a
   pending timer interrupt can wake the hart even if the guest had not enabled
-  interrupts.
+  interrupts. If an enabled interrupt is already pending once `MIE` is set,
+  `WFI` completes without stalling (`step` returns `0`) and the interrupt is
+  delivered on the next `step` call. A stalled hart also re-checks for a
+  deliverable interrupt at the top of every `step`, so a pending bit set on
+  `mip` directly (without `injectInterrupt`'s WFI clear) still wakes it.
+- `MRET` is machine-mode only: executed from user mode it traps
+  illegal-instruction regardless of `mstatus.MPP`. `MRET`/`ECALL`/`EBREAK`/
+  `WFI` with a non-zero `rd` or `rs1` field are illegal (reserved encodings).
 
 Interrupt gating and injection:
 
@@ -181,16 +188,46 @@ through three `MemoryBus` methods instead of computing AMO results itself.
   atomic decision for `SC.W`. `RV32IMACore` calls this only after its own
   local fast-path check passes (`state.reservationValid` and
   `state.reservationAddr` match) — if that check fails, the bus is never
-  called and the destination register gets `1` (failure) directly. The bus
-  is still free to reject a store the core's local state believed would
-  succeed, if it observed a cross-hart invalidation the core's purely local
-  state cannot see; the default implementation always succeeds, correct
-  only for a single hart. Either way the reservation is consumed.
+  called for the store; instead the core calls `checkAccess(address, ctx)`
+  (below) and, if that returns normally, the destination register gets `1`
+  (failure) with nothing written. The bus is still free to reject a store
+  the core's local state believed would succeed, if it observed a cross-hart
+  invalidation the core's purely local state cannot see; the default
+  implementation always succeeds, correct only for a single hart. Either way
+  the reservation is consumed. An override that returns a failure code must
+  have permission-checked the store first (a failed `SC.W` may not retire
+  without passing memory permission checks), and must consume its own
+  reservation entry before throwing.
+- `checkAccess(address, ctx)` is a side-effect-free permission probe: throw
+  `IndexOutOfBoundsException` iff the real access described by `ctx` would
+  be denied, without reading or writing anything. The default permits
+  everything (so a legacy six-method bus keeps its old behavior); a bus
+  with access control overrides it, and a wrapper forwards it. Today the
+  core calls it only on the locally-failing `SC.W` path (`kind == AMO`,
+  `width == 4`, `atomicOp == 3`); `FFMMemoryBus` bounds-checks.
 
-A fault (`IndexOutOfBoundsException`) thrown from either `atomicRmw` or
-`tryScAndStore` becomes a standard store/AMO access fault (cause 7, `mtval`
-= the AMO address), exactly like an ordinary faulting store — see
-`AtomicPrimitivesTest`.
+Every atomic address the core hands to the bus is naturally aligned to
+`ctx.width()`: a misaligned `LR.W` traps load address-misaligned (cause 4),
+a misaligned `SC.W` or AMO — Zabha halfwords included — traps store/AMO
+address-misaligned (cause 6), with `mtval` = the guest address, before any
+bus call. (Ordinary `LW`/`SW` etc. remain misaligned-tolerant, inherited
+from mini-rv32ima; only atomics enforce alignment.) `LR.W` with a non-zero
+`rs2` field is an illegal instruction.
+
+A fault (`IndexOutOfBoundsException`) thrown from `atomicRmw`,
+`tryScAndStore`, or `checkAccess` becomes a standard store/AMO access fault
+(cause 7, `mtval` = the AMO address), exactly like an ordinary faulting
+store — see `AtomicPrimitivesTest`. Reservation lifecycle: every
+`LR.W`/`SC.W` attempt clears the hart's local reservation before the bus is
+consulted, so a faulting `SC.W` (or `LR.W`) never leaves a stale
+`reservationValid`; only a successful `LR.W` establishes one.
+
+Bus wrappers (address routers, MPU views, boot overlays) must forward the
+context-bearing overloads *and* `atomicRmw`/`tryScAndStore`/`checkAccess`
+to the wrapped bus; otherwise the defaults drop the context and split
+every AMO into a read/write pair at the wrapper. `MMIOBus` does this for
+addresses no hook claims (hook addresses still take the no-context
+`HardwareHook` path, since that interface carries no context).
 
 Zabha (byte/halfword AMOs, Phase 3): with `IsaConfig.hasZabha`, the RV32A
 opcode's `funct3` field also admits `0` (byte) and `1` (halfword) for the nine

@@ -73,9 +73,14 @@ different front-end wrappers.
 - The `AccessContext`/`atomicRmw`/`tryScAndStore` *contract* on this repo's side is complete
   (Phase 1–5, `docs/FEATURE_REQUEST_PLAN.md`) — nothing further is needed here for the emulator
   to consume it. See `docs/API.md` for the current surface.
-- `RV32IMACore.injectInterrupt(RV32IMAState, int bit)` already exists and is safe to call across
-  threads (it only sets a `mip` bit and clears the WFI stall flag) — this is the building block
-  for AP-to-IOP trap notification, a *separate* concern from the memory-bus work (a trap enters
+- `RV32IMACore.injectInterrupt(RV32IMAState, int bit)` already exists — this is the building block
+  for AP-to-IOP trap notification. **Correction (2026-09-16, per V-32's `CPU_INTEGRATION_REVIEW.md`):
+  it is *not* inherently thread-safe.** It does a plain read-modify-write of `mip` and
+  `extraflags`, the same fields `step()` mutates, and its Javadoc requires the caller to hold
+  whatever synchronization guards the target `RV32IMAState`. An earlier draft of this note said
+  "safe to call across threads"; that was wrong. The safe pattern is for the sender to publish
+  pending state through its own synchronized/volatile device state and for the *target hart's
+  owner thread* to call `injectInterrupt` between its own `step` calls. Notification is a *separate* concern from the memory-bus work (a trap enters
   M-mode on whichever hart took it; the IOP needs its own device/convention to learn about an AP
   trap it cares about). Not a `MemoryBus` design question.
 - A detailed, actionable design writeup for the multi-hart bus itself — recommending one new bus

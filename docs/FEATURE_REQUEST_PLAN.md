@@ -273,6 +273,26 @@ default int tryScAndStore(int hartId, int addr, int value, AccessContext ctx) {
 `step()` gains no new parameter for this mechanism. Cross-hart reservation management is
 entirely encapsulated in the bus implementation.
 
+**Amended 2026-09-16 (`0664be7`, from V-32's `CPU_INTEGRATION_REVIEW.md` findings 3–5; see
+`docs/CPU_INTEGRATION_RESPONSE.md`):**
+- *Locally failing SC is still permission-checked.* The A extension says no `SC.W` may retire
+  without passing memory permission checks. The "no bus call at all" fast path above was
+  therefore incomplete for a bus with access control. New default method
+  `MemoryBus.checkAccess(address, ctx)` — a side-effect-free probe, permit-all by default — is
+  called on that path instead of a write; it throws `IndexOutOfBoundsException` to fault the
+  SC with cause 7. `tryScAndStore` overrides must likewise permission-check before returning a
+  failure code. The store-side fast path (no `tryScAndStore` call when the local check fails)
+  is unchanged.
+- *Alignment.* The core validates natural alignment for `LR.W`/`SC.W`/every AMO width before
+  any bus call (causes 4/6, `mtval` = guest address), so the "naturally aligned" promise in
+  `atomicRmw`'s contract is now enforced rather than assumed. `LR.W` with `rs2 != 0` is illegal.
+- *Reservation lifecycle on a fault.* Every `LR.W`/`SC.W` attempt clears
+  `state.reservationValid` before the bus is consulted; only a successful `LR.W` sets it. A bus
+  override must consume its own entry before throwing so both views agree after the trap.
+- *Wrappers.* `MMIOBus` now forwards context-bearing overloads and all three atomic primitives
+  to its backing bus for non-hook addresses; the "bus wrappers must preserve context and forward
+  atomic primitives" sentence in §3 was previously unmet by the one wrapper in this repo.
+
 V-32 has distinct AP/IOP bus wrappers, not identical address views. AP logical RAM addresses
 are translated before coordination. Both paths must converge on one reservation/locking domain
 keyed by backing-memory identity and translated physical granule. Sharing an allocation alone
@@ -303,6 +323,11 @@ For a multi-threaded host where Hart 0 (IOP) injects an interrupt into Hart 1 (A
 must be called while holding whatever synchronization guards the AP's `RV32IMAState`,
 including execution through `step()`. Pending-bit clearing/acknowledgement uses the same
 synchronization. No callback or synchronous trap delivery inside the helper is required.
+(Reaffirmed 2026-09-16: the helper is a plain read-modify-write of `mip`/`extraflags` and is
+*not* thread-safe on its own; the recommended pattern is for the target hart's owner thread to
+apply it between `step` calls from device state the sender published safely. A stalled hart
+now also re-checks `mip & mie` at the top of `step`, so a pending bit set directly on `mip`
+without this helper's WFI clear is not lost — `0664be7`.)
 
 **Required Phase 2 delivery work — done (`5620de0`).** MSIP/MEIP dispatch (constants
 `MIP_MSIP`/`MIP_MEIP`, causes `INT_MACHINE_SOFTWARE`/`INT_MACHINE_EXTERNAL`) and
@@ -348,8 +373,12 @@ an AP-visible address.
 **ECALL cause by privilege (existing).** `ECALL` from M-mode sets `mcause = 11`; from U-mode
 sets `mcause = 8`. Already correct at line 489.
 
-**MRET (existing).** Restores privilege from `mstatus.MPP`, restores `MIE` from `MPIE`, clears
-`MPP` to U-mode. Already correct at lines 481–485.
+**MRET (existing — corrected 2026-09-16, `0664be7`).** Restores privilege from `mstatus.MPP`,
+restores `MIE` from `MPIE`, clears `MPP` to U-mode. The return-state mechanics were correct, but
+the "already correct" claim missed that nothing gated the instruction on privilege: V-32's
+`CPU_INTEGRATION_REVIEW.md` demonstrated U-mode `MRET` performing a machine-mode return. Now an
+`MRET` below M-mode traps illegal-instruction, and non-zero `rd`/`rs1` on any funct3 == 0 SYSTEM
+instruction is illegal. See `docs/CPU_INTEGRATION_RESPONSE.md` finding 1.
 
 **Trap entry (existing).** All traps and interrupts enter M-mode unconditionally (`extraflags |= 3`),
 saving the prior privilege in `mstatus.MPP`. Already correct at line 621.

@@ -1,6 +1,33 @@
-# Session Checkpoint — 2026-09-13
+# Session Checkpoint — 2026-09-16
 
-## Where We Are
+## Latest: V-32 CPU integration review answered (`0664be7`, bump to `0.1.4-SNAPSHOT`)
+
+V-32 reviewed `0.1.3-SNAPSHOT` (its `CPU_INTEGRATION_REVIEW.md`, 2026-09-15, copied into this
+repo's root along with `MULTI_HART_BUS_NOTES.md` and `CoreFeatureProbe.java` in `0a22a97` —
+V-32 artifacts kept verbatim as the review input) and found five processor defects. All fixed in `0664be7` with regressions; response for the V-32 side is
+`docs/CPU_INTEGRATION_RESPONSE.md`:
+
+1. U-mode `MRET` → illegal instruction (plus reserved rd/rs1 on SYSTEM funct3==0).
+2. WFI lost wakeup: stall check now runs after the pending-interrupt computation; `WFI` itself
+   doesn't stall when an interrupt is already deliverable (returns 0).
+3. Atomic alignment traps (causes 4/6, `mtval` = guest address, no bus call); `LR.W` rs2≠0 illegal.
+4. **API decision:** new `MemoryBus.checkAccess(address, ctx)` — side-effect-free permission
+   probe, permit-all default, called on the locally-failing `SC.W` path so an MPU bus can fault
+   it (cause 7). `FFMMemoryBus` bounds-checks; `tryScAndStore` overrides must permission-check
+   before returning failure.
+5. Every `LR.W`/`SC.W` attempt clears the local reservation before the bus is consulted.
+
+Also: `MMIOBus` now forwards context-bearing overloads + `atomicRmw`/`tryScAndStore`/`checkAccess`
+to its backing bus for non-hook addresses (was a context-dropping wrapper).
+`docs/EMULATOR_REPO_NOTES.md`'s "injectInterrupt is safe across threads" claim was wrong and is
+corrected (Javadoc requires caller synchronization). No compatibility flag added — see the
+response doc's last section for why. Nothing in `../emulator` modified.
+
+**Resume:** V-32 bumps `build.gradle` to `0.1.4-SNAPSHOT`, adds a one-line `checkAccess`
+override to its probe bus, re-runs the probe (expected values in the response doc), then
+resumes its bus/privilege integration. This repo waits on that; API stays unfrozen.
+
+## Where We Are (as of 2026-09-13)
 
 All P0–P7 bugs fixed and tested. Release tooling (Spotless, Checkstyle, SpotBugs, Javadoc +
 source jars) in place. Public API Javadoc **done** (commits `b8a1fa8`, `a6e5fa7`). Compliance

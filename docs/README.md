@@ -11,6 +11,7 @@
 | [PLAN_REVIEW_RESPONSE.md](PLAN_REVIEW_RESPONSE.md) | The originating LLM's answers (B1–B7); basis for r6 and the interrupt-gating fix. |
 | [TEST_PLAN.md](TEST_PLAN.md) | Test-suite expansion plan. Layers 1 & 2 done; Layer 3 (system-level scenarios) not started. |
 | [RELEASING.md](RELEASING.md) | Local versioning/tagging/build procedure (`maven-release-plugin`). Central publishing is a separate, on-hold step — see `../RELEASE_TODO.md`. |
+| [CPU_INTEGRATION_RESPONSE.md](CPU_INTEGRATION_RESPONSE.md) | Response to V-32's 2026-09-15 `CPU_INTEGRATION_REVIEW.md`: per-finding fixes (`0664be7`), the `MemoryBus.checkAccess` API decision for failing-SC permission checks, alignment/reservation-lifecycle policy, and what remains V-32's. |
 | [EMULATOR_REPO_NOTES.md](EMULATOR_REPO_NOTES.md) | Findings from directly reading the sibling emulator (V-32) repo's source — its architecture, threading model, and multi-hart `MemoryBus` gaps. A dated snapshot, not a live view; check before relying on specifics. |
 | [RV64_FEASIBILITY_NOTES.md](RV64_FEASIBILITY_NOTES.md) | Speculative notes on whether/how this library could add RV64 support alongside RV32. No decision made, no work started or scheduled. |
 

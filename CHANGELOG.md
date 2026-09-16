@@ -98,6 +98,36 @@ for how this file is updated as part of cutting a release.
   `scm`) on all three modules.
 - `docs/RELEASING.md`, `RELEASE_TODO.md`, `PLAN_REVIEW_REQUEST.md` /
   `PLAN_REVIEW_RESPONSE.md`, and `docs/README.md` documentation index.
+- `MemoryBus.checkAccess(int, AccessContext)`: new side-effect-free permission probe,
+  default permit-all. `RV32IMACore` calls it for an `SC.W` whose local reservation
+  pre-check fails, so a bus with access control can still reject the failing `SC.W` with a
+  store/AMO access fault (cause 7) as the A extension requires, without any write.
+  `FFMMemoryBus` overrides it with a bounds check. `tryScAndStore`'s Javadoc now also
+  requires an override to permission-check before returning a failure code and to consume
+  its reservation entry before throwing.
+
+### Changed
+- Upgraded JUnit from 5.10.0 to 6.1.3 via the `junit-bom`.
+- `MMIOBus` now forwards every context-bearing overload plus `atomicRmw`, `tryScAndStore`,
+  and `checkAccess` to its backing bus for addresses no hook claims, so an `AccessContext`
+  and the single-call atomic contract survive the router (previously it implemented only the
+  six legacy methods, silently dropping context and splitting AMOs at that boundary). Hook
+  addresses still take the no-context `HardwareHook` path.
+- Fixed a latent interrupt-gating defect: `mstatus.MIE` no longer masks machine
+  interrupts while executing in user mode (it should only mask them while already in
+  machine mode, per the RISC-V privileged spec). Dormant until now — nothing previously
+  ran the core below machine mode.
+- Reorganized `docs/`: active planning docs consolidated under `docs/`, superseded docs
+  moved to `docs/archive/`.
+- Added Checkstyle naming-convention rules; normalized `RV32IMACore`'s mixed
+  snake_case/camelCase locals to camelCase; named trap-cause and status-bit constants
+  that were previously bare integer literals.
+- `main` now carries a `-SNAPSHOT` version (`0.1.1-SNAPSHOT`); previously every commit
+  claimed a bare `0.1.0` with no tags or release history.
+
+### Removed
+- Dead `MemoryBus.readIntSigned` default method (never called; `LW` uses `readInt`
+  directly).
 
 ### Fixed
 Findings from the V-32 emulator's CPU integration review of `0.1.3-SNAPSHOT`
@@ -119,36 +149,6 @@ Findings from the V-32 emulator's CPU integration review of `0.1.3-SNAPSHOT`
   no longer leaves `reservationValid` set, and an `LR.W` that traps drops any previous
   reservation. Rule: every `LR.W`/`SC.W` attempt clears the hart's reservation first; only a
   successful `LR.W` establishes one.
-
-### Changed
-- Upgraded JUnit from 5.10.0 to 6.1.3 via the `junit-bom`.
-- `MemoryBus.checkAccess(int, AccessContext)`: new side-effect-free permission probe,
-  default permit-all. `RV32IMACore` calls it for an `SC.W` whose local reservation
-  pre-check fails, so a bus with access control can still reject the failing `SC.W` with a
-  store/AMO access fault (cause 7) as the A extension requires, without any write.
-  `FFMMemoryBus` overrides it with a bounds check. `tryScAndStore`'s Javadoc now also
-  requires an override to permission-check before returning a failure code and to consume
-  its reservation entry before throwing.
-- `MMIOBus` now forwards every context-bearing overload plus `atomicRmw`, `tryScAndStore`,
-  and `checkAccess` to its backing bus for addresses no hook claims, so an `AccessContext`
-  and the single-call atomic contract survive the router (previously it implemented only the
-  six legacy methods, silently dropping context and splitting AMOs at that boundary). Hook
-  addresses still take the no-context `HardwareHook` path.
-- Fixed a latent interrupt-gating defect: `mstatus.MIE` no longer masks machine
-  interrupts while executing in user mode (it should only mask them while already in
-  machine mode, per the RISC-V privileged spec). Dormant until now — nothing previously
-  ran the core below machine mode.
-- Reorganized `docs/`: active planning docs consolidated under `docs/`, superseded docs
-  moved to `docs/archive/`.
-- Added Checkstyle naming-convention rules; normalized `RV32IMACore`'s mixed
-  snake_case/camelCase locals to camelCase; named trap-cause and status-bit constants
-  that were previously bare integer literals.
-- `main` now carries a `-SNAPSHOT` version (`0.1.1-SNAPSHOT`); previously every commit
-  claimed a bare `0.1.0` with no tags or release history.
-
-### Removed
-- Dead `MemoryBus.readIntSigned` default method (never called; `LW` uses `readInt`
-  directly).
 
 ## [0.1.0] - unreleased
 

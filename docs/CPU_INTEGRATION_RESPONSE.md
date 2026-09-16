@@ -1,5 +1,9 @@
 # Response to the V-32 CPU integration review — 2026-09-16
 
+> Round 2: V-32's follow-up review of this response and `0.1.4-SNAPSHOT` is answered in
+> [CPU_INTEGRATION_RESPONSE_2.md](CPU_INTEGRATION_RESPONSE_2.md) (`0.1.5-SNAPSHOT`). The
+> body below is preserved as written.
+
 Answers V-32's `CPU_INTEGRATION_REVIEW.md` (archived here verbatim as
 `archive/CPU_INTEGRATION_REVIEW.md`, with its probe and the handoff notes it answered;
 2026-09-15, written against

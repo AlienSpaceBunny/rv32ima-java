@@ -1,5 +1,23 @@
 # Session Checkpoint — 2026-09-16
 
+## Latest: V-32 follow-up review answered (round 2, `0.1.5-SNAPSHOT`)
+
+V-32 re-reviewed `0.1.4-SNAPSHOT` (`docs/archive/CPU_INTEGRATION_FOLLOWUP.md`): accepted all
+round-1 changes and `checkAccess`, and raised two more, both real and both fixed
+(`docs/CPU_INTEGRATION_RESPONSE_2.md`):
+
+1. Misaligned `LR.W`/`SC.W` exited before the reservation clear → stale reservation reusable
+   by a later SC without a new LR. Now cleared before the alignment check. Bus-side "inert
+   stale entry, replaced by next LR.W" policy documented on `tryScAndStore`.
+2. Interrupts were only evaluated at `step` entry / WFI → with `count > 1`, a `csrs
+   mstatus/mie/mip` or `MRET` let the next instruction run before delivery. Now reevaluated
+   after those instructions retire and delivered in the same call (`mepc` exact, incl.
+   compressed targets; cycle counts only the retired instruction).
+
+V-32's own probes rerun here against the `0.1.5` jar: `CoreFeatureProbe` exit 0,
+`CoreResponseProbe` 30/30. **Resume:** V-32 bumps `build.gradle` to `0.1.5-SNAPSHOT` and
+resumes its bus/privilege/mailbox integration.
+
 ## Latest: V-32 CPU integration review answered (`0664be7`, bump to `0.1.4-SNAPSHOT`)
 
 V-32 reviewed `0.1.3-SNAPSHOT` (its `CPU_INTEGRATION_REVIEW.md`, 2026-09-15, copied into this

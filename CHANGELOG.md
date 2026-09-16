@@ -99,8 +99,41 @@ for how this file is updated as part of cutting a release.
 - `docs/RELEASING.md`, `RELEASE_TODO.md`, `PLAN_REVIEW_REQUEST.md` /
   `PLAN_REVIEW_RESPONSE.md`, and `docs/README.md` documentation index.
 
+### Fixed
+Findings from the V-32 emulator's CPU integration review of `0.1.3-SNAPSHOT`
+(`docs/CPU_INTEGRATION_RESPONSE.md`):
+- `MRET` executed from user mode now traps illegal-instruction (cause 2, `mtval` = the
+  encoding) instead of performing the machine-mode return, whatever `mstatus.MPP` holds.
+  Non-zero `rd`/`rs1` fields on `MRET`/`ECALL`/`EBREAK`/`WFI` (reserved) are illegal too.
+- `WFI` no longer loses an already-pending enabled interrupt. `WFI` completes without
+  stalling when an enabled interrupt is pending once it has set `mstatus.MIE`, and a stalled
+  hart now checks for deliverable interrupts before returning `1`, so a pending bit set on
+  `mip` directly (without `injectInterrupt`) or set before the `WFI` executed wakes the hart
+  on the next `step`.
+- Atomic operand validation: `LR.W`/`SC.W`/AMOs must be naturally aligned to their width.
+  A misaligned `LR.W` traps load address-misaligned (cause 4); a misaligned `SC.W` or AMO
+  (including Zabha halfwords) traps store/AMO address-misaligned (cause 6); `mtval` is the
+  guest address and the bus is never called. `LR.W` with a non-zero `rs2` field is illegal.
+  Ordinary loads/stores keep their misaligned tolerance; only atomics gained alignment traps.
+- LR/SC reservation lifecycle on a fault: an `SC.W` that traps with a store/AMO access fault
+  no longer leaves `reservationValid` set, and an `LR.W` that traps drops any previous
+  reservation. Rule: every `LR.W`/`SC.W` attempt clears the hart's reservation first; only a
+  successful `LR.W` establishes one.
+
 ### Changed
 - Upgraded JUnit from 5.10.0 to 6.1.3 via the `junit-bom`.
+- `MemoryBus.checkAccess(int, AccessContext)`: new side-effect-free permission probe,
+  default permit-all. `RV32IMACore` calls it for an `SC.W` whose local reservation
+  pre-check fails, so a bus with access control can still reject the failing `SC.W` with a
+  store/AMO access fault (cause 7) as the A extension requires, without any write.
+  `FFMMemoryBus` overrides it with a bounds check. `tryScAndStore`'s Javadoc now also
+  requires an override to permission-check before returning a failure code and to consume
+  its reservation entry before throwing.
+- `MMIOBus` now forwards every context-bearing overload plus `atomicRmw`, `tryScAndStore`,
+  and `checkAccess` to its backing bus for addresses no hook claims, so an `AccessContext`
+  and the single-call atomic contract survive the router (previously it implemented only the
+  six legacy methods, silently dropping context and splitting AMOs at that boundary). Hook
+  addresses still take the no-context `HardwareHook` path.
 - Fixed a latent interrupt-gating defect: `mstatus.MIE` no longer masks machine
   interrupts while executing in user mode (it should only mask them while already in
   machine mode, per the RISC-V privileged spec). Dormant until now — nothing previously

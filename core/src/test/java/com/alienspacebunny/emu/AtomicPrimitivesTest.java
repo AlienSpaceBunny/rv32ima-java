@@ -41,6 +41,10 @@ public class AtomicPrimitivesTest {
         Integer fixedAtomicRmwResult;
         boolean throwOnAtomicRmw;
         boolean throwOnTryScAndStore;
+        int checkAccessCalls;
+        Integer lastCheckAccessAddress;
+        AccessContext lastCheckAccessCtx;
+        boolean throwOnCheckAccess;
 
         RecordingBus(FFMMemoryBus delegate) {
             this.delegate = delegate;
@@ -105,6 +109,24 @@ public class AtomicPrimitivesTest {
             }
             return MemoryBus.super.tryScAndStore(hartId, address, value, ctx);
         }
+
+        @Override
+        public void checkAccess(int address, AccessContext ctx) {
+            checkAccessCalls++;
+            lastCheckAccessAddress = address;
+            lastCheckAccessCtx = ctx;
+            if (throwOnCheckAccess) {
+                throw new IndexOutOfBoundsException("simulated denial");
+            }
+        }
+    }
+
+    private static RV32IMAState machineState() {
+        RV32IMAState state = new RV32IMAState();
+        state.pc = RAM_OFFSET;
+        state.extraflags |= 3;
+        state.mtvec = RAM_OFFSET + 0x80;
+        return state;
     }
 
     @Test
@@ -295,6 +317,221 @@ public class AtomicPrimitivesTest {
             assertEquals(7, state.mcause);
             assertEquals(dataAddr, state.mtval);
             assertEquals(RAM_OFFSET, state.mepc);
+        }
+    }
+
+    // Regressions for the V-32 CPU integration review (docs/CPU_INTEGRATION_RESPONSE.md):
+    // atomic operand validation, the failing-SC permission probe, and reservation lifecycle.
+
+    @Test
+    public void misalignedLrTrapsLoadMisalignedWithoutTouchingBus() {
+        int ramSize = 1024;
+        try (FFMMemoryBus backing = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RecordingBus bus = new RecordingBus(backing);
+            RV32IMAState state = machineState();
+            int dataAddr = RAM_OFFSET + 0x101;
+            state.regs[1] = dataAddr;
+            backing.writeInt(RAM_OFFSET, amoInstruction(2, 2, 3, 1, 0)); // lr.w x3, (x1)
+
+            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(4, state.mcause);
+            assertEquals(dataAddr, state.mtval);
+            assertEquals(RAM_OFFSET, state.mepc);
+            assertEquals(false, state.reservationValid);
+        }
+    }
+
+    @Test
+    public void misalignedScAndAmoTrapStoreMisalignedWithoutTouchingBus() {
+        int ramSize = 1024;
+        int[][] cases = {
+            {amoInstruction(3, 2, 3, 1, 2), 0x102}, // sc.w x3, x2, (x1) at +2
+            {amoInstruction(0, 2, 3, 1, 2), 0x103}, // amoadd.w at +3
+            {amoInstruction(1, 2, 3, 1, 2), 0x101}, // amoswap.w at +1
+        };
+        for (int[] c : cases) {
+            try (FFMMemoryBus backing = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+                RecordingBus bus = new RecordingBus(backing);
+                RV32IMAState state = machineState();
+                int dataAddr = RAM_OFFSET + c[1];
+                state.regs[1] = dataAddr;
+                state.regs[2] = 1;
+                state.reservationValid = true; // even a valid-looking reservation must not reach the bus
+                state.reservationAddr = dataAddr;
+                backing.writeInt(RAM_OFFSET, c[0]);
+                backing.writeInt(RAM_OFFSET + 0x100, 0);
+
+                new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+                assertEquals(6, state.mcause, Integer.toHexString(c[0]));
+                assertEquals(dataAddr, state.mtval);
+                assertEquals(0, bus.atomicRmwCalls);
+                assertEquals(0, bus.tryScAndStoreCalls);
+                assertEquals(0, bus.checkAccessCalls);
+                assertEquals(0, backing.readInt(RAM_OFFSET + 0x100)); // memory untouched
+            }
+        }
+    }
+
+    @Test
+    public void misalignedZabhaHalfwordAmoTrapsStoreMisaligned() {
+        int ramSize = 1024;
+        try (FFMMemoryBus backing = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RecordingBus bus = new RecordingBus(backing);
+            RV32IMAState state = machineState();
+            int dataAddr = RAM_OFFSET + 0x101;
+            state.regs[1] = dataAddr;
+            state.regs[2] = 1;
+            backing.writeInt(RAM_OFFSET, amoInstruction(0, 1, 3, 1, 2)); // amoadd.h
+
+            new RV32IMACore(new IsaConfig(false, false, false, false, true))
+                    .step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(6, state.mcause);
+            assertEquals(dataAddr, state.mtval);
+            assertEquals(0, bus.atomicRmwCalls);
+        }
+    }
+
+    @Test
+    public void zabhaByteAmoIsNeverMisaligned() {
+        int ramSize = 1024;
+        try (FFMMemoryBus backing = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RecordingBus bus = new RecordingBus(backing);
+            RV32IMAState state = machineState();
+            state.regs[1] = RAM_OFFSET + 0x103;
+            state.regs[2] = 1;
+            backing.writeInt(RAM_OFFSET, amoInstruction(0, 0, 3, 1, 2)); // amoadd.b
+
+            new RV32IMACore(new IsaConfig(false, false, false, false, true))
+                    .step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(0, state.mcause);
+            assertEquals(1, bus.atomicRmwCalls);
+        }
+    }
+
+    @Test
+    public void lrWithNonZeroRs2IsIllegalInstruction() {
+        int ramSize = 1024;
+        try (FFMMemoryBus backing = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RecordingBus bus = new RecordingBus(backing);
+            RV32IMAState state = machineState();
+            state.regs[1] = RAM_OFFSET + 0x100;
+            int encoding = amoInstruction(2, 2, 3, 1, 2); // lr.w with rs2 = x2
+            backing.writeInt(RAM_OFFSET, encoding);
+
+            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(2, state.mcause);
+            assertEquals(encoding, state.mtval);
+            assertEquals(false, state.reservationValid);
+        }
+    }
+
+    @Test
+    public void locallyFailingScProbesPermissionsViaCheckAccess() {
+        int ramSize = 1024;
+        try (FFMMemoryBus backing = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RecordingBus bus = new RecordingBus(backing);
+            RV32IMAState state = machineState();
+            state.hartId = 5;
+            int dataAddr = RAM_OFFSET + 0x100;
+            state.regs[1] = dataAddr;
+            state.regs[2] = 0x55aa;
+            state.reservationValid = false; // no reservation: local fast-path failure
+            backing.writeInt(RAM_OFFSET, amoInstruction(3, 2, 3, 1, 2)); // sc.w x3, x2, (x1)
+            backing.writeInt(dataAddr, 0x11111111);
+
+            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(0, state.mcause);
+            assertEquals(1, state.regs[3]); // failed, retired
+            assertEquals(0, bus.tryScAndStoreCalls);
+            assertEquals(1, bus.checkAccessCalls);
+            assertEquals(dataAddr, bus.lastCheckAccessAddress);
+            assertEquals(new AccessContext(5, 3, AccessKind.AMO, 4, 3), bus.lastCheckAccessCtx);
+            assertEquals(0x11111111, backing.readInt(dataAddr)); // nothing written
+        }
+    }
+
+    @Test
+    public void locallyFailingScToDeniedAddressTrapsStoreAmoAccessFault() {
+        int ramSize = 1024;
+        try (FFMMemoryBus backing = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RecordingBus bus = new RecordingBus(backing);
+            bus.throwOnCheckAccess = true;
+            RV32IMAState state = machineState();
+            int dataAddr = 0x10000; // wherever the bus says no
+            state.regs[1] = dataAddr;
+            state.regs[2] = 0x55aa;
+            state.regs[3] = 0x7777;
+            backing.writeInt(RAM_OFFSET, amoInstruction(3, 2, 3, 1, 2)); // sc.w x3, x2, (x1)
+
+            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(7, state.mcause);
+            assertEquals(dataAddr, state.mtval);
+            assertEquals(RAM_OFFSET, state.mepc);
+            assertEquals(0x7777, state.regs[3]); // rd not written on a trap
+            assertEquals(0, bus.tryScAndStoreCalls);
+        }
+    }
+
+    @Test
+    public void locallyFailingScToUnmappedAddressFaultsOnReferenceBus() {
+        // FFMMemoryBus overrides checkAccess with a bounds check, so the reference bus rejects a
+        // failing SC.W outside its region end-to-end without any recording shim.
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            int dataAddr = RAM_OFFSET + ramSize; // first address past the end
+            state.regs[1] = dataAddr;
+            ram.writeInt(RAM_OFFSET, amoInstruction(3, 2, 3, 1, 2)); // sc.w x3, x2, (x1)
+
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(7, state.mcause);
+            assertEquals(dataAddr, state.mtval);
+        }
+    }
+
+    @Test
+    public void faultingScConsumesLocalReservation() {
+        int ramSize = 1024;
+        try (FFMMemoryBus backing = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RecordingBus bus = new RecordingBus(backing);
+            bus.throwOnTryScAndStore = true;
+            RV32IMAState state = machineState();
+            int dataAddr = RAM_OFFSET + 0x100;
+            state.regs[1] = dataAddr;
+            state.reservationValid = true;
+            state.reservationAddr = dataAddr;
+            backing.writeInt(RAM_OFFSET, amoInstruction(3, 2, 3, 1, 2)); // sc.w x3, x2, (x1)
+
+            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(7, state.mcause);
+            assertEquals(false, state.reservationValid);
+        }
+    }
+
+    @Test
+    public void faultingLrDropsPreviousReservation() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            int oldAddr = RAM_OFFSET + 0x100;
+            state.reservationValid = true;
+            state.reservationAddr = oldAddr;
+            state.regs[1] = RAM_OFFSET + ramSize; // unmapped
+            ram.writeInt(RAM_OFFSET, amoInstruction(2, 2, 3, 1, 0)); // lr.w x3, (x1)
+
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(5, state.mcause);
+            assertEquals(false, state.reservationValid);
         }
     }
 }

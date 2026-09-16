@@ -35,9 +35,19 @@ package com.alienspacebunny.emu;
  *
  * <p><b>Atomics (Phase 2).</b> {@link #atomicRmw} handles every RV32A read-modify-write AMO
  * except {@code LR.W}/{@code SC.W}; {@code LR.W} routes through {@link #readInt(int,
- * AccessContext)} and {@code SC.W} through {@link #tryScAndStore}. The default implementations of
- * all three are correct only for a single hart — see each method's Javadoc for what a
- * multi-hart-aware override must do.
+ * AccessContext)}, {@code SC.W} through {@link #tryScAndStore} when the hart's local reservation
+ * is valid, and through {@link #checkAccess} (a side-effect-free permission probe) when it is not.
+ * The default implementations are correct only for a single hart — see each method's Javadoc for
+ * what a multi-hart-aware override must do. {@link RV32IMACore} validates alignment before any of
+ * these calls: every atomic address it passes is naturally aligned to {@code ctx.width()}, and a
+ * misaligned {@code LR.W}/{@code SC.W}/AMO traps in the core without reaching the bus.
+ *
+ * <p><b>Wrappers.</b> A bus that wraps another bus (an address router, an MPU view, a boot
+ * overlay) must forward the context-bearing overloads <em>and</em> {@link #atomicRmw}, {@link
+ * #tryScAndStore}, and {@link #checkAccess} to the wrapped bus, not just the six legacy methods.
+ * Otherwise the defaults silently discard the {@link AccessContext} and split every AMO into a
+ * non-atomic read/write pair at the wrapper boundary. {@link MMIOBus} does this forwarding for
+ * addresses not claimed by a hook.
  */
 public interface MemoryBus {
     /**
@@ -261,7 +271,9 @@ public interface MemoryBus {
      * ignored, not folded in), and writes back only the low {@code width} bytes of the result.
      * There is no byte/halfword {@code LR}/{@code SC} — Zabha omits them.
      *
-     * @param address the unsigned 32-bit guest address. Naturally aligned to {@code ctx.width()}.
+     * @param address the unsigned 32-bit guest address. Always naturally aligned to {@code
+     *     ctx.width()}: {@link RV32IMACore} traps a misaligned AMO (store/AMO address-misaligned,
+     *     cause 6) before calling this method.
      * @param funct5 the RV32A {@code funct5} encoding identifying the operation (for example,
      *     {@code 0} for {@code AMOADD.W}, {@code 1} for {@code AMOSWAP.W}); equal to {@link
      *     AccessContext#atomicOp()} on {@code ctx}. Must be one of the values {@link RV32IMACore}
@@ -339,9 +351,25 @@ public interface MemoryBus {
      * still valid, perform the write and invalidate the reservation; either way, the reservation
      * entry is consumed (removed) by this call, regardless of success.
      *
+     * <p><b>Permission checks on failure.</b> The RISC-V A extension says no {@code SC.W} may
+     * retire unless it passes memory permission checks, and that a failed {@code SC.W} may be
+     * treated like a store for protection purposes. An override that decides to report failure
+     * must therefore still authorize {@code [address, address + 4)} as a store for {@code ctx}
+     * first, and throw {@link IndexOutOfBoundsException} if that would be denied, rather than
+     * returning a failure code for an address the hart may not write. (The locally-failing case,
+     * where the core never calls this method, is covered by {@link #checkAccess}.)
+     *
+     * <p><b>Reservation lifecycle on a fault.</b> {@link RV32IMACore} clears the hart's local
+     * reservation before calling this method, so an {@code SC.W} that traps with a store/AMO
+     * access fault does not leave a stale local reservation behind. An override must match that:
+     * consume its own tracked entry for this hart before throwing, so the bus's and the core's
+     * views of the reservation agree after the trap.
+     *
      * @param hartId the calling hart's identity (see {@link AccessContext#hartId()}), passed
      *     separately rather than requiring it be re-derived from {@code ctx}.
      * @param address the unsigned 32-bit guest address, matching the preceding {@code LR.W}.
+     *     Always 4-byte aligned: {@link RV32IMACore} traps a misaligned {@code SC.W} (store/AMO
+     *     address-misaligned, cause 6) before calling this method.
      * @param value the value to conditionally store (from {@code rs2}).
      * @param ctx metadata describing this access. See {@link AccessContext}.
      * @return {@code 0} on success; any non-zero value on failure. This becomes the destination
@@ -352,4 +380,35 @@ public interface MemoryBus {
         writeInt(address, value, ctx);
         return 0;
     }
+
+    /**
+     * Checks whether the access described by {@code ctx} at {@code address} would be permitted,
+     * without performing it.
+     *
+     * <p>{@link RV32IMACore} calls this for an {@code SC.W} whose local reservation pre-check
+     * fails (no reservation, or a reservation for a different address). No store happens in that
+     * case, but the RISC-V A extension still requires the failing {@code SC.W} to pass memory
+     * permission checks before it retires — so the bus must be able to reject it with a store/AMO
+     * access fault (cause 7, {@code mtval} = the guest address) even though nothing is written.
+     * For that call, {@code ctx} has {@code kind == AccessKind.AMO}, {@code width == 4}, and
+     * {@code atomicOp == 3} ({@code SC.W}'s {@code funct5}).
+     *
+     * <p><b>Contract.</b> Throw {@link IndexOutOfBoundsException} if and only if the real access
+     * ({@link #writeInt(int, int, AccessContext)}/{@link #tryScAndStore} for a store-kind context)
+     * would be denied for this hart, privilege, and full {@code [address, address + ctx.width())}
+     * range. Return normally otherwise. Must have <b>no side effects</b>: do not read or write
+     * memory or MMIO to answer, do not touch reservation tracking. An MPU-style bus answers from
+     * its mapping tables; a wrapper forwards to the wrapped bus (translating the address as it
+     * would for a real access).
+     *
+     * <p>The default implementation permits everything. A bus that only implements the six legacy
+     * methods therefore keeps its previous behavior: a locally failing {@code SC.W} retires with a
+     * non-zero result and no permission check, which is acceptable only where the bus enforces no
+     * access control. A bus that can reject a store must override this method as well.
+     *
+     * @param address the unsigned 32-bit guest address. Naturally aligned to {@code ctx.width()}.
+     * @param ctx metadata describing the access being checked. See {@link AccessContext}.
+     * @throws IndexOutOfBoundsException if the access would be denied.
+     */
+    default void checkAccess(int address, AccessContext ctx) {}
 }

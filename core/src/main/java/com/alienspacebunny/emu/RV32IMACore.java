@@ -108,7 +108,9 @@ public class RV32IMACore {
     private static final int EXC_INSTRUCTION_ACCESS_FAULT = 1;
     private static final int EXC_ILLEGAL_INSTRUCTION = 2;
     private static final int EXC_BREAKPOINT = 3;
+    private static final int EXC_LOAD_MISALIGNED = 4;
     private static final int EXC_LOAD_ACCESS_FAULT = 5;
+    private static final int EXC_STORE_MISALIGNED = 6;
     private static final int EXC_STORE_ACCESS_FAULT = 7;
     private static final int EXC_ECALL_FROM_U = 8;
     private static final int EXC_ECALL_FROM_M = 11;
@@ -171,6 +173,18 @@ public class RV32IMACore {
     public static void injectInterrupt(RV32IMAState state, int interruptBit) {
         state.mip |= 1 << interruptBit;
         state.extraflags &= ~EXTRAFLAG_WFI;
+    }
+
+    /**
+     * Returns the {@code mip & mie} bits that are currently deliverable under the gating rule
+     * documented on {@link #step}: every individually enabled interrupt while in user mode, or
+     * only when {@code mstatus.MIE} is set while in machine mode. Shared by the pre-loop dispatch
+     * and the {@code WFI} handler so both agree on what counts as a pending interrupt.
+     */
+    private static int pendingEnabledInterrupts(RV32IMAState state) {
+        boolean interruptsGloballyEnabled =
+                (state.extraflags & EXTRAFLAG_PRIV_MASK) == PRIV_USER || (state.mstatus & MSTATUS_MIE) != 0;
+        return interruptsGloballyEnabled ? (state.mip & state.mie) : 0;
     }
 
     /**
@@ -1094,11 +1108,6 @@ public class RV32IMACore {
             state.mip &= ~MIP_MTIP;
         }
 
-        // If WFI, don't run processor.
-        if ((state.extraflags & EXTRAFLAG_WFI) != 0) {
-            return 1;
-        }
-
         int trap = 0;
         int rval = 0;
         int pc = state.pc;
@@ -1121,9 +1130,20 @@ public class RV32IMACore {
         // mie is always taken while running below M-mode (here, U-mode), regardless of
         // mstatus.MIE. Priority when more than one bit is simultaneously pending and enabled:
         // external > software > timer.
-        boolean interruptsGloballyEnabled =
-                (state.extraflags & EXTRAFLAG_PRIV_MASK) == PRIV_USER || (state.mstatus & MSTATUS_MIE) != 0;
-        int pendingEnabled = interruptsGloballyEnabled ? (state.mip & state.mie) : 0;
+        int pendingEnabled = pendingEnabledInterrupts(state);
+
+        // If WFI, don't run processor -- unless an enabled interrupt is already pending, in which
+        // case the stall ends here and the interrupt is delivered below. This check deliberately
+        // comes after pendingEnabledInterrupts so a pending bit that was set before the WFI
+        // executed (or set directly on mip by an embedder, without injectInterrupt's WFI clear)
+        // cannot leave the hart stalled with a deliverable interrupt.
+        if ((state.extraflags & EXTRAFLAG_WFI) != 0) {
+            if (pendingEnabled == 0) {
+                return 1;
+            }
+            state.extraflags &= ~EXTRAFLAG_WFI;
+        }
+
         if ((pendingEnabled & MIP_MEIP) != 0) {
             trap = INT_MACHINE_EXTERNAL;
         } else if ((pendingEnabled & MIP_MSIP) != 0) {
@@ -1765,8 +1785,18 @@ public class RV32IMACore {
                             } else if (microop == 0) {
                                 // SYSTEM (MRET, ECALL, etc.)
                                 rdid = 0;
-                                if (csrno == 0x302) {
+                                if (((ir >> 7) & 0x1f) != 0 || ((ir >> 15) & 0x1f) != 0) {
+                                    // rd and rs1 are reserved (must be zero) for every funct3 == 0
+                                    // SYSTEM instruction; any other encoding is illegal.
+                                    trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
+                                } else if (csrno == 0x302) {
                                     // MRET
+                                    if ((state.extraflags & EXTRAFLAG_PRIV_MASK) != PRIV_MACHINE) {
+                                        // MRET is a machine-mode-only instruction: executing it below
+                                        // M-mode is an illegal instruction, whatever MPP holds.
+                                        trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
+                                        break;
+                                    }
                                     int startmstatus = state.mstatus;
                                     int startextraflags = state.extraflags;
                                     state.mstatus = (startmstatus & ~(MSTATUS_MIE | MSTATUS_MPIE | MSTATUS_MPP))
@@ -1790,9 +1820,17 @@ public class RV32IMACore {
                                             break;
                                         case 0x105: // WFI
                                             state.mstatus |= MSTATUS_MIE;
-                                            state.extraflags |= EXTRAFLAG_WFI;
                                             state.setCycle(cycle);
                                             state.pc = pc + instrLen;
+                                            if (pendingEnabledInterrupts(state) != 0) {
+                                                // An enabled interrupt is already pending (for example,
+                                                // MSIP injected before this WFI, or an interrupt that
+                                                // mstatus.MIE was masking until the line above set
+                                                // it). WFI completes immediately without stalling;
+                                                // the next step call delivers the interrupt.
+                                                return 0;
+                                            }
+                                            state.extraflags |= EXTRAFLAG_WFI;
                                             return 1;
                                         default:
                                             trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
@@ -1826,7 +1864,23 @@ public class RV32IMACore {
                                 break;
                             }
 
+                            if (irmid == 2 && ((ir >> 20) & 0x1f) != 0) {
+                                // LR.W's rs2 field is reserved and must be zero.
+                                trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
+                                break;
+                            }
+
                             int width = isWordWidth ? 4 : (funct3 == 1 ? 2 : 1);
+                            // LR/SC and AMOs must be naturally aligned to their width (the misaligned
+                            // atomicity granule PMA is not modelled). Checked before any bus call so a
+                            // misaligned atomic never reaches the bus, whose atomicRmw/tryScAndStore
+                            // contract promises aligned addresses. Ordinary loads and stores keep
+                            // their misaligned tolerance; only atomics trap here.
+                            if ((rs1 & (width - 1)) != 0) {
+                                trap = exceptionTrap(irmid == 2 ? EXC_LOAD_MISALIGNED : EXC_STORE_MISALIGNED);
+                                rval = rs1;
+                                break;
+                            }
                             int accessFaultTrap =
                                     exceptionTrap(irmid == 2 ? EXC_LOAD_ACCESS_FAULT : EXC_STORE_ACCESS_FAULT);
                             // irmid is the funct5 encoding; also AccessContext.atomicOp. LR.W is irmid 2 --
@@ -1837,22 +1891,35 @@ public class RV32IMACore {
                             try {
                                 switch (irmid) {
                                     case 2: // LR.W
+                                        // Any LR.W attempt drops the previous reservation first, so a
+                                        // faulting LR never leaves a stale one behind; a successful
+                                        // read then establishes the new one.
+                                        state.reservationValid = false;
                                         rval = mem.readInt(rs1, amoCtx);
                                         state.reservationAddr = rs1;
                                         state.reservationValid = true;
                                         break;
                                     case 3: // SC.W
-                                        // Local fast-path pre-check: if it fails, fail immediately with no
-                                        // bus call at all (Design Decision §5). If it passes, the bus still
-                                        // makes the final atomic decision -- it may reject even though the
-                                        // local state says valid, if a cross-hart invalidation landed between
-                                        // this hart's LR and SC.
-                                        if (state.reservationValid && state.reservationAddr == rs1) {
+                                        // Every SC.W attempt consumes the local reservation -- success,
+                                        // failure, or trap -- so this is cleared before the bus is
+                                        // consulted rather than after, where a thrown access fault
+                                        // would skip it.
+                                        boolean locallyValid = state.reservationValid && state.reservationAddr == rs1;
+                                        state.reservationValid = false;
+                                        if (locallyValid) {
+                                            // Local fast-path pre-check passed (Design Decision §5); the bus
+                                            // still makes the final atomic decision -- it may reject even
+                                            // though the local state says valid, if a cross-hart
+                                            // invalidation landed between this hart's LR and SC.
                                             rval = mem.tryScAndStore(state.hartId, rs1, rs2, amoCtx);
                                         } else {
+                                            // Locally failed SC: no store happens, but the spec still
+                                            // requires the SC to pass memory permission checks before it
+                                            // retires, so the bus gets a side-effect-free probe that may
+                                            // throw (-> store/AMO access fault) instead of a write.
+                                            mem.checkAccess(rs1, amoCtx);
                                             rval = 1;
                                         }
-                                        state.reservationValid = false;
                                         break;
                                     default: // the 9 validated non-LR/SC AMOs (ADD/SWAP/XOR/AND/OR/MIN[U]/MAX[U])
                                         rval = mem.atomicRmw(rs1, irmid, rs2, amoCtx);

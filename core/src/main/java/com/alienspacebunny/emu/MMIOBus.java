@@ -10,13 +10,17 @@ import java.util.List;
  * <p>Registered ranges are device-owned: once an access matches a hook range,
  * it is routed to the hook and does not fall through to the backing RAM bus.
  *
- * <p><b>Does not forward {@link AccessContext}.</b> This class implements only the six
- * no-context {@link MemoryBus} methods, so every context-bearing call it receives falls to
- * {@code MemoryBus}'s default implementation and the {@link AccessContext} is discarded before
- * reaching either the backing bus or {@link HardwareHook}. That is the correct behavior for a
- * bus that doesn't need per-access metadata, but a bus that does — for example, per-hart MPU
- * enforcement — should implement {@link MemoryBus} directly rather than extend or wrap this
- * class, since wrapping it would silently drop context at this boundary.
+ * <p><b>Context and atomic forwarding.</b> For an address not claimed by any hook, every
+ * context-bearing overload, {@link #atomicRmw}, {@link #tryScAndStore}, and {@link #checkAccess}
+ * is forwarded to the backing bus with its {@link AccessContext} intact, so a multi-hart-aware
+ * RAM bus behind this router still sees hart identity and still gets each atomic as one call.
+ * For an address a hook owns, the {@link HardwareHook} interface carries no context, so the
+ * context is dropped at that boundary; an AMO to a hook address falls back to {@code
+ * MemoryBus}'s default read-compute-write through the hook (two hook calls, not atomic across
+ * harts), an {@code SC.W} to a hook address is an unconditional hook write, and {@link
+ * #checkAccess} on a hook address permits it, since hooks cannot be probed without side effects.
+ * A bus that needs per-access metadata on device accesses too should implement {@link MemoryBus}
+ * directly rather than wrap this class.
  */
 public class MMIOBus implements MemoryBus {
     private static final long ADDRESS_SPACE_SIZE = 1L << 32;
@@ -140,6 +144,83 @@ public class MMIOBus implements MemoryBus {
             hook.handleWrite(address, value, 4);
         } else {
             ram.writeInt(address, value);
+        }
+    }
+
+    // ---- Context-bearing overloads and atomic primitives: forward to the backing bus for
+    // non-hook addresses so the AccessContext and the single-call atomic contract survive this
+    // router; hook addresses take the no-context path above.
+
+    @Override
+    public byte readByte(int address, AccessContext ctx) {
+        return getHook(address) != null ? readByte(address) : ram.readByte(address, ctx);
+    }
+
+    @Override
+    public short readShort(int address, AccessContext ctx) {
+        return getHook(address) != null ? readShort(address) : ram.readShort(address, ctx);
+    }
+
+    @Override
+    public int readInt(int address, AccessContext ctx) {
+        return getHook(address) != null ? readInt(address) : ram.readInt(address, ctx);
+    }
+
+    @Override
+    public int readByteSigned(int address, AccessContext ctx) {
+        return getHook(address) != null ? readByteSigned(address) : ram.readByteSigned(address, ctx);
+    }
+
+    @Override
+    public int readShortSigned(int address, AccessContext ctx) {
+        return getHook(address) != null ? readShortSigned(address) : ram.readShortSigned(address, ctx);
+    }
+
+    @Override
+    public void writeByte(int address, byte value, AccessContext ctx) {
+        if (getHook(address) != null) {
+            writeByte(address, value);
+        } else {
+            ram.writeByte(address, value, ctx);
+        }
+    }
+
+    @Override
+    public void writeShort(int address, short value, AccessContext ctx) {
+        if (getHook(address) != null) {
+            writeShort(address, value);
+        } else {
+            ram.writeShort(address, value, ctx);
+        }
+    }
+
+    @Override
+    public void writeInt(int address, int value, AccessContext ctx) {
+        if (getHook(address) != null) {
+            writeInt(address, value);
+        } else {
+            ram.writeInt(address, value, ctx);
+        }
+    }
+
+    @Override
+    public int atomicRmw(int address, int funct5, int operand, AccessContext ctx) {
+        return getHook(address) != null
+                ? MemoryBus.super.atomicRmw(address, funct5, operand, ctx)
+                : ram.atomicRmw(address, funct5, operand, ctx);
+    }
+
+    @Override
+    public int tryScAndStore(int hartId, int address, int value, AccessContext ctx) {
+        return getHook(address) != null
+                ? MemoryBus.super.tryScAndStore(hartId, address, value, ctx)
+                : ram.tryScAndStore(hartId, address, value, ctx);
+    }
+
+    @Override
+    public void checkAccess(int address, AccessContext ctx) {
+        if (getHook(address) == null) {
+            ram.checkAccess(address, ctx);
         }
     }
 }

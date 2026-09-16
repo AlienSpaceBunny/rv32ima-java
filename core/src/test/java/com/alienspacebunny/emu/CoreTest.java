@@ -1864,4 +1864,137 @@ public class CoreTest {
             assertEquals(0x22222222, state.mtvec);
         }
     }
+
+    // Regressions for the V-32 CPU integration review (docs/CPU_INTEGRATION_RESPONSE.md).
+
+    @Test
+    public void mretInUserModeIsIllegalEvenWithMppMachine() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.extraflags &= ~3; // U-mode
+            state.mtvec = RAM_OFFSET + 0x80;
+            state.mstatus = 0x1800; // MPP = M: must not matter
+            state.mepc = RAM_OFFSET + 0x40;
+            ram.writeInt(RAM_OFFSET, 0x30200073); // mret
+
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(2, state.mcause);
+            assertEquals(0x30200073, state.mtval);
+            assertEquals(RAM_OFFSET, state.mepc);
+            assertEquals(RAM_OFFSET + 0x80, state.pc);
+            assertEquals(3, state.extraflags & 3); // trap entry, not the MRET's MPP restore
+            assertEquals(0, (state.mstatus & 0x1800)); // MPP recorded the U-mode origin
+        }
+    }
+
+    @Test
+    public void systemInstructionsWithNonZeroRdOrRs1AreIllegal() {
+        int ramSize = 1024;
+        int[] encodings = {
+            0x30200073 | (1 << 7), // mret with rd = x1
+            0x30200073 | (1 << 15), // mret with rs1 = x1
+            0x00000073 | (2 << 7), // ecall with rd = x2
+            0x10500073 | (3 << 15), // wfi with rs1 = x3
+        };
+        for (int encoding : encodings) {
+            try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+                RV32IMAState state = machineState();
+                state.mtvec = RAM_OFFSET + 0x80;
+                ram.writeInt(RAM_OFFSET, encoding);
+
+                new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+                assertEquals(2, state.mcause, Integer.toHexString(encoding));
+                assertEquals(encoding, state.mtval);
+            }
+        }
+    }
+
+    @Test
+    public void wfiWithSoftwareInterruptAlreadyPendingDoesNotStall() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.mtvec = RAM_OFFSET + 0x80;
+            state.mie = 1 << 3; // MSIE
+            state.mstatus = 0; // global MIE clear: the interrupt was masked until WFI
+            RV32IMACore.injectInterrupt(state, 3); // MSIP pending before WFI executes
+            ram.writeInt(RAM_OFFSET, 0x10500073); // wfi
+
+            int first = new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(0, first); // completed immediately, no stall
+            assertEquals(0, state.extraflags & 4);
+            assertEquals(RAM_OFFSET + 4, state.pc);
+
+            int second = new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(0, second);
+            assertEquals(0x80000003, state.mcause);
+            assertEquals(RAM_OFFSET + 4, state.mepc); // resumes after the WFI
+            assertEquals(RAM_OFFSET + 0x80, state.pc);
+        }
+    }
+
+    @Test
+    public void pendingBitSetDirectlyOnMipWakesStalledHart() {
+        // An embedder may set mip directly rather than via injectInterrupt (which also clears the
+        // WFI flag); the stall must still end once the interrupt is deliverable.
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.mtvec = RAM_OFFSET + 0x80;
+            state.mstatus = 0x08;
+            state.mie = 1 << 11; // MEIE
+            state.extraflags |= 4; // stalled in WFI
+            state.pc = RAM_OFFSET + 4;
+
+            assertEquals(1, new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null));
+
+            state.mip |= 1 << 11; // MEIP, without injectInterrupt
+            int result = new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(0, result);
+            assertEquals(0, state.extraflags & 4);
+            assertEquals(0x8000000b, state.mcause);
+            assertEquals(RAM_OFFSET + 4, state.mepc);
+        }
+    }
+
+    @Test
+    public void stalledHartStaysStalledWhilePendingInterruptIsNotEnabled() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.mstatus = 0x08;
+            state.mie = 0; // nothing enabled
+            state.mip = 1 << 3;
+            state.extraflags |= 4;
+
+            assertEquals(1, new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null));
+            assertEquals(4, state.extraflags & 4);
+        }
+    }
+
+    @Test
+    public void enablingInterruptThenWfiInOneBatchWithPendingBitDoesNotStall() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.mtvec = RAM_OFFSET + 0x80;
+            state.mstatus = 0;
+            state.mip = 1 << 3; // MSIP pending, but MSIE not yet set
+            state.regs[1] = 1 << 3;
+            ram.writeInt(RAM_OFFSET, csrInstruction(0x304, 2, 0, 1)); // csrs mie, x1
+            ram.writeInt(RAM_OFFSET + 4, 0x10500073); // wfi
+
+            int result = new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 2, null, null);
+
+            assertEquals(0, result);
+            assertEquals(0, state.extraflags & 4);
+            assertEquals(RAM_OFFSET + 8, state.pc);
+        }
+    }
 }

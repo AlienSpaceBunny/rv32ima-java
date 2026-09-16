@@ -74,6 +74,20 @@ public class FFMMemoryBus implements MemoryBus, AutoCloseable {
         segment.set(LE_INT, getInternalAddress(address), value);
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>This bus enforces only its own bounds, so the check is that the whole {@code [address,
+     * address + ctx.width())} range lies inside the region. Nothing is read or written.
+     */
+    @Override
+    public void checkAccess(int address, AccessContext ctx) {
+        long start = getInternalAddress(address);
+        if (start + ctx.width() > size) {
+            throw new IndexOutOfBoundsException("Address out of range: " + Integer.toUnsignedString(address));
+        }
+    }
+
     @Override
     public void close() {
         arena.close();

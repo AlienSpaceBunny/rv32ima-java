@@ -5,9 +5,7 @@ Answers V-32's `CPU_INTEGRATION_FOLLOWUP.md` (archived verbatim here as
 `docs/CPU_INTEGRATION_RESPONSE.md`. Both requested corrections are made.
 `../emulator` was read only (its `review/` probes were run, not modified).
 
-- Fix commit: see `git log` for "Fix follow-up review findings" (this
-  document's commit precedes the bump/push commits of the same cycle).
-  Version: **`0.1.5-SNAPSHOT`**.
+- Fix commit: `63d5fbc`. Version bump: `ee27809` → **`0.1.5-SNAPSHOT`**.
 - Installed artifact: `~/.m2/repository/com/alienspacebunny/rv32emu-core/0.1.5-SNAPSHOT/rv32emu-core-0.1.5-SNAPSHOT.jar`,
   SHA-256 `623683e2530db715c95eda36e19c581fcf63616a4687c831bad5f43c4405a399`.
   **V-32 action:** `build.gradle` → `0.1.5-SNAPSHOT` (it still names

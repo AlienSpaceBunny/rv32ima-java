@@ -1,10 +1,35 @@
 # Session Checkpoint — 2026-09-16
 
-## Latest: V-32 follow-up review answered (round 2, `0.1.5-SNAPSHOT`)
+## Latest: V-32 accepted `0.1.5-SNAPSHOT` — CPU integration exchange closed
+
+V-32 delivered `CPU_INTEGRATION_ACCEPTANCE.md` (now `docs/archive/CPU_INTEGRATION_ACCEPTANCE.md`,
+verbatim): it reran both probes against the `0.1.5` jar (`CoreFeatureProbe` all pass,
+`CoreResponseProbe` 30/30), its Gradle gate is green (51 tests, 32 new integration cases), and
+**no CPU-project requests are outstanding** from either review round. Its `build.gradle` is on
+`0.1.5-SNAPSHOT`; the `0.1.15-SNAPSHOT` the doc mentions was a typo. Nothing in `../emulator`
+was modified from this side.
+
+**No code action taken or needed.** Docs-only close-out (no version bump): the acceptance and
+both response docs are archived under `docs/archive/` with the review/follow-up they answer,
+indexed in `docs/README.md`; links in `CHANGELOG.md` and `docs/FEATURE_REQUEST_PLAN.md` updated.
+The `checkAccess` contract and inert-bus-entry policy the exchange produced already live in
+`docs/API.md` and the Javadoc, so nothing authoritative moved out of `docs/`.
+
+**Decision now due (Nate's, not started):** the acceptance's "Completed V-32 integration"
+section — shared-RAM monitor with cross-hart LR/SC, AP translation forwarding `checkAccess`,
+two-hart reset/privilege, mailbox with MEIP delivery, guest ECALL→mailbox→IOP test — is the
+"emulator repo's side of the integration done and has exercised the API in practice" condition
+that `RELEASE_TODO.md`'s 2026-09-13 update set for lifting the release hold. If Nate agrees it's
+met, the next step is the API-freeze review, then R5–R7 and a first release at **`0.2.0`**
+(`RELEASE_TODO.md`). Until then the API stays unfrozen and `main` stays a plain `0.1.5-SNAPSHOT`.
+Caveat from the acceptance itself: V-32's checks are focused integration tests, its upstream
+Maven gate was not rerun there, and no native-image/perf runs were done.
+
+## V-32 follow-up review answered (round 2, `0.1.5-SNAPSHOT`)
 
 V-32 re-reviewed `0.1.4-SNAPSHOT` (`docs/archive/CPU_INTEGRATION_FOLLOWUP.md`): accepted all
 round-1 changes and `checkAccess`, and raised two more, both real and both fixed
-(`docs/CPU_INTEGRATION_RESPONSE_2.md`):
+(`docs/archive/CPU_INTEGRATION_RESPONSE_2.md`):
 
 1. Misaligned `LR.W`/`SC.W` exited before the reservation clear → stale reservation reusable
    by a later SC without a new LR. Now cleared before the alignment check. Bus-side "inert
@@ -18,12 +43,12 @@ V-32's own probes rerun here against the `0.1.5` jar: `CoreFeatureProbe` exit 0,
 `CoreResponseProbe` 30/30. **Resume:** V-32 bumps `build.gradle` to `0.1.5-SNAPSHOT` and
 resumes its bus/privilege/mailbox integration.
 
-## Latest: V-32 CPU integration review answered (`0664be7`, bump to `0.1.4-SNAPSHOT`)
+## V-32 CPU integration review answered (`0664be7`, bump to `0.1.4-SNAPSHOT`)
 
 V-32 reviewed `0.1.3-SNAPSHOT` (its `CPU_INTEGRATION_REVIEW.md`, 2026-09-15, copied into this
 repo along with `MULTI_HART_BUS_NOTES.md` and `CoreFeatureProbe.java` in `0a22a97`, now
 archived verbatim under `docs/archive/` as the review input) and found five processor defects. All fixed in `0664be7` with regressions; response for the V-32 side is
-`docs/CPU_INTEGRATION_RESPONSE.md`:
+`docs/archive/CPU_INTEGRATION_RESPONSE.md`:
 
 1. U-mode `MRET` → illegal instruction (plus reserved rd/rs1 on SYSTEM funct3==0).
 2. WFI lost wakeup: stall check now runs after the pending-interrupt computation; `WFI` itself

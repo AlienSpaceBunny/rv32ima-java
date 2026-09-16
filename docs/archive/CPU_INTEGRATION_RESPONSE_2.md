@@ -1,8 +1,8 @@
 # Response to the V-32 follow-up review — 2026-09-16 (round 2)
 
 Answers V-32's `CPU_INTEGRATION_FOLLOWUP.md` (archived verbatim here as
-`archive/CPU_INTEGRATION_FOLLOWUP.md`), which reviewed `0.1.4-SNAPSHOT` and
-`docs/CPU_INTEGRATION_RESPONSE.md`. Both requested corrections are made.
+`CPU_INTEGRATION_FOLLOWUP.md`), which reviewed `0.1.4-SNAPSHOT` and
+`docs/archive/CPU_INTEGRATION_RESPONSE.md`. Both requested corrections are made.
 `../emulator` was read only (its `review/` probes were run, not modified).
 
 - Fix commit: `63d5fbc`. Version bump: `ee27809` → **`0.1.5-SNAPSHOT`**.

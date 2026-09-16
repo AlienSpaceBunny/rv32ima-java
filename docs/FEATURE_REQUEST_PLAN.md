@@ -274,7 +274,7 @@ default int tryScAndStore(int hartId, int addr, int value, AccessContext ctx) {
 entirely encapsulated in the bus implementation.
 
 **Amended 2026-09-16 (`0664be7`, from V-32's `CPU_INTEGRATION_REVIEW.md` (now `docs/archive/`) findings 3–5; see
-`docs/CPU_INTEGRATION_RESPONSE.md`):**
+`docs/archive/CPU_INTEGRATION_RESPONSE.md`):**
 - *Locally failing SC is still permission-checked.* The A extension says no `SC.W` may retire
   without passing memory permission checks. The "no bus call at all" fast path above was
   therefore incomplete for a bus with access control. New default method
@@ -288,7 +288,7 @@ entirely encapsulated in the bus implementation.
   `atomicRmw`'s contract is now enforced rather than assumed. `LR.W` with `rs2 != 0` is illegal.
 - *Reservation lifecycle on a fault.* Every `LR.W`/`SC.W` attempt clears
   `state.reservationValid` before any exit path (alignment trap included — a gap V-32's
-  follow-up caught; closed in `docs/CPU_INTEGRATION_RESPONSE_2.md`); only a successful `LR.W`
+  follow-up caught; closed in `docs/archive/CPU_INTEGRATION_RESPONSE_2.md`); only a successful `LR.W`
   sets it. A bus override must consume its own entry before throwing. A bus entry left behind
   by a core-local clear (misaligned attempt, locally failing SC) is inert and is replaced by the
   hart's next `LR.W`; embedders clear entries on reset/remap. See `tryScAndStore`'s Javadoc.
@@ -381,12 +381,12 @@ restores `MIE` from `MPIE`, clears `MPP` to U-mode. The return-state mechanics w
 the "already correct" claim missed that nothing gated the instruction on privilege: V-32's
 `CPU_INTEGRATION_REVIEW.md` demonstrated U-mode `MRET` performing a machine-mode return. Now an
 `MRET` below M-mode traps illegal-instruction, and non-zero `rd`/`rs1` on any funct3 == 0 SYSTEM
-instruction is illegal. See `docs/CPU_INTEGRATION_RESPONSE.md` finding 1.
+instruction is illegal. See `docs/archive/CPU_INTEGRATION_RESPONSE.md` finding 1.
 
 **Trap entry (existing).** All traps and interrupts enter M-mode unconditionally (`extraflags |= 3`),
 saving the prior privilege in `mstatus.MPP`. Already correct at line 621.
 
-**In-batch interrupt reevaluation — done (V-32 follow-up, `docs/CPU_INTEGRATION_RESPONSE_2.md`).**
+**In-batch interrupt reevaluation — done (V-32 follow-up, `docs/archive/CPU_INTEGRATION_RESPONSE_2.md`).**
 Interrupt deliverability was only evaluated at `step` entry (and in `WFI`), so with `count > 1` a
 guest `csrs mstatus`/`mie`/`mip` or `MRET` that made a pending interrupt deliverable let the next
 instruction run first. Now the core reevaluates immediately after those instructions retire and

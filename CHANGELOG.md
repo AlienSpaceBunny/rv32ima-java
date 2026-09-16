@@ -131,7 +131,7 @@ for how this file is updated as part of cutting a release.
 
 ### Fixed
 Follow-up findings from the V-32 emulator's review of `0.1.4-SNAPSHOT`
-(`docs/CPU_INTEGRATION_RESPONSE_2.md`):
+(`docs/archive/CPU_INTEGRATION_RESPONSE_2.md`):
 - A misaligned `LR.W`/`SC.W` now drops the hart's local reservation before trapping, as the
   lifecycle rule already promised; previously the alignment trap exited before the clear, so a
   valid `LR.W` → misaligned `SC.W` → aligned `SC.W` (no new `LR.W`) sequence succeeded and
@@ -144,7 +144,7 @@ Follow-up findings from the V-32 emulator's review of `0.1.4-SNAPSHOT`
   first and the interrupt waited for the next `step` entry.
 
 Findings from the V-32 emulator's CPU integration review of `0.1.3-SNAPSHOT`
-(`docs/CPU_INTEGRATION_RESPONSE.md`):
+(`docs/archive/CPU_INTEGRATION_RESPONSE.md`):
 - `MRET` executed from user mode now traps illegal-instruction (cause 2, `mtval` = the
   encoding) instead of performing the machine-mode return, whatever `mstatus.MPP` holds.
   Non-zero `rd`/`rs1` fields on `MRET`/`ECALL`/`EBREAK`/`WFI` (reserved) are illegal too.

@@ -115,6 +115,13 @@ the two intentional spec deviations):
 - `MRET` is machine-mode only: executed from user mode it traps
   illegal-instruction regardless of `mstatus.MPP`. `MRET`/`ECALL`/`EBREAK`/
   `WFI` with a non-zero `rd` or `rs1` field are illegal (reserved encodings).
+- Interrupts are reevaluated within a batch, not only at `step` entry: after
+  a write to `mstatus`, `mie`, or `mip`, or after `MRET`, an interrupt that
+  became deliverable is taken before the next guest instruction runs, in the
+  same `step` call. `mepc` is the next instruction's address (the `MRET`
+  target, or the instruction after the CSR write — compressed or not), and
+  the cycle count includes only the instruction that retired. The usual
+  priority (external > software > timer) applies.
 
 Interrupt gating and injection:
 
@@ -218,9 +225,16 @@ A fault (`IndexOutOfBoundsException`) thrown from `atomicRmw`,
 `tryScAndStore`, or `checkAccess` becomes a standard store/AMO access fault
 (cause 7, `mtval` = the AMO address), exactly like an ordinary faulting
 store — see `AtomicPrimitivesTest`. Reservation lifecycle: every
-`LR.W`/`SC.W` attempt clears the hart's local reservation before the bus is
-consulted, so a faulting `SC.W` (or `LR.W`) never leaves a stale
-`reservationValid`; only a successful `LR.W` establishes one.
+`LR.W`/`SC.W` attempt clears the hart's local reservation before *any* exit
+path — the alignment trap included — so a faulting `SC.W` (or `LR.W`) never
+leaves a stale `reservationValid`; only a successful `LR.W` establishes one.
+A multi-hart bus can still hold an entry for a hart whose local flag is
+false (misaligned attempts never reach the bus; `checkAccess` must not
+touch tracking). That entry is inert — the core never calls
+`tryScAndStore` without a valid local reservation, and the next `LR.W`
+read replaces it — so the bus keeps at most one entry per hart, replaced
+on every `LR.W`, and the embedder clears entries on reset/reload/MPU remap.
+No cleanup call exists.
 
 Bus wrappers (address routers, MPU views, boot overlays) must forward the
 context-bearing overloads *and* `atomicRmw`/`tryScAndStore`/`checkAccess`

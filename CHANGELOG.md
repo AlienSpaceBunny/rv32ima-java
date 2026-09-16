@@ -130,6 +130,19 @@ for how this file is updated as part of cutting a release.
   directly).
 
 ### Fixed
+Follow-up findings from the V-32 emulator's review of `0.1.4-SNAPSHOT`
+(`docs/CPU_INTEGRATION_RESPONSE_2.md`):
+- A misaligned `LR.W`/`SC.W` now drops the hart's local reservation before trapping, as the
+  lifecycle rule already promised; previously the alignment trap exited before the clear, so a
+  valid `LR.W` → misaligned `SC.W` → aligned `SC.W` (no new `LR.W`) sequence succeeded and
+  wrote memory. Documented the bus-side lifecycle when no atomic bus call occurs (a stale bus
+  entry behind a false local flag is inert and replaced by the hart's next `LR.W`).
+- Interrupts are reevaluated within a batch after a write to `mstatus`/`mie`/`mip` or after
+  `MRET`: an interrupt those made deliverable is taken in the same `step` call before the next
+  guest instruction runs (`mepc` = that instruction, compressed or not; cycle count includes
+  only the retired instruction). Previously, with `count > 1`, the following instruction ran
+  first and the interrupt waited for the next `step` entry.
+
 Findings from the V-32 emulator's CPU integration review of `0.1.3-SNAPSHOT`
 (`docs/CPU_INTEGRATION_RESPONSE.md`):
 - `MRET` executed from user mode now traps illegal-instruction (cause 2, `mtval` = the

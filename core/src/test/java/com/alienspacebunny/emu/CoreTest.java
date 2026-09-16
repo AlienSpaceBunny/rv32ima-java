@@ -1997,4 +1997,203 @@ public class CoreTest {
             assertEquals(RAM_OFFSET + 8, state.pc);
         }
     }
+
+    // In-batch interrupt reevaluation after interrupt-affecting CSR writes and MRET (V-32
+    // follow-up review, docs/CPU_INTEGRATION_RESPONSE_2.md request 2). Every case runs with
+    // count > 1 and asserts the instruction after the boundary did NOT execute.
+
+    private static final int ADDI_X4_1 = 0x00100213; // addi x4, x0, 1
+
+    @Test
+    public void csrWriteEnablingMstatusMieDeliversPendingInterruptBeforeNextInstruction() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.mtvec = RAM_OFFSET + 0x80;
+            state.mip = 1 << 3;
+            state.mie = 1 << 3;
+            state.mstatus = 0;
+            state.regs[1] = 8;
+            ram.writeInt(RAM_OFFSET, 0x3000a073); // csrs mstatus, x1
+            ram.writeInt(RAM_OFFSET + 4, ADDI_X4_1);
+
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 2, null, null);
+
+            assertEquals(0, state.regs[4]); // addi did not run
+            assertEquals(0x80000003, state.mcause);
+            assertEquals(RAM_OFFSET + 4, state.mepc);
+            assertEquals(RAM_OFFSET + 0x80, state.pc);
+            assertEquals(1, state.getCycle()); // only the csrs retired
+            assertEquals(0x1880, state.mstatus); // MPIE=1 (MIE was 1), MIE=0, MPP=M
+        }
+    }
+
+    @Test
+    public void csrWriteEnablingMieBitWithMstatusMieAlreadySetDeliversBeforeNextInstruction() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.mtvec = RAM_OFFSET + 0x80;
+            state.mip = 1 << 11;
+            state.mie = 0;
+            state.mstatus = 0x08;
+            state.regs[1] = 1 << 11;
+            ram.writeInt(RAM_OFFSET, csrInstruction(0x304, 2, 0, 1)); // csrs mie, x1
+            ram.writeInt(RAM_OFFSET + 4, ADDI_X4_1);
+
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 2, null, null);
+
+            assertEquals(0, state.regs[4]);
+            assertEquals(0x8000000b, state.mcause);
+            assertEquals(RAM_OFFSET + 4, state.mepc);
+        }
+    }
+
+    @Test
+    public void csrWriteSettingPendingBitInMipDeliversBeforeNextInstruction() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.mtvec = RAM_OFFSET + 0x80;
+            state.mip = 0;
+            state.mie = 1 << 3;
+            state.mstatus = 0x08;
+            state.regs[1] = 1 << 3;
+            ram.writeInt(RAM_OFFSET, csrInstruction(0x344, 2, 0, 1)); // csrs mip, x1
+            ram.writeInt(RAM_OFFSET + 4, ADDI_X4_1);
+
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 2, null, null);
+
+            assertEquals(0, state.regs[4]);
+            assertEquals(0x80000003, state.mcause);
+            assertEquals(RAM_OFFSET + 4, state.mepc);
+        }
+    }
+
+    @Test
+    public void csrWriteReevaluationPreservesInterruptPriority() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.mtvec = RAM_OFFSET + 0x80;
+            state.mip = (1 << 3) | (1 << 11);
+            state.mie = (1 << 3) | (1 << 11);
+            state.mstatus = 0;
+            ram.writeInt(RAM_OFFSET, csrInstruction(0x300, 6, 0, 8)); // csrsi mstatus, 8
+            ram.writeInt(RAM_OFFSET + 4, ADDI_X4_1);
+
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 2, null, null);
+
+            assertEquals(0, state.regs[4]);
+            assertEquals(0x8000000b, state.mcause); // external beats software
+        }
+    }
+
+    @Test
+    public void csrWriteWithNothingDeliverableDoesNotEndTheBatch() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.mip = 1 << 3;
+            state.mie = 0; // pending but not enabled
+            state.regs[1] = 8;
+            ram.writeInt(RAM_OFFSET, 0x3000a073); // csrs mstatus, x1
+            ram.writeInt(RAM_OFFSET + 4, ADDI_X4_1);
+
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 2, null, null);
+
+            assertEquals(1, state.regs[4]);
+            assertEquals(0, state.mcause);
+            assertEquals(RAM_OFFSET + 8, state.pc);
+            assertEquals(2, state.getCycle());
+        }
+    }
+
+    @Test
+    public void mretToUserModeDeliversPendingInterruptBeforeTargetInstruction() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.mtvec = RAM_OFFSET + 0x80;
+            state.mip = 1 << 3;
+            state.mie = 1 << 3;
+            state.mstatus = 0; // MIE=0, MPIE=0, MPP=U: still deliverable in U-mode
+            state.mepc = RAM_OFFSET + 0x40;
+            ram.writeInt(RAM_OFFSET, 0x30200073); // mret
+            ram.writeInt(RAM_OFFSET + 0x40, ADDI_X4_1);
+
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 2, null, null);
+
+            assertEquals(0, state.regs[4]); // target instruction waited
+            assertEquals(0x80000003, state.mcause);
+            assertEquals(RAM_OFFSET + 0x40, state.mepc);
+            assertEquals(RAM_OFFSET + 0x80, state.pc);
+            assertEquals(3, state.extraflags & 3); // trap entered M-mode
+            assertEquals(0, state.mstatus & 0x1800); // MPP records the U-mode it was returning to
+            assertEquals(1, state.getCycle());
+        }
+    }
+
+    @Test
+    public void mretReenablingMachineInterruptsDeliversBeforeTargetInstruction() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.mtvec = RAM_OFFSET + 0x80;
+            state.mip = 1 << 11;
+            state.mie = 1 << 11;
+            state.mstatus = 0x80 | 0x1800; // MPIE=1, MPP=M -> MRET sets MIE, stays in M
+            state.mepc = RAM_OFFSET + 0x40;
+            ram.writeInt(RAM_OFFSET, 0x30200073); // mret
+            ram.writeInt(RAM_OFFSET + 0x40, ADDI_X4_1);
+
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 2, null, null);
+
+            assertEquals(0, state.regs[4]);
+            assertEquals(0x8000000b, state.mcause);
+            assertEquals(RAM_OFFSET + 0x40, state.mepc);
+            assertEquals(0x1880, state.mstatus); // MPIE=1 (from MIE=1), MIE=0, MPP=M
+        }
+    }
+
+    @Test
+    public void mretToCompressedTargetDeliversWithExactTargetMepc() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.mtvec = RAM_OFFSET + 0x80;
+            state.mip = 1 << 3;
+            state.mie = 1 << 3;
+            state.mstatus = 0; // return to U-mode
+            state.mepc = RAM_OFFSET + 0x42; // halfword-aligned compressed target
+            ram.writeInt(RAM_OFFSET, 0x30200073); // mret
+            ram.writeShort(RAM_OFFSET + 0x42, (short) 0x0205); // c.addi x4, 1
+
+            new RV32IMACore(IsaConfig.RV32IMC_ZBB_ZICSR).step(state, ram, RAM_OFFSET, ramSize, 0, 2, null, null);
+
+            assertEquals(0, state.regs[4]);
+            assertEquals(0x80000003, state.mcause);
+            assertEquals(RAM_OFFSET + 0x42, state.mepc);
+        }
+    }
+
+    @Test
+    public void mretWithNothingDeliverableContinuesAtTarget() {
+        int ramSize = 1024;
+        try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RV32IMAState state = machineState();
+            state.mip = 1 << 3;
+            state.mie = 0;
+            state.mstatus = 0x80 | 0x1800;
+            state.mepc = RAM_OFFSET + 0x40;
+            ram.writeInt(RAM_OFFSET, 0x30200073); // mret
+            ram.writeInt(RAM_OFFSET + 0x40, ADDI_X4_1);
+
+            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 2, null, null);
+
+            assertEquals(1, state.regs[4]);
+            assertEquals(0, state.mcause);
+            assertEquals(RAM_OFFSET + 0x44, state.pc);
+        }
+    }
 }

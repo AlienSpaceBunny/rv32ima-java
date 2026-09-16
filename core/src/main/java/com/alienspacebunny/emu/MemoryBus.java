@@ -365,6 +365,19 @@ public interface MemoryBus {
      * consume its own tracked entry for this hart before throwing, so the bus's and the core's
      * views of the reservation agree after the trap.
      *
+     * <p><b>Stale bus entries when no atomic bus call happens.</b> Some {@code LR.W}/{@code SC.W}
+     * attempts clear the core's local reservation without reaching this method or the {@code
+     * LR.W} read at all: a misaligned {@code LR.W}/{@code SC.W} traps in the core, and a locally
+     * failing {@code SC.W} only calls {@link #checkAccess}, which must not touch reservation
+     * tracking. A multi-hart bus may therefore still hold an entry for a hart whose local flag is
+     * already false. Such an entry is <em>inert</em>: the core never calls this method unless its
+     * local reservation is valid, and the local flag can only become valid again through a new
+     * {@code LR.W} read — at which point the bus records that new {@code (hartId, address)},
+     * replacing the stale entry. The contract is thus: a bus must keep at most one entry per
+     * hart, replaced on every {@code LR.W} read for that hart; it need not (and cannot) be told
+     * about core-local clears; and the embedder clears entries on reset, halt/reload, or MPU
+     * remap as part of that transition. No separate cleanup call is provided or needed.
+     *
      * @param hartId the calling hart's identity (see {@link AccessContext#hartId()}), passed
      *     separately rather than requiring it be re-derived from {@code ctx}.
      * @param address the unsigned 32-bit guest address, matching the preceding {@code LR.W}.

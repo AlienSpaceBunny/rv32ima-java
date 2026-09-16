@@ -534,4 +534,72 @@ public class AtomicPrimitivesTest {
             assertEquals(false, state.reservationValid);
         }
     }
+
+    // Reservation cleanup on an alignment fault (V-32 follow-up review,
+    // docs/CPU_INTEGRATION_RESPONSE_2.md request 1): a valid LR followed by a misaligned SC or
+    // LR must drop the reservation, so a later aligned SC without a fresh LR fails.
+
+    @Test
+    public void validLrThenMisalignedScClearsReservationAndLaterScFails() {
+        int ramSize = 1024;
+        try (FFMMemoryBus backing = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RecordingBus bus = new RecordingBus(backing);
+            RV32IMAState state = machineState();
+            int dataAddr = RAM_OFFSET + 0x100;
+            backing.writeInt(dataAddr, 0x11111111);
+            backing.writeInt(RAM_OFFSET, amoInstruction(2, 2, 3, 1, 0)); // lr.w x3, (x1)
+            backing.writeInt(RAM_OFFSET + 4, amoInstruction(3, 2, 3, 1, 2)); // sc.w x3, x2, (x1)
+            backing.writeInt(RAM_OFFSET + 0x80, amoInstruction(3, 2, 3, 1, 2)); // sc.w at mtvec
+            RV32IMACore core = new RV32IMACore();
+
+            state.regs[1] = dataAddr;
+            core.step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(true, state.reservationValid);
+
+            state.regs[1] = dataAddr + 1; // misaligned SC
+            state.regs[2] = 42;
+            core.step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(6, state.mcause);
+            assertEquals(dataAddr + 1, state.mtval);
+            assertEquals(false, state.reservationValid);
+            assertEquals(0, bus.tryScAndStoreCalls);
+
+            state.regs[1] = dataAddr; // aligned SC without a new LR, at mtvec
+            core.step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(1, state.regs[3]); // failed
+            assertEquals(0, bus.tryScAndStoreCalls);
+            assertEquals(0x11111111, backing.readInt(dataAddr)); // nothing written
+        }
+    }
+
+    @Test
+    public void validLrThenMisalignedLrClearsReservationAndLaterScFails() {
+        int ramSize = 1024;
+        try (FFMMemoryBus backing = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RecordingBus bus = new RecordingBus(backing);
+            RV32IMAState state = machineState();
+            int dataAddr = RAM_OFFSET + 0x100;
+            backing.writeInt(dataAddr, 0x11111111);
+            backing.writeInt(RAM_OFFSET, amoInstruction(2, 2, 3, 1, 0)); // lr.w x3, (x1)
+            backing.writeInt(RAM_OFFSET + 4, amoInstruction(2, 2, 3, 1, 0)); // lr.w again
+            backing.writeInt(RAM_OFFSET + 0x80, amoInstruction(3, 2, 3, 1, 2)); // sc.w at mtvec
+            RV32IMACore core = new RV32IMACore();
+
+            state.regs[1] = dataAddr;
+            core.step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(true, state.reservationValid);
+
+            state.regs[1] = dataAddr + 1; // misaligned LR
+            core.step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(4, state.mcause);
+            assertEquals(false, state.reservationValid);
+
+            state.regs[1] = dataAddr;
+            state.regs[2] = 42;
+            core.step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            assertEquals(1, state.regs[3]);
+            assertEquals(0, bus.tryScAndStoreCalls);
+            assertEquals(0x11111111, backing.readInt(dataAddr));
+        }
+    }
 }

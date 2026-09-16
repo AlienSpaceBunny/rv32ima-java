@@ -287,8 +287,11 @@ entirely encapsulated in the bus implementation.
   any bus call (causes 4/6, `mtval` = guest address), so the "naturally aligned" promise in
   `atomicRmw`'s contract is now enforced rather than assumed. `LR.W` with `rs2 != 0` is illegal.
 - *Reservation lifecycle on a fault.* Every `LR.W`/`SC.W` attempt clears
-  `state.reservationValid` before the bus is consulted; only a successful `LR.W` sets it. A bus
-  override must consume its own entry before throwing so both views agree after the trap.
+  `state.reservationValid` before any exit path (alignment trap included — a gap V-32's
+  follow-up caught; closed in `docs/CPU_INTEGRATION_RESPONSE_2.md`); only a successful `LR.W`
+  sets it. A bus override must consume its own entry before throwing. A bus entry left behind
+  by a core-local clear (misaligned attempt, locally failing SC) is inert and is replaced by the
+  hart's next `LR.W`; embedders clear entries on reset/remap. See `tryScAndStore`'s Javadoc.
 - *Wrappers.* `MMIOBus` now forwards context-bearing overloads and all three atomic primitives
   to its backing bus for non-hook addresses; the "bus wrappers must preserve context and forward
   atomic primitives" sentence in §3 was previously unmet by the one wrapper in this repo.
@@ -382,6 +385,12 @@ instruction is illegal. See `docs/CPU_INTEGRATION_RESPONSE.md` finding 1.
 
 **Trap entry (existing).** All traps and interrupts enter M-mode unconditionally (`extraflags |= 3`),
 saving the prior privilege in `mstatus.MPP`. Already correct at line 621.
+
+**In-batch interrupt reevaluation — done (V-32 follow-up, `docs/CPU_INTEGRATION_RESPONSE_2.md`).**
+Interrupt deliverability was only evaluated at `step` entry (and in `WFI`), so with `count > 1` a
+guest `csrs mstatus`/`mie`/`mip` or `MRET` that made a pending interrupt deliverable let the next
+instruction run first. Now the core reevaluates immediately after those instructions retire and
+takes the interrupt in the same call, before any further guest instruction.
 
 **Interrupt gating — done (`5620de0`).** For this U/M-only core, a pending machine interrupt is
 eligible when its bit is set in both `mip` and `mie`, and either execution is in U-mode or

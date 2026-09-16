@@ -188,6 +188,24 @@ public class RV32IMACore {
     }
 
     /**
+     * Selects the highest-priority deliverable interrupt as an {@code mcause}-form trap code
+     * ({@link #INT_MACHINE_EXTERNAL} > {@link #INT_MACHINE_SOFTWARE} > {@link #INT_MACHINE_TIMER}),
+     * or {@code 0} if none is deliverable. Shared by the pre-loop dispatch and the in-batch
+     * reevaluation after an interrupt-affecting CSR write or {@code MRET}.
+     */
+    private static int pendingInterruptTrap(RV32IMAState state) {
+        int pendingEnabled = pendingEnabledInterrupts(state);
+        if ((pendingEnabled & MIP_MEIP) != 0) {
+            return INT_MACHINE_EXTERNAL;
+        } else if ((pendingEnabled & MIP_MSIP) != 0) {
+            return INT_MACHINE_SOFTWARE;
+        } else if ((pendingEnabled & MIP_MTIP) != 0) {
+            return INT_MACHINE_TIMER;
+        }
+        return 0;
+    }
+
+    /**
      * Computes a Zba/Zbb bit-manipulation instruction's result. Shared by the OP/OP-IMM decode
      * block's bitmanip branch; the caller has already validated that the {@code (isReg, funct7,
      * funct3, rs2Field)} combination is one of the encodings below.
@@ -1130,27 +1148,24 @@ public class RV32IMACore {
         // mie is always taken while running below M-mode (here, U-mode), regardless of
         // mstatus.MIE. Priority when more than one bit is simultaneously pending and enabled:
         // external > software > timer.
-        int pendingEnabled = pendingEnabledInterrupts(state);
+        trap = pendingInterruptTrap(state);
 
         // If WFI, don't run processor -- unless an enabled interrupt is already pending, in which
         // case the stall ends here and the interrupt is delivered below. This check deliberately
-        // comes after pendingEnabledInterrupts so a pending bit that was set before the WFI
+        // comes after pendingInterruptTrap so a pending bit that was set before the WFI
         // executed (or set directly on mip by an embedder, without injectInterrupt's WFI clear)
         // cannot leave the hart stalled with a deliverable interrupt.
         if ((state.extraflags & EXTRAFLAG_WFI) != 0) {
-            if (pendingEnabled == 0) {
+            if (trap == 0) {
                 return 1;
             }
             state.extraflags &= ~EXTRAFLAG_WFI;
         }
 
-        if ((pendingEnabled & MIP_MEIP) != 0) {
-            trap = INT_MACHINE_EXTERNAL;
-        } else if ((pendingEnabled & MIP_MSIP) != 0) {
-            trap = INT_MACHINE_SOFTWARE;
-        } else if ((pendingEnabled & MIP_MTIP) != 0) {
-            trap = INT_MACHINE_TIMER;
-        }
+        // Set by an instruction that can change interrupt deliverability (a write to mstatus,
+        // mie, or mip, or MRET); checked once that instruction has fully retired so a newly
+        // deliverable interrupt is taken before the next guest instruction in this batch runs.
+        boolean reevaluateInterrupts = false;
 
         if (trap != 0) {
             pc -= instrLen; // Will be incremented back to original PC in the interrupt handler
@@ -1781,6 +1796,9 @@ public class RV32IMACore {
 
                                 if (shouldWrite) {
                                     writeCsr(state, csrHook, csrno, writeValue);
+                                    if (csrno == 0x300 || csrno == 0x304 || csrno == 0x344) {
+                                        reevaluateInterrupts = true; // mstatus, mie, mip
+                                    }
                                 }
                             } else if (microop == 0) {
                                 // SYSTEM (MRET, ECALL, etc.)
@@ -1805,6 +1823,7 @@ public class RV32IMACore {
                                     state.extraflags = (startextraflags & ~EXTRAFLAG_PRIV_MASK)
                                             | ((startmstatus & MSTATUS_MPP) >> MSTATUS_MPP_SHIFT);
                                     pc = state.mepc - instrLen;
+                                    reevaluateInterrupts = true; // MIE and privilege both changed
                                 } else {
                                     switch (csrno) {
                                         case 0: // ECALL
@@ -1871,6 +1890,16 @@ public class RV32IMACore {
                             }
 
                             int width = isWordWidth ? 4 : (funct3 == 1 ? 2 : 1);
+                            // Every LR.W/SC.W attempt consumes the hart's local reservation, whether it
+                            // goes on to succeed, fail, or trap (misaligned below, or a bus fault in
+                            // the switch). Decide SC's local validity first, then clear, so no exit
+                            // path -- including the alignment trap -- can leave a stale reservation
+                            // that a later SC without a fresh LR could consume.
+                            boolean scLocallyValid =
+                                    irmid == 3 && state.reservationValid && state.reservationAddr == rs1;
+                            if (irmid == 2 || irmid == 3) {
+                                state.reservationValid = false;
+                            }
                             // LR/SC and AMOs must be naturally aligned to their width (the misaligned
                             // atomicity granule PMA is not modelled). Checked before any bus call so a
                             // misaligned atomic never reaches the bus, whose atomicRmw/tryScAndStore
@@ -1891,22 +1920,17 @@ public class RV32IMACore {
                             try {
                                 switch (irmid) {
                                     case 2: // LR.W
-                                        // Any LR.W attempt drops the previous reservation first, so a
-                                        // faulting LR never leaves a stale one behind; a successful
-                                        // read then establishes the new one.
-                                        state.reservationValid = false;
+                                        // The previous reservation was already dropped above; a
+                                        // successful read establishes the new one. A faulting read
+                                        // leaves none.
                                         rval = mem.readInt(rs1, amoCtx);
                                         state.reservationAddr = rs1;
                                         state.reservationValid = true;
                                         break;
                                     case 3: // SC.W
-                                        // Every SC.W attempt consumes the local reservation -- success,
-                                        // failure, or trap -- so this is cleared before the bus is
-                                        // consulted rather than after, where a thrown access fault
-                                        // would skip it.
-                                        boolean locallyValid = state.reservationValid && state.reservationAddr == rs1;
-                                        state.reservationValid = false;
-                                        if (locallyValid) {
+                                        // The local reservation was consumed above, before the bus is
+                                        // consulted, so a thrown access fault cannot skip the clear.
+                                        if (scLocallyValid) {
                                             // Local fast-path pre-check passed (Design Decision §5); the bus
                                             // still makes the final atomic decision -- it may reject even
                                             // though the local state says valid, if a cross-hart
@@ -1948,6 +1972,22 @@ public class RV32IMACore {
 
                 if (postExec != null) postExec.onPostExec(pc, ir, trap);
                 pc += instrLen;
+
+                if (reevaluateInterrupts) {
+                    // The instruction that just retired changed mstatus/mie/mip or executed MRET;
+                    // an interrupt it made deliverable must be taken before any further guest
+                    // instruction. Per the privileged spec, xRET and interrupt-CSR writes require
+                    // immediate reevaluation, not just the ordinary bounded-delay rule. pc already
+                    // points at the next instruction; back it up by instrLen so the trap handler's
+                    // "+ instrLen" for interrupts lands mepc exactly there (same idiom as the
+                    // pre-loop dispatch), whatever the retired instruction's length was.
+                    reevaluateInterrupts = false;
+                    trap = pendingInterruptTrap(state);
+                    if (trap != 0) {
+                        pc -= instrLen;
+                        break;
+                    }
+                }
             }
         }
 

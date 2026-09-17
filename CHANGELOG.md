@@ -107,6 +107,18 @@ for how this file is updated as part of cutting a release.
   its reservation entry before throwing.
 
 ### Changed
+- Maven build cleanups (manual): every lifecycle and invoked plugin is now pinned via
+  `<pluginManagement>` in the root pom (no more Maven-default plugin versions); a new
+  `maven-enforcer-plugin` execution requires Maven `[3.9.16,4)` and Java `[25,26)`, so the
+  build now fails fast on any other toolchain; `versions-maven-plugin` ignores
+  alpha/beta/milestone/RC candidates. Tooling bumps: Spotless 2.44.5 → 3.10.2, SpotBugs
+  4.9.8.3 → 4.10.4.1, maven-javadoc-plugin 3.11.2 → 3.12.0, maven-source-plugin 3.3.1 → 3.4.0,
+  maven-shade-plugin 3.6.1 → 3.6.2, maven-antrun-plugin 3.1.0 → 3.2.0.
+- SpotBugs 4.10 introduced two new findings, both suppressed with justification in
+  `config/spotbugs-exclude.xml`: `CT_CONSTRUCTOR_THROW` on `RV32IMACore`'s constructors (the
+  "finalizer attack" model doesn't apply; the real fix, `final`, is a public-API change held
+  for the API-freeze review) and `NP_NULL_PARAM_DEREF_*` on test classes' deliberate
+  null-contract `assertThrows` calls.
 - Upgraded JUnit from 5.10.0 to 6.1.3 via the `junit-bom`.
 - `MMIOBus` now forwards every context-bearing overload plus `atomicRmw`, `tryScAndStore`,
   and `checkAccess` to its backing bus for addresses no hook claims, so an `AccessContext`

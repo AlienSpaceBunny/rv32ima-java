@@ -75,4 +75,29 @@
         <Bug pattern="FE_FLOATING_POINT_EQUALITY"/>
     </Match>
 
+    <!--
+        RV32IMACore's constructors throw NullPointerException (via Objects.requireNonNull) before
+        any field is assigned. SpotBugs 4.10 flags this as a "finalizer attack" vector: a malicious
+        subclass could override finalize() to capture the partially-constructed object. That threat
+        model does not apply here — the core holds no privileged or security-sensitive state, a
+        core with a null isaConfig is inert, and finalization is deprecated for removal on the
+        JDK 25 baseline. The real fix would be making the class final, which is a public-API change
+        held for the API-freeze review rather than slipped in under a tooling bump.
+    -->
+    <Match>
+        <Class name="com.alienspacebunny.emu.RV32IMACore"/>
+        <Bug pattern="CT_CONSTRUCTOR_THROW"/>
+    </Match>
+
+    <!--
+        Test classes deliberately pass null to non-null parameters inside assertThrows lambdas
+        to verify the documented NullPointerException contract. SpotBugs reports these as
+        null-parameter defects; they are the point of the test. The finding lands on the synthetic
+        lambda method, so this is scoped by class rather than by test method.
+    -->
+    <Match>
+        <Class name="~com\.alienspacebunny\..*Test"/>
+        <Bug pattern="NP_NULL_PARAM_DEREF_NONVIRTUAL,NP_NULL_PARAM_DEREF_ALL_TARGETS_DANGEROUS"/>
+    </Match>
+
 </FindBugsFilter>

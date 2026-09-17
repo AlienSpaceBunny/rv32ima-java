@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
@@ -13,10 +12,8 @@
     <artifactId>rv32emu-cli</artifactId>
 
     <name>RV32IMA Emulator CLI</name>
-    <description>
-        Command-line reference runner for rv32emu-core: loads a flat RISC-V binary, wires UART /
-        CLINT / SYSCON hooks, and executes. Distributed as a fat jar via GitHub Releases, not Maven.
-    </description>
+    <description>Command-line reference runner for rv32emu-core: loads a flat RISC-V binary, wires UART /
+        CLINT / SYSCON hooks, and executes. Distributed as a fat jar via GitHub Releases, not Maven.</description>
 
     <dependencies>
         <dependency>
@@ -44,10 +41,10 @@
                 <version>3.6.1</version>
                 <executions>
                     <execution>
-                        <phase>package</phase>
                         <goals>
                             <goal>shade</goal>
                         </goals>
+                        <phase>package</phase>
                         <configuration>
                             <createDependencyReducedPom>false</createDependencyReducedPom>
                             <transformers>
@@ -66,30 +63,24 @@
                 <executions>
                     <execution>
                         <id>packaged-cli-smoke-test</id>
-                        <phase>verify</phase>
                         <goals>
                             <goal>run</goal>
                         </goals>
+                        <phase>verify</phase>
                         <configuration>
                             <target>
-                                <java jar="${project.build.directory}/${project.build.finalName}.jar"
-                                      fork="true"
-                                      failonerror="true"
-                                      output="${project.build.directory}/packaged-cli-smoke.out">
+                                <java failonerror="true" fork="true" jar="${project.build.directory}/${project.build.finalName}.jar" output="${project.build.directory}/packaged-cli-smoke.out">
                                     <arg value="-f"/>
                                     <arg file="${project.basedir}/src/test/resources/bin/baremetal.bin"/>
                                     <arg value="-c"/>
                                     <arg value="10000000"/>
                                     <arg value="-p"/>
                                 </java>
-                                <loadfile property="packaged.cli.output"
-                                          srcFile="${project.build.directory}/packaged-cli-smoke.out"/>
+                                <loadfile property="packaged.cli.output" srcFile="${project.build.directory}/packaged-cli-smoke.out"/>
                                 <condition property="packaged.cli.output.ok">
-                                    <contains string="${packaged.cli.output}"
-                                              substring="Hello world from RV32 land."/>
+                                    <contains string="${packaged.cli.output}" substring="Hello world from RV32 land."/>
                                 </condition>
-                                <fail unless="packaged.cli.output.ok"
-                                      message="Packaged CLI smoke test did not produce expected UART output."/>
+                                <fail message="Packaged CLI smoke test did not produce expected UART output." unless="packaged.cli.output.ok"/>
                             </target>
                         </configuration>
                     </execution>

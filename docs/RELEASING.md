@@ -1,12 +1,12 @@
 # Releasing rv32ima-java
 
-Scope: **local, git-tagged, Maven-installed releases only.** There is no Maven Central
-deploy wired up yet — see `RELEASE_TODO.md` (R1–R4), which is deliberately on hold until
-the **emulator repo's** side of the multi-hart integration is done (not just this repo's
-own `docs/FEATURE_REQUEST_PLAN.md` staging plan, which finished 2026-09-13) and an
-explicit API-freeze review has happened against a real consumer. This document covers
-versioning + tagging mechanics (R5) and a lightweight local build/verify procedure; it is
-not the eventual publish-to-Central process.
+Scope: **local, git-tagged, Maven-installed releases**, plus the **manual GitHub release
+workflow** that will publish to Maven Central (see [Publishing](#publishing-manual-github-workflow)).
+Publishing itself is deliberately on hold — see `RELEASE_TODO.md` — until the **emulator
+repo's** side of the multi-hart integration is done (not just this repo's own
+`docs/FEATURE_REQUEST_PLAN.md` staging plan, which finished 2026-09-13) and an explicit
+API-freeze review has happened against a real consumer. The workflow is wired and waiting;
+nothing runs it automatically.
 
 ## Model
 
@@ -29,12 +29,16 @@ repo as:
 - **`tagNameFormat`**: `v@{project.version}` — tags look like `v0.2.0`.
 - **`autoVersionSubmodules=true`** — `core` and `cli` inherit the parent's version, so
   you're only asked for one version number, not three.
-- **`pushChanges=false`** — `release:prepare` commits and tags **locally only**. Pushing
-  is a separate, explicit step (§5 below) so nothing reaches `origin` by surprise.
+- **`pushChanges=${asb.release.push}`** (default `false`) — `release:prepare` commits and
+  tags **locally only**. Pushing is a separate, explicit step (§5 below) so nothing reaches
+  `origin` by surprise. Only the manual release workflow passes `-Dasb.release.push=true`.
+- **`preparationGoals=clean spotless:apply verify`**, **`completionGoals=spotless:apply`** —
+  the plugin's POM rewrite changes XML layout (`<x/>` becomes `<x />`), so the POMs are
+  re-formatted before Spotless checks them and before each release commit.
 - **`localCheckout=true`** — `release:perform` builds from the local tag; you don't need
   to have pushed it to GitHub first.
-- **`goals=install`** on `perform` — not the plugin's default `deploy`, since there's no
-  Central deploy configured yet (see the comment in `pom.xml` next to this plugin).
+- **`goals=install`** on `perform` — a local release never deploys; publishing is the
+  workflow's job (below).
 
 ## Prerequisites
 
@@ -148,6 +152,34 @@ git reset --hard <commit-before-prepare>
 Never run rollback (or a manual reset) after step 5 has pushed — that rewrites published
 history. Cut a new patch release instead.
 
+## Publishing (manual GitHub workflow)
+
+`.github/workflows/release.yml` runs only when started by hand (Actions → Release → Run
+workflow, or `gh workflow run release.yml -f releaseVersion=0.2.0`). There is no CI on push.
+
+Before running it: finish the changelog (§2 above) and push it, with `main` clean and green.
+
+1. **Prepare**: `release:prepare` with the given **releaseVersion** (required; no default,
+   so an accidental run can't cut `0.1.x`), verifies, commits, tags `vX.Y.Z` and pushes both
+   commits and the tag using the job token.
+2. **Publish**: checks out the tag and runs `./mvnw -Pcentral-release deploy`. The profile
+   comes from `alienspacebunny-parent` (sources, GPG signing, Central Portal upload). Only
+   `rv32emu-core` and the `rv32emu-parent` POM are bundled; `rv32emu-cli` is excluded
+   (`excludeArtifacts` in `pom.xml`). With **autoPublish** unchecked (the default) the
+   deployment is only validated: review it at central.sonatype.com → Publish → Deployments
+   and click **Publish** (permanent) or **Drop**.
+3. **Draft GitHub Release**: attaches `rv32emu-cli-X.Y.Z.jar` and this version's
+   `CHANGELOG.md` section as a **draft**; publish it on GitHub when ready.
+
+If publishing fails after the tag was pushed, re-run with **existingTag** (e.g. `v0.2.0`):
+it skips prepare and repeats steps 2–3 for that tag.
+
+Signing key and Portal token are AlienSpaceBunny organization secrets (`CENTRAL_USERNAME`,
+`CENTRAL_PASSWORD`, `GPG_PRIVATE_KEY`, `GPG_PASSPHRASE`), shared with `alienspacebunny-build`.
+
+After publishing, smoke-test the artifact as served by Central from an empty local
+repository (`-Dmaven.repo.local=$(mktemp -d)`), not just from `~/.m2`.
+
 ## Validating a release build
 
 `release.sh` runs the full quality-gated build (`./mvnw clean verify` — Spotless,
@@ -164,8 +196,8 @@ anything. Run it standalone at any time, or from inside `target/checkout` after
 
 - **Versioning scheme (RELEASE_TODO.md R5):** this document assumes standard SemVer
   patch/minor/major judgement calls at prepare time; there's no enforced policy yet.
-- **CI (R7):** no `.github/workflows/` exists. `release:prepare`'s build step and
-  `release.sh` are currently the only gates, run locally.
-- **Publishing (R1–R4):** on hold. When it's time, `perform`'s `goals` changes from
-  `install` to `deploy` (or a dedicated `release` profile adds `maven-gpg-plugin` and the
-  Central Publishing plugin) — see `RELEASE_TODO.md`.
+- **CI (R7):** only the manual release workflow exists; there is deliberately no
+  verify-on-push workflow yet. `release:prepare`'s build step and `release.sh` remain the
+  gates, run locally (and in the release workflow's prepare step).
+- **Publishing:** wired (R4) and **on hold** — see `RELEASE_TODO.md`. The first real run
+  of the workflow is also the first end-to-end test of the rv32emu side of it.

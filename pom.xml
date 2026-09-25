@@ -17,7 +17,7 @@
     <name>RV32IMA Emulator (parent)</name>
     <description>Platform-agnostic RISC-V RV32IMA emulator for Java 25 — a port of cnlohr's mini-rv32ima.
         Multi-module build: rv32emu-core (the library) and rv32emu-cli (a reference runner).</description>
-    <url>https://github.com/nkedel/rv32ima-java</url>
+    <url>https://github.com/AlienSpaceBunny/rv32ima-java</url>
     <inceptionYear>2025</inceptionYear>
 
     <licenses>
@@ -42,17 +42,35 @@
     </modules>
 
     <scm>
-        <connection>scm:git:https://github.com/nkedel/rv32ima-java.git</connection>
-        <developerConnection>scm:git:git@github.com:nkedel/rv32ima-java.git</developerConnection>
-        <url>https://github.com/nkedel/rv32ima-java</url>
+        <connection>scm:git:https://github.com/AlienSpaceBunny/rv32ima-java.git</connection>
+        <developerConnection>scm:git:git@github.com:AlienSpaceBunny/rv32ima-java.git</developerConnection>
+        <url>https://github.com/AlienSpaceBunny/rv32ima-java</url>
     </scm>
 
     <properties>
         <!-- rv32emu's own Checkstyle rules (smaller than the shared set); see alienspacebunny-parent. -->
         <asb.checkstyle.config>${asb.config.dir}/checkstyle.xml</asb.checkstyle.config>
+        <!-- The manual release workflow passes -Dasb.release.push=true; local releases never push. -->
+        <asb.release.push>false</asb.release.push>
     </properties>
 
     <build>
+        <!-- Maven Central (-Pcentral-release, profile inherited from alienspacebunny-parent):
+             only rv32emu-core and this parent POM are published; the CLI fat jar goes to a
+             GitHub Release instead (RELEASE_TODO.md). -->
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.sonatype.central</groupId>
+                    <artifactId>central-publishing-maven-plugin</artifactId>
+                    <configuration>
+                        <excludeArtifacts>
+                            <excludeArtifact>rv32emu-cli</excludeArtifact>
+                        </excludeArtifacts>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </pluginManagement>
         <!-- Shared gates (Spotless, Checkstyle, SpotBugs, enforcer) and all plugin pins
              come from alienspacebunny-parent. -->
         <plugins>
@@ -106,10 +124,9 @@
                 maven-release-plugin: versions, tags, and builds a release from a git tag.
                 See docs/RELEASING.md for the step-by-step local release procedure.
 
-                `perform` currently runs `install`, not the default `deploy`: there is no
-                Maven Central deploy wired yet (RELEASE_TODO.md R1-R4 are deliberately on
-                hold). Change `goals` to `deploy` (or a dedicated release profile) once that
-                lands; until then this only installs the tagged build to the local repository.
+                `perform` runs `install`, not the default `deploy`: a local release only installs
+                the tagged build. Publishing to Maven Central is the manual GitHub release
+                workflow's job (-Pcentral-release deploy), and is on hold (RELEASE_TODO.md).
             -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -118,10 +135,15 @@
                     <!-- All 3 poms share one version; don't prompt separately per module. -->
                     <autoVersionSubmodules>true</autoVersionSubmodules>
                     <tagNameFormat>v@{project.version}</tagNameFormat>
-                    <!-- Commit + tag locally only; pushing is a separate, explicit step. -->
-                    <pushChanges>false</pushChanges>
+                    <!-- Commit + tag locally only; pushing is a separate, explicit step.
+                         Only the manual GitHub release workflow sets asb.release.push=true. -->
+                    <pushChanges>${asb.release.push}</pushChanges>
                     <!-- perform builds from the local tag; it need not be pushed to origin first. -->
                     <localCheckout>true</localCheckout>
+                    <!-- The release POM rewrite changes XML layout (e.g. <x/> becomes <x />);
+                         re-format before Spotless checks it and before each release commit. -->
+                    <preparationGoals>clean spotless:apply verify</preparationGoals>
+                    <completionGoals>spotless:apply</completionGoals>
                     <goals>install</goals>
                 </configuration>
             </plugin>

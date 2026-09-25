@@ -71,17 +71,20 @@ release candidates.
 
 ---
 
-## R1 — Central Portal account / namespace  *(done / Nate)*
+## R1 — Central Portal account / namespace  *(done / Nate; token done 2026-09-25)*
 
 - `com.alienspacebunny` and `us.n8l` are both already registered on the **Central
   Portal** (central.sonatype.com — the modern path; legacy OSSRH / `oss.sonatype.org`
   is sunset). Namespace verification is complete.
-- Still needed at publish time: generate a Portal **publishing token** (user token)
-  for CI / local deploy auth; store in `~/.m2/settings.xml` under the Portal server
-  id, never in the repo.
+- Portal user token: **done (2026-09-25)** — stored as AlienSpaceBunny organization
+  secrets `CENTRAL_USERNAME`/`CENTRAL_PASSWORD`, shared with `alienspacebunny-build`
+  (which has already published through it). Never in the repo.
 
-## R2 — GPG signing key  *(blocker, Nate)*
+## R2 — GPG signing key  *(done, 2026-09-25)*
 
+- **Done:** dedicated "AlienSpaceBunny Releases" RSA 4096 key
+  (`1FDA871CDFBF25ABB316DF15DB609F7A3E8E3165`), public key on keyserver.ubuntu.com,
+  private key + passphrase as organization secrets `GPG_PRIVATE_KEY`/`GPG_PASSPHRASE`.
 - Generate or designate a GPG key for artifact signing.
 - Publish the public key to a keyserver (`keys.openpgp.org` and/or
   `keyserver.ubuntu.com`) — Central validates signatures against these.
@@ -92,7 +95,8 @@ release candidates.
 
 Central rejects artifacts missing required metadata. Add to the **parent** pom
 (inherited by modules): `<url>`, `<licenses>` (MIT), `<developers>` (Nate Edel),
-`<scm>` (github.com/nkedel/rv32ima-java), `<organization>`/`<inceptionYear>`
+`<scm>` (github.com/AlienSpaceBunny/rv32ima-java — moved from `nkedel` 2026-09-25, where the
+repo now lives), `<organization>`/`<inceptionYear>`
 optional. Add `<name>` + `<description>` to **each** module pom (these do **not**
 inherit).
 
@@ -103,7 +107,13 @@ inherit).
       add a `Copyright (c) 2025 Nate Edel` line for the port (README already claims
       the port is MIT). Keep the upstream attribution line either way.
 
-## R4 — Deploy plugin wiring  *(code — needs R1 to test)*
+## R4 — Deploy plugin wiring  *(done 2026-09-25 — untested for rv32emu until the first real release)*
+
+Implemented via the inherited `central-release` profile from `alienspacebunny-parent`
+(sources, `maven-gpg-plugin`, `central-publishing-maven-plugin` 0.11.0 — current at
+wiring time) instead of a local `release` profile; `rv32emu-cli` is excluded with the
+plugin's `excludeArtifacts`. The same profile has already published
+`alienspacebunny-parent`/`-build-tools` 0.1.1 end to end. Original notes:
 
 - Add the **Central Publishing Maven Plugin**
   (`org.sonatype.central:central-publishing-maven-plugin`) — pull the current
@@ -143,13 +153,17 @@ bump would have broken outright.
 - [ ] Deploy step intentionally **not** added — `release.sh` validates a build, it
       doesn't publish one; see R4/R8 for the eventual deploy path.
 
-## R7 — CI workflow  *(new — no `.github/workflows/` exists)*
+## R7 — CI workflow  *(release workflow done 2026-09-25; verify-on-push deliberately deferred)*
+
+`.github/workflows/release.yml` is manual-only (`workflow_dispatch`): prepare → Central →
+draft GitHub Release with the CLI jar. Per Nate, the repo is not ready for push/PR CI yet.
+Original notes:
 
 - Add a GitHub Actions workflow: `./mvnw clean verify` on push / PR (JDK 25).
 - Optional: a release workflow triggered on tag push that builds, signs, deploys
   to Central, and uploads the CLI fat jar to the GitHub Release.
 
-## R8 — Release-process document  *(partially done)*
+## R8 — Release-process document  *(Central section done 2026-09-25; published-artifact smoke test still open)*
 
 `docs/RELEASING.md` **done** for the local scope: version bump mechanics, tag naming
 (`vX.Y.Z`), which gates must be green, `release:prepare`/`release:perform`/`rollback`,

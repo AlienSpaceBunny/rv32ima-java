@@ -79,7 +79,9 @@ failing tests, an unresolved question, or partial work — report that instead.
   prepare/perform/rollback procedure. Don't hand-edit the version in the poms
   outside that procedure.
 - Maven Central publishing is deliberately on hold — see `RELEASE_TODO.md`
-  (R1–R4) for why and what's still open.
+  (R1–R4) for why and what's still open. The manual release workflow
+  (`.github/workflows/release.yml`) is wired; never start it unless Nate explicitly
+  asks for a release. There is deliberately no CI on push/PR.
 
 ## Docs
 

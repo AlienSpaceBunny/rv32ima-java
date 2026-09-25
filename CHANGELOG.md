@@ -9,6 +9,11 @@ for how this file is updated as part of cutting a release.
 ## [Unreleased]
 
 ### Added
+- Manual GitHub release workflow (`.github/workflows/release.yml`, `workflow_dispatch` only):
+  `release:prepare` with an explicit version, publish `rv32emu-core` + the parent POM to Maven
+  Central via the inherited `central-release` profile (validated only unless auto-published),
+  and a draft GitHub Release with the `rv32emu-cli` fat jar. Publishing remains on hold
+  (`RELEASE_TODO.md`); see `docs/RELEASING.md`.
 - RV32F (single-precision floating-point) decode, rounding-mode-independent subset (multi-hart
   Phase 5a), gated by `IsaConfig.hasF`: `RV32IMAState.fregs` (FP register file) and `fcsr`
   (rounding mode / accrued exception flags), the `fflags`/`frm`/`fcsr` CSRs, `FLW`/`FSW`,
@@ -107,6 +112,9 @@ for how this file is updated as part of cutting a release.
   its reservation entry before throwing.
 
 ### Changed
+- POM `<url>`/`<scm>` now point at `github.com/AlienSpaceBunny/rv32ima-java` (was `nkedel`).
+  Release preparation re-formats POMs (`spotless:apply`) after the release plugin rewrites
+  them, and `pushChanges` is controlled by `asb.release.push` (still `false` locally).
 - Build inherits the shared `com.alienspacebunny:alienspacebunny-parent` 0.1.1 (from
   `../alienspacebunny-build`, published on Maven Central). Plugin pins, the JUnit BOM and the Spotless/
   Checkstyle/SpotBugs setup now come from there; rv32emu keeps its own `config/checkstyle.xml`

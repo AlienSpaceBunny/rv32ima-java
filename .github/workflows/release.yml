@@ -1,0 +1,110 @@
+# Manually triggered release only (no CI on push/PR). See docs/RELEASING.md.
+#
+# Publishing is ON HOLD (RELEASE_TODO.md): the API stays unfrozen until the emulator's
+# multi-hart integration has exercised it and an API-freeze review has happened. The
+# first real release is 0.2.0. This workflow exists so that release is one click
+# when the time comes; it does not run on its own.
+#
+# Steps: release:prepare (verify, commit, tag vX.Y.Z, push) -> deploy rv32emu-core and
+# the parent POM to Maven Central (-Pcentral-release; validated only unless autoPublish)
+# -> draft GitHub Release with the rv32emu-cli fat jar.
+#
+# Secrets (AlienSpaceBunny organization): CENTRAL_USERNAME, CENTRAL_PASSWORD,
+# GPG_PRIVATE_KEY, GPG_PASSPHRASE.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      releaseVersion:
+        description: Release version, e.g. 0.2.0 (required unless existingTag is set)
+        required: false
+      developmentVersion:
+        description: Next development version (blank = next patch -SNAPSHOT)
+        required: false
+      existingTag:
+        description: Re-publish an existing tag (e.g. v0.2.0) instead of cutting a new release
+        required: false
+      autoPublish:
+        description: Publish automatically (unchecked = upload and validate only; click Publish in the Central Portal)
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require an explicit release version
+        if: inputs.existingTag == '' && inputs.releaseVersion == ''
+        run: |
+          echo "::error::Set releaseVersion (the first release is 0.2.0; see RELEASE_TODO.md) or existingTag."
+          exit 1
+
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: corretto
+          java-version: '25'
+          cache: maven
+          server-id: central
+          server-username-env-var: CENTRAL_USERNAME
+          server-password-env-var: CENTRAL_PASSWORD
+          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
+          gpg-passphrase-env-var: MAVEN_GPG_PASSPHRASE
+
+      - name: Configure git for release commits
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # The POM's developerConnection is SSH; push over HTTPS with the job token instead.
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+
+      - name: Prepare release (verify, tag, push)
+        if: inputs.existingTag == ''
+        env:
+          RELEASE_VERSION: ${{ inputs.releaseVersion }}
+          DEVELOPMENT_VERSION: ${{ inputs.developmentVersion }}
+        run: >-
+          ./mvnw -B -ntp release:prepare -Dasb.release.push=true
+          -DreleaseVersion="$RELEASE_VERSION"
+          ${DEVELOPMENT_VERSION:+-DdevelopmentVersion=$DEVELOPMENT_VERSION}
+
+      - name: Check out the release tag
+        env:
+          EXISTING_TAG: ${{ inputs.existingTag }}
+        run: |
+          tag=${EXISTING_TAG:-$(sed -n 's/^scm.tag=//p' release.properties)}
+          git checkout --quiet "$tag"
+          echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
+
+      - name: Publish rv32emu-core to Maven Central
+        env:
+          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.CENTRAL_PASSWORD }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+          AUTO_PUBLISH: ${{ inputs.autoPublish }}
+        run: ./mvnw -B -ntp -Pcentral-release deploy -Dasb.central.autoPublish="$AUTO_PUBLISH"
+
+      - name: Draft GitHub Release with the CLI fat jar
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=${RELEASE_TAG#v}
+          if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
+            echo "GitHub Release $RELEASE_TAG already exists; not changing it."
+            exit 0
+          fi
+          # Notes: this version's CHANGELOG.md section (finalized before releasing).
+          awk -v v="[$version]" '/^## \[/ { p = index($0, v) > 0 } p' CHANGELOG.md > release-notes.md
+          [ -s release-notes.md ] || echo "rv32emu $version" > release-notes.md
+          gh release create "$RELEASE_TAG" "cli/target/rv32emu-cli-$version.jar" \
+            --draft --verify-tag --title "rv32emu $version" --notes-file release-notes.md

@@ -471,10 +471,10 @@ now because `Main.java` always runs the CLI in machine mode.
 ## Key Decisions to Remember
 
 - **Wildcard imports banned** by Checkstyle `AvoidStarImport`. Do not re-introduce.
-- **Formatter**: Palantir Java Format 2.90.0. Run `./mvnw spotless:apply` before committing new
-  source.
-- **JUnit version** lives only in `<junit.version>` (parent pom) via the BOM. Bump there.
-- **Surefire** pinned — do not remove the pin; the bundled default lags the Platform.
+- **Build config** is inherited from `alienspacebunny-parent` (`../alienspacebunny-build`):
+  formatter (Palantir 2.99.0), Checkstyle engine, SpotBugs, Surefire and the JUnit BOM are
+  pinned there. Bump versions in that repository, not here. Run `./mvnw spotless:apply`
+  before committing new source.
 - **Big-endian JVM** explicitly out of scope (documented in `FFMMemoryBus` Javadoc).
 - **Versioning is `maven-release-plugin`-driven** (superseded the earlier "no automated
   semantic versioning" note) — see `docs/RELEASING.md`. Don't hand-edit pom versions.

@@ -468,17 +468,16 @@ public class RV32IMACore {
         float lower = trueAboveRne ? rne : Math.nextDown(rne);
         float upper = trueAboveRne ? Math.nextUp(rne) : rne;
         boolean nonNegative = Double.doubleToRawLongBits(approx) >= 0;
-        float result =
-                switch (rm) {
-                    case RM_RTZ -> nonNegative ? lower : upper;
-                    case RM_RDN -> lower;
-                    case RM_RUP -> upper;
-                    case RM_RMM -> {
-                        boolean tie = residualSign == 0 && approx == (((double) lower + (double) upper) / 2.0);
-                        yield tie ? (nonNegative ? upper : lower) : rne;
-                    }
-                    default -> rne; // RM_RNE
-                };
+        float result = switch (rm) {
+            case RM_RTZ -> nonNegative ? lower : upper;
+            case RM_RDN -> lower;
+            case RM_RUP -> upper;
+            case RM_RMM -> {
+                boolean tie = residualSign == 0 && approx == (((double) lower + (double) upper) / 2.0);
+                yield tie ? (nonNegative ? upper : lower) : rne;
+            }
+            default -> rne; // RM_RNE
+        };
         state.fcsr |= FFLAGS_NX;
         if (Math.abs(approx) > Float.MAX_VALUE) {
             state.fcsr |= FFLAGS_OF;
@@ -1628,13 +1627,12 @@ public class RV32IMACore {
                                         break;
                                     }
                                     rdid = 0;
-                                    int result =
-                                            switch (funct7) {
-                                                case 0x00 -> fAddSubS(state, aBits, bBits, false, rm);
-                                                case 0x04 -> fAddSubS(state, aBits, bBits, true, rm);
-                                                case 0x08 -> fMulS(state, aBits, bBits, rm);
-                                                default -> fDivS(state, aBits, bBits, rm); // 0x0C
-                                            };
+                                    int result = switch (funct7) {
+                                        case 0x00 -> fAddSubS(state, aBits, bBits, false, rm);
+                                        case 0x04 -> fAddSubS(state, aBits, bBits, true, rm);
+                                        case 0x08 -> fMulS(state, aBits, bBits, rm);
+                                        default -> fDivS(state, aBits, bBits, rm); // 0x0C
+                                    };
                                     writeFReg(state, fRd, result);
                                     break;
                                 }
@@ -1868,11 +1866,10 @@ public class RV32IMACore {
                             int irmid = (ir >> 27) & 0x1f;
                             int funct3 = (ir >> 12) & 7;
 
-                            boolean validAtomicOperation =
-                                    switch (irmid) {
-                                        case 0, 1, 2, 3, 4, 8, 12, 16, 20, 24, 28 -> true;
-                                        default -> false;
-                                    };
+                            boolean validAtomicOperation = switch (irmid) {
+                                case 0, 1, 2, 3, 4, 8, 12, 16, 20, 24, 28 -> true;
+                                default -> false;
+                            };
                             boolean isWordWidth = funct3 == 2;
                             boolean isSubWordWidth = isaConfig.hasZabha() && (funct3 == 0 || funct3 == 1);
                             // Zabha omits byte/halfword LR.W/SC.W (irmid 2, 3) -- only the nine RMW ops

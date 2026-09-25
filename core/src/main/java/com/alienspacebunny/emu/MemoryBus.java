@@ -290,18 +290,16 @@ public interface MemoryBus {
      */
     default int atomicRmw(int address, int funct5, int operand, AccessContext ctx) {
         int width = ctx.width();
-        int old =
-                switch (width) {
-                    case 1 -> readByte(address, ctx);
-                    case 2 -> readShort(address, ctx);
-                    default -> readInt(address, ctx);
-                };
-        int truncatedOperand =
-                switch (width) {
-                    case 1 -> (byte) operand;
-                    case 2 -> (short) operand;
-                    default -> operand;
-                };
+        int old = switch (width) {
+            case 1 -> readByte(address, ctx);
+            case 2 -> readShort(address, ctx);
+            default -> readInt(address, ctx);
+        };
+        int truncatedOperand = switch (width) {
+            case 1 -> (byte) operand;
+            case 2 -> (short) operand;
+            default -> operand;
+        };
         int result = computeAmo(funct5, old, truncatedOperand);
         switch (width) {
             case 1 -> writeByte(address, (byte) result, ctx);

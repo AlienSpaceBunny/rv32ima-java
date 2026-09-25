@@ -107,6 +107,11 @@ for how this file is updated as part of cutting a release.
   its reservation entry before throwing.
 
 ### Changed
+- Build inherits the shared `com.alienspacebunny:alienspacebunny-parent` 0.1.0 (install
+  `../alienspacebunny-build` locally first). Plugin pins, the JUnit BOM and the Spotless/
+  Checkstyle/SpotBugs setup now come from there; rv32emu keeps its own `config/checkstyle.xml`
+  and SpotBugs `includeTests`. Palantir Java Format 2.90.0 → 2.99.0 (assigned switch
+  expressions rewrapped); Checkstyle engine pinned to 14.1.0 (previously the plugin default).
 - Maven build cleanups (manual): every lifecycle and invoked plugin is now pinned via
   `<pluginManagement>` in the root pom (no more Maven-default plugin versions); a new
   `maven-enforcer-plugin` execution requires Maven `[3.9.16,4)` and Java `[25,26)`, so the

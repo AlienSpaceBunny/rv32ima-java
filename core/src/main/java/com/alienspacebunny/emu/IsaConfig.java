@@ -11,19 +11,18 @@ package com.alienspacebunny.emu;
  * multi-hart feature work (see {@code docs/FEATURE_REQUEST_PLAN.md}).
  *
  * <p><b>Decode support.</b> {@link #hasZba}, {@link #hasZbb}, {@link #hasZabha}, {@link #hasC},
- * and {@link #hasF} are decoded (Phases 3, 4, and 5 respectively): {@link #hasZba} unlocks {@code
+ * and {@link #hasF} are decoded: {@link #hasZba} unlocks {@code
  * SH1ADD}/{@code SH2ADD}/{@code SH3ADD}; {@link #hasZbb} unlocks the 18 basic bit-manipulation
  * instructions; {@link #hasZabha} unlocks byte/halfword AMOs (the RV32A opcode's {@code funct3}
  * field admitting {@code 0}/{@code 1} in addition to {@code 2}); {@link #hasC} unlocks the RV32C
- * base compressed instruction set (see {@code RV32IMACore}'s {@code decodeCompressed} — every
- * 16-bit encoding without an {@code F}/{@code D} dependency; {@code C.FLW}/{@code C.FSW} stay
- * illegal since {@code D} isn't decoded); {@link #hasF} unlocks the RV32F single-precision
- * floating-point instructions. {@link #hasD} is <b>not</b> decoded: like {@link #hasF} before
- * Phase 5, setting it only changes the {@link #misa()} value the guest observes, and D-extension
+ * base compressed instruction set (see {@code RV32IMACore}'s {@code decodeCompressed}), plus
+ * {@code C.FLW}/{@code C.FSW}/{@code C.FLWSP}/{@code C.FSWSP} when {@link #hasF} is also enabled;
+ * compressed D instructions remain illegal because D is not decoded. {@link #hasF} unlocks the RV32F single-precision
+ * floating-point instructions. {@link #hasD} is <b>not</b> decoded: setting it only changes the
+ * {@link #misa()} value the guest observes, and D-extension
  * instructions still raise an illegal-instruction trap. It exists now, ahead of any D decode
  * work, purely to avoid a later compatibility-constructor layer — see {@code
- * docs/FEATURE_REQUEST_PLAN.md} Design Decision §8. Enabling a flag ahead of its phase does not
- * unlock any instructions early — it only changes what the guest reads back from {@code misa}.
+ * docs/FEATURE_REQUEST_PLAN.md} Design Decision §8.
  *
  * <p><b>{@code misa}'s U-mode bit.</b> The value {@code RV32IMACore} hardcoded before this type
  * existed ({@code 0x40401101}) does not set the standard "U" bit (bit 20) that advertises

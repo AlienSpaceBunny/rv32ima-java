@@ -22,10 +22,7 @@ Requires `clang` and `lld` with RISC-V 32-bit support.  Tested with clang
 22; any recent clang release (14+) with the `riscv32` target enabled should
 work.
 
-**GCC is not supported**: The upstream Makefile used a RISC-V GCC
-cross-compiler; this port switched to clang/LLVM including what are *likely*
-breaking changes.  A GCC build is expected to fail; please do not submit GCC
-fixes unless this maintains clang/LLVM compatibility..
+The maintained build uses clang/LLVM. RISC-V GCC builds are not tested.
 
 ```bash
 make clean

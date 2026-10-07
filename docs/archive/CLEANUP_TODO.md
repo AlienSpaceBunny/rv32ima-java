@@ -1,5 +1,9 @@
 # Cleanup TODO — Post-P0–P7 Standards Pass
 
+Archived completed plan. C1–C7 are done; the remaining imperative text records
+their original requirements, not outstanding work. Paths below refer to the
+repository layout at the time of the pass.
+
 Driven by the architectural review + coding-standards spot check (2026-09-10). The review
 verdict: **architecture is sound, no redesign needed**; the gaps are documentation drift and
 unenforced coding conventions. This is a targeted mechanical cleanup, **not** a comprehensive

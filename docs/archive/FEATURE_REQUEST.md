@@ -1,5 +1,9 @@
 # rv32emu-core Feature Request for V-32 AP/IOP Support
 
+Archived original request, implemented by
+[the CPU feature plan](../FEATURE_REQUEST_PLAN.md). Workarounds and future-tense
+requirements below describe the request's original context.
+
 ## Summary
 
 The V-32 emulator is moving from a flat single-core prototype to an asymmetric

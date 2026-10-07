@@ -12,19 +12,17 @@ should be composed around the core through `MemoryBus`, `HardwareHook`,
 ## Execution Core
 
 `RV32IMACore()` configures the base RV32IMA_Zicsr ISA. `RV32IMACore(IsaConfig)`
-accepts an `IsaConfig` for the additional extensions being layered on for the
-V-32 multi-hart feature work (`RV32IMFC_ZBA_ZBB_ZICSR`, `RV32IMC_ZBB_ZICSR`, or
-a custom combination). As of Phase 5b, `hasZba`, `hasZbb`, `hasZabha`, `hasC`,
+accepts an `IsaConfig` for additional extensions (`RV32IMFC_ZBA_ZBB_ZICSR`,
+`RV32IMC_ZBB_ZICSR`, or a custom combination). `hasZba`, `hasZbb`, `hasZabha`, `hasC`,
 and `hasF` are fully decoded — enabling one unlocks the corresponding
-instructions, and the un-gated encodings still raise an illegal-instruction
-trap even when the config would otherwise support them (see the
-`IsaConfig`/`RV32IMACore` class Javadoc for the exact instruction list per
+instructions; unsupported or disabled encodings raise an illegal-instruction
+trap (see the `IsaConfig`/`RV32IMACore` class Javadoc for the exact instruction list per
 flag). `hasF` unlocks all of RV32F: `FLW`/`FSW`, the FP moves
 (`FMV.X.W`/`FMV.W.X`), sign injection (`FSGNJ[N|X].S`), `FCLASS.S`,
 comparisons (`FEQ`/`FLT`/`FLE.S`), `FMIN`/`FMAX.S` (all rounding-mode
-independent, Phase 5a), and `FADD`/`FSUB`/`FMUL`/`FDIV`/`FSQRT.S`, the FMADD
+independent), and `FADD`/`FSUB`/`FMUL`/`FDIV`/`FSQRT.S`, the FMADD
 family, and `FCVT.{W,WU}.S`/`FCVT.S.{W,WU}` (all rounding-mode dependent,
-Phase 5b). An instruction's `rm` field selects one of the five IEEE 754
+selected by `rm`). An instruction's `rm` field selects one of the five
 rounding modes statically, or `frm` (CSR `0x002`) dynamically when `rm` is 7;
 a reserved encoding (`rm` 5 or 6, or a dynamic selector when `frm` itself
 holds a reserved value) traps illegal-instruction before touching any
@@ -52,11 +50,11 @@ all-ones); read the low 32 bits directly, or via `Float.intBitsToFloat((int)
 state.fregs[i])`. `state.fcsr` holds the rounding mode (bits 7–5, `frm`) and
 accrued exception flags (bits 4–0, `fflags`); also addressable piecewise as
 CSRs `0x001` and `0x002`. All five `fflags` bits (`NV`/`DZ`/`OF`/`UF`/`NX`)
-are accrued now: `NV` from a signaling-NaN operand (or, for FCVT, any NaN
-input, or an out-of-range input) to any FP-consuming instruction; `DZ` from a
-finite nonzero dividend divided by zero (not `0/0`, which is `NV`); `OF`/`UF`
-from a rounded result that overflows to infinity/saturates at the largest
-finite magnitude, or underflows to a subnormal or zero; `NX` whenever the
+accrue according to the instruction: `NV` from invalid operations,
+instruction-specific NaN handling or out-of-range conversions; `DZ` from a
+finite nonzero dividend divided by zero (not `0/0`, which is `NV`); `OF`
+from overflow to infinity or saturation at the largest finite magnitude;
+`UF` from an inexact subnormal or zero result; `NX` whenever the
 mathematically exact result isn't exactly representable in the destination
 type. `fflags`/`frm`/`fcsr` are never cleared by the core itself — the guest
 CSR-writes them directly (typically before a sequence it wants to check
@@ -158,7 +156,7 @@ instruction fetch after the core's instruction-fetch window check.
   enforces this explicitly and `FFMMemoryBusEndianTest` covers it. Big-endian
   hosts are not supported.
 
-Access context (multi-hart Phase 2): every read/write method has a
+Access context: every read/write method has a
 context-bearing overload taking an `AccessContext` (`hartId`, `privilege`,
 `AccessKind` — `FETCH`/`LOAD`/`STORE`/`AMO`, `width` in bytes, and `atomicOp`,
 the AMO/LR/SC `funct5` or `0`). `RV32IMACore` calls only the context-bearing
@@ -173,7 +171,7 @@ rather than wrap or extend `MMIOBus`. `AccessContext` does not carry `aq`/`rl`
 ordering bits; per-access exclusion alone is not a payload-publication
 guarantee for shared-memory IPC — see `AccessContext`'s Javadoc.
 
-Atomics (multi-hart Phase 2): `RV32IMACore`'s AMO block (RV32A) routes
+Atomics: `RV32IMACore`'s AMO block (RV32A) routes
 through three `MemoryBus` methods instead of computing AMO results itself.
 
 - `atomicRmw(address, funct5, operand, ctx)` handles every RV32A AMO except
@@ -243,7 +241,7 @@ every AMO into a read/write pair at the wrapper. `MMIOBus` does this for
 addresses no hook claims (hook addresses still take the no-context
 `HardwareHook` path, since that interface carries no context).
 
-Zabha (byte/halfword AMOs, Phase 3): with `IsaConfig.hasZabha`, the RV32A
+Zabha (byte/halfword AMOs): with `IsaConfig.hasZabha`, the RV32A
 opcode's `funct3` field also admits `0` (byte) and `1` (halfword) for the nine
 read-modify-write AMOs above — `LR.W`/`SC.W` remain word-only; Zabha does not
 define a sub-word `LR`/`SC`. `atomicRmw`'s default sign-extends the loaded
@@ -253,7 +251,7 @@ default is correct for `AMOMIN[U]`/`AMOMAX[U]`'s signed and unsigned
 comparisons without a separate sub-word code path. `RV32IMACore` never
 widens a sub-word AMO into a word-width bus access. See `ZabhaTest`.
 
-Zba/Zbb (Phase 3): `RV32IMACore` decodes `SH1ADD`/`SH2ADD`/`SH3ADD` when
+Zba/Zbb: `RV32IMACore` decodes `SH1ADD`/`SH2ADD`/`SH3ADD` when
 `IsaConfig.hasZba`, and all 18 Zbb basic bit-manipulation instructions when
 `IsaConfig.hasZbb` (`CLZ`, `CTZ`, `CPOP`, `SEXT.B`, `SEXT.H`, `ZEXT.H`, `MIN`,
 `MINU`, `MAX`, `MAXU`, `ANDN`, `ORN`, `XNOR`, `ROL`, `ROR`, `RORI`, `ORC.B`,
@@ -262,7 +260,7 @@ involvement. See `RV32IComplianceTest`'s Zba/Zbb sections for the full
 instruction-by-instruction coverage, including `IsaConfig` gating in both
 directions.
 
-F extension, rounding-mode-independent subset (Phase 5a): with
+F extension, rounding-mode-independent operations: with
 `IsaConfig.hasF`, `FLW`/`FSW` route through the existing
 `readInt(address, ctx)`/`writeInt(address, value, ctx)` overloads exactly
 like `LW`/`SW`, and `FSW` invalidates any held LR/SC reservation like any
@@ -275,7 +273,7 @@ comparison (only a signaling NaN operand sets `fcsr`'s `NV` bit); `FLT.S`/
 `FExtensionTest` for the full instruction-by-instruction coverage, including
 the NaN-boxing, `IsaConfig` gating, and `fcsr`/`fflags`/`frm` CSR behavior.
 
-F extension, rounding-mode layer (Phase 5b): `FADD`/`FSUB`/`FMUL`/`FDIV`/
+F extension, rounded operations: `FADD`/`FSUB`/`FMUL`/`FDIV`/
 `FSQRT.S`, the FMADD/FMSUB/FNMSUB/FNMADD.S family, and
 `FCVT.{W,WU}.S`/`FCVT.S.{W,WU}` are all computed by pairing a
 correctly-rounded `double`-precision approximation of the true result with
@@ -328,7 +326,7 @@ RAM, VRAM, and hooks. Keep `MMIOBus` for simple range-routed devices.
   are ignored when no hook is present.
 - CSR instruction side-effect rules are enforced by the core before invoking
   the hook.
-- **Privilege gating** (Phase 2): before any of the above, the core checks the
+- **Privilege gating**: before any of the above, the core checks the
   CSR number's minimum-privilege field (bits 9–8 of the 12-bit CSR number, the
   standard RISC-V CSR address convention) against the hart's current privilege
   and raises an illegal-instruction trap — without calling the hook — if the
@@ -344,9 +342,8 @@ RAM, VRAM, and hooks. Keep `MMIOBus` for simple range-routed devices.
 - Integer registers, PC, key machine CSRs, cycle counter, and timer registers
   are public fields for simple embedding and checkpointing.
 - `hartId` identifies this hart among others sharing a `MemoryBus`. Defaults to
-  `0`. The core does not read or write it as of the Phase 1 foundation work; a
-  multi-hart-aware `MemoryBus` is expected to key per-hart state by it once bus
-  access metadata lands. Embedders with more than one concurrently participating
+  `0`. The core reads it for access metadata and bus-side SC coordination, and
+  does not modify it. Embedders with more than one concurrently participating
   hart must assign distinct, stable IDs.
 - `getCycle()/setCycle()`, `getTimer()/setTimer()`, and
   `getTimerMatch()/setTimerMatch()` expose the 64-bit split registers; prefer

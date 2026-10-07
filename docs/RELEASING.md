@@ -2,16 +2,15 @@
 
 Scope: **local, git-tagged, Maven-installed releases**, plus the **manual GitHub release
 workflow** that will publish to Maven Central (see [Publishing](#publishing-manual-github-workflow)).
-Publishing itself is deliberately on hold — see `RELEASE_TODO.md` — until the **emulator
-repo's** side of the multi-hart integration is done (not just this repo's own
-`docs/FEATURE_REQUEST_PLAN.md` staging plan, which finished 2026-09-13) and an explicit
-API-freeze review has happened against a real consumer. The workflow is wired and waiting;
-nothing runs it automatically.
+Publishing remains on hold. V-32 has supplied integration acceptance; confirming that
+it satisfies the hold condition and reviewing the API against that consumer remain
+pending. See [release readiness](../RELEASE_TODO.md). The workflow runs only when
+started explicitly.
 
 ## Model
 
 `main` always carries a `-SNAPSHOT` version (currently `0.1.6-SNAPSHOT`; expect several more
-plain bumps before a real release — see `RELEASE_TODO.md`'s 2026-09-13 update). The first
+plain bumps before a real release — see [release readiness](../RELEASE_TODO.md)). The first
 real release will be `0.2.0`, whichever `-SNAPSHOT` `main` is on when it's eventually cut;
 `0.1.0`/`0.1.1` are both skipped (`0.1.0` because that version number is already referenced
 by the downstream V-32 project; `0.1.1` was an earlier, now-superseded target from before the
@@ -122,8 +121,8 @@ ls ~/.m2/repository/com/alienspacebunny/rv32emu-core/<version>/
 ```
 
 The CLI fat jar for that same tag is at `target/checkout/cli/target/rv32emu-cli-<version>.jar`
-after `perform` — this is what gets attached to a GitHub Release (manually, for now; see
-`RELEASE_TODO.md` R7 for future CI automation).
+after `perform`. It can be attached manually to a GitHub Release. The manual publishing
+workflow below builds the tagged CLI jar and attaches it automatically.
 
 ### 5. Push, when you're satisfied
 
@@ -158,10 +157,12 @@ history. Cut a new patch release instead.
 workflow, or `gh workflow run release.yml -f releaseVersion=0.2.0`). There is no CI on push.
 
 Before running it: finish the changelog (§2 above) and push it, with `main` clean and green.
+For a tag created by the local procedure above, set **existingTag**. To create a new
+release through the workflow, set **releaseVersion** instead.
 
-1. **Prepare**: `release:prepare` with the given **releaseVersion** (required; no default,
-   so an accidental run can't cut `0.1.x`), verifies, commits, tags `vX.Y.Z` and pushes both
-   commits and the tag using the job token.
+1. **Prepare**: for a new release, `release:prepare` uses the required
+   **releaseVersion**, verifies, commits, tags `vX.Y.Z` and pushes both commits and
+   the tag using the job token.
 2. **Publish**: checks out the tag and runs `./mvnw -Pcentral-release deploy`. The profile
    comes from `alienspacebunny-parent` (sources, GPG signing, Central Portal upload). Only
    `rv32emu-core` and the `rv32emu-parent` POM are bundled; `rv32emu-cli` is excluded
@@ -192,12 +193,9 @@ anything. Run it standalone at any time, or from inside `target/checkout` after
 ./release.sh
 ```
 
-## What's still open
+## Remaining validation
 
-- **Versioning scheme (RELEASE_TODO.md R5):** this document assumes standard SemVer
-  patch/minor/major judgement calls at prepare time; there's no enforced policy yet.
-- **CI (R7):** only the manual release workflow exists; there is deliberately no
-  verify-on-push workflow yet. `release:prepare`'s build step and `release.sh` remain the
-  gates, run locally (and in the release workflow's prepare step).
-- **Publishing:** wired (R4) and **on hold** — see `RELEASE_TODO.md`. The first real run
-  of the workflow is also the first end-to-end test of the rv32emu side of it.
+The first rv32emu deployment will exercise its Central wiring end to end. After
+publication, test the artifact retrieved from Central using an empty local Maven
+repository. Decisions and release authorization are tracked in
+[release readiness](../RELEASE_TODO.md). Push/PR CI remains deliberately deferred.

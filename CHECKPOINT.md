@@ -1,4 +1,4 @@
-# Session Checkpoint — 2026-10-06
+# Session Checkpoint — 2026-10-07
 
 ## Current state
 
@@ -31,15 +31,15 @@ are wired. They do not lift the release hold; there is deliberately no push/PR C
 1. **Nate must decide whether V-32's acceptance satisfies the integration condition
    for lifting the hold.** If agreed, the next step is an explicit API-freeze review
    against the real consumer before any release. See
-   [RELEASE_TODO.md](RELEASE_TODO.md)'s 2026-09-13 update and
-   [RELEASING.md](docs/RELEASING.md) for current mechanics. Older release-task
-   baselines and suggested orders predate the completed wiring.
+   [RELEASE_TODO.md](RELEASE_TODO.md) for the remaining decisions and
+   [RELEASING.md](docs/RELEASING.md) for current mechanics.
 2. Central deployment is still untested for rv32emu; a smoke test of the published
    artifact remains open. Never start the manual release workflow without Nate's
    explicit release request.
 3. No further feature work is authorized. D remains deferred (`hasD` only advertises
-   the misa bit; no D decode). [TEST_PLAN.md](docs/TEST_PLAN.md)'s Layer 3 system
-   scenarios have not started. [RV64_FEASIBILITY_NOTES.md](docs/RV64_FEASIBILITY_NOTES.md)
+   the misa bit; no D decode). [TEST_PLAN.md](docs/TEST_PLAN.md) now audits existing
+   coverage and proposes the remaining system scenarios. No new tests were added.
+   [RV64_FEASIBILITY_NOTES.md](docs/RV64_FEASIBILITY_NOTES.md)
    is speculative, with no decision or scheduled implementation.
 
 ## Constraints for future work
@@ -58,5 +58,9 @@ are wired. They do not lift the release hold; there is deliberately no push/PR C
   a double result alone loses boundary information. Preserve independent
   differential tests when changing that arithmetic.
 
-This compaction moved historical detail into the archive and refreshed stale version
-and release-tooling references. It changes documentation only.
+The 2026-10-07 cleanup refreshed README/API/release guidance, condensed AGENTS.md,
+and archived completed plans. Superseded application architecture and bus-handoff
+notes moved to `../emulator/docs/archive/` with `RV32EMU_`-prefixed filenames;
+the documentation index records their locations (V-32 commit `371af30`). Public
+Javadoc's compressed-F description was corrected. `clean verify` passed; local
+Markdown link targets were checked. Runtime behavior and versions are unchanged.

@@ -1,5 +1,8 @@
 # CPU integration acceptance — 2026-09-16
 
+Archive note (2026-10-07): the architecture-document link now points to a
+committed V-32 copy. The acceptance text and reported results are unchanged.
+
 Accepted `rv32emu-core:0.1.5-SNAPSHOT` after reviewing
 [CPU_INTEGRATION_RESPONSE_2.md](CPU_INTEGRATION_RESPONSE_2.md) and independently
 rerunning both V-32 probes. No further CPU-project requests are outstanding
@@ -64,6 +67,6 @@ store widths and AMOs, translated aliases in both hart directions, successful
 LR/SC with aligned and unaligned physical windows, concurrent guest AMO totals,
 permission faults and logical `mtval`, signed-load context forwarding,
 reservation lifecycle, mailbox payload publication, and guest wake/ACK/MRET.
-See [V32_ARCHITECTURE.md](V32_ARCHITECTURE.md) for the mailbox ABI, ordering,
+See [V32_ARCHITECTURE.md](https://github.com/AlienSpaceBunny/v32-emulator/blob/371af30de51b3ce736c882a83fffdafa512b0c3d/docs/V32_ARCHITECTURE.md) for the mailbox ABI, ordering,
 and host quiescence requirements. Native-image build and performance benchmarks
 were not rerun; no throughput claim is made for the correctness-first locks.

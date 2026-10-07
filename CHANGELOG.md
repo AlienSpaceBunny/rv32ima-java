@@ -71,7 +71,7 @@ for how this file is updated as part of cutting a release.
   default to delegating to the no-context ones. `MMIOBus` does not forward
   `AccessContext` to `HardwareHook`; see its updated Javadoc.
 - `RV32IMAState.hartId`, identifying a hart among others sharing a `MemoryBus`.
-  Defaults to `0`; not yet read or written by the core itself.
+  Defaults to `0`; passed to the bus in access metadata. Concurrent harts must use distinct IDs.
 - `MemoryBus.atomicRmw` and `MemoryBus.tryScAndStore` (multi-hart Phase 2):
   `RV32IMACore`'s AMO block now routes every RV32A atomic through these two default
   methods instead of computing results inline. `LR.W` continues to route through the
@@ -191,4 +191,4 @@ Findings from the V-32 emulator's CPU integration review of `0.1.3-SNAPSHOT`
 ## [0.1.0] - unreleased
 
 Not tagged in this repository. Referenced informally by the downstream V-32 project
-before this changelog existed; the first tagged release from this repo will be `0.1.1`.
+before this changelog existed; the first tagged release target is `0.2.0`.

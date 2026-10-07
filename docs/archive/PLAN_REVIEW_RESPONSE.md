@@ -1,6 +1,9 @@
 # V-32 AP/IOP plan review response
 
-Date: 2026-09-10. Reviews r5 of [FEATURE_REQUEST_PLAN.md](FEATURE_REQUEST_PLAN.md)
+Archive note (2026-10-07): local link targets were repaired for this archive
+directory. The original review text is unchanged.
+
+Date: 2026-09-10. Reviews r5 of [FEATURE_REQUEST_PLAN.md](../FEATURE_REQUEST_PLAN.md)
 and answers [PLAN_REVIEW_REQUEST.md](PLAN_REVIEW_REQUEST.md). The plan incorporates
 these clarifications as r6; this response records the review of r5.
 
@@ -65,7 +68,7 @@ pending-bit clearing can use the target hart's synchronization discipline,
 shared with execution.
 
 **Material concern:** the current interrupt dispatch in
-[`RV32IMACore.step()`](../core/src/main/java/com/alienspacebunny/emu/RV32IMACore.java)
+[`RV32IMACore.step()`](../../core/src/main/java/com/alienspacebunny/emu/RV32IMACore.java)
 checks only MTIP. Phase 2 must implement MSIP/MEIP delivery and correct
 privilege-dependent gating. Section 7's unconditional `mstatus.MIE` requirement
 is incorrect when executing in U-mode: enabled, pending machine interrupts can

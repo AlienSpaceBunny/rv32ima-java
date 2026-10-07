@@ -1,5 +1,11 @@
 # Feature Request Plan: V-32 AP/IOP Support
 
+**Completed design specification.** All CPU implementation phases have landed.
+Estimates and future-tense instructions below preserve the original design;
+current contracts are in [API.md](API.md), and remaining release work is in
+[release readiness](../RELEASE_TODO.md). The original request is
+[archived](archive/FEATURE_REQUEST.md).
+
 Revision: **r6**, 2026-09-10. See [PLAN_REVIEW_RESPONSE.md](archive/PLAN_REVIEW_RESPONSE.md)
 for the application-context review of r5 and answers B1–B7.
 

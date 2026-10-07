@@ -1,176 +1,66 @@
-# Test Suite Expansion Plan
+# Test Coverage and Remaining Candidates
 
-## Context
+Reviewed against the test sources on **2026-10-07**. The original instruction
+expansion (Layer 1) and compliance-style vector suite (Layer 2) are complete.
+Later ISA and integration fixes added substantial coverage beyond that plan.
+The [original plan](archive/TEST_PLAN_PRE_CLEANUP_2026-10-07.md) is archived.
 
-The goal is a test suite that catches regressions when new ISA extensions are added in the future.
-Current baseline (as of the Javadoc commit): **46 unit tests + 1 integration test**.
+## Current coverage
 
-Tests live in `core/src/test/java/com/alienspacebunny/emu/`:
-- `CoreTest.java` — instruction execution and trap tests (35 tests)
-- `MMIOBusTest.java` — MMIO bus contract tests (7 tests)
-- `FFMMemoryBusEndianTest.java` — little-endian memory layout tests (4 tests)
-- `cli/IntegrationTest.java` — packaged CLI smoke test (1 test)
+Core tests live in
+[`core/src/test/java/com/alienspacebunny/emu/`](../core/src/test/java/com/alienspacebunny/emu/).
 
----
-
-## Existing Coverage (CoreTest.java)
-
-| Category | What's Covered |
+| Suite | Coverage |
 |---|---|
-| Basic arithmetic | ADDI, ADD |
-| Load/store | SW, LW |
-| Memory fault | Load below RAM, store past RAM, MMIO without hook |
-| Boundary | First/last byte read/write |
-| CSR side effects | CSRRW rd=x0, CSRRS rs1=x0, CSRRSI imm=0, CSRRC rs1=x0, CSRRCI imm=0 |
-| Trap/MRET | ECALL (machine mode), MRET, timer interrupt entry |
-| Timer | mtime < mtimecmp, mtime == mtimecmp, mtime > mtimecmp |
-| WFI | WFI wake on timer interrupt |
-| LR/SC | Success, SC without LR at 0x80000000, address mismatch, SC clears reservation, store clears reservation |
-| AMO | AMOMIN.W signed, AMOMAX.W signed, AMOMINU.W, AMOMAXU.W |
-| Illegal instruction | Trap cause, mtval=ir, no rd commit; invalid funct7, invalid shift, M-lookalike, invalid funct3, invalid AMO op |
-| Valid encodings | Neighboring valid instructions still execute (SLLI, SUB, MUL, AMOADD) |
+| `CoreTest` | Integer execution, CSR access and privilege checks, trap state, timer boundaries, interrupt priority, WFI wakeups, LR/SC, invalid encodings, and in-batch interrupt reevaluation. |
+| `RV32IComplianceTest` | Parameterized integer and multiplication/division vectors, plus Zba and Zbb instruction tests. |
+| `CompressedInstructionTest` | Compressed/32-bit differential execution, mixed streams, extension gating, alignment, and fetch-window edges; includes compressed F loads/stores. |
+| `FExtensionTest` / `FExtensionRoundingTest` | FP register/CSR behavior, special values, rounding modes and flags; independent arithmetic differential checks. |
+| `ZabhaTest` | Sub-word AMOs, neighboring-byte preservation, signed/unsigned comparison and extension gating. |
+| `AtomicPrimitivesTest` | Bus routing, bus-side SC rejection, permission faults, atomic alignment and reservation lifecycle. |
+| `AccessContextTest` / `MMIOBusTest` | Context propagation, legacy compatibility, hook ownership/ranges/widths, and forwarding atomic primitives. |
+| `IsaConfigTest` / `FFMMemoryBusEndianTest` | Configuration/misa behavior and little-endian memory layout. |
 
----
+The CLI's [IntegrationTest](../cli/src/test/java/com/alienspacebunny/cli/IntegrationTest.java)
+executes the baremetal binary with UART, CLINT and syscon hooks. `clean verify`
+also runs the packaged CLI jar against that binary. V-32's separate multi-hart
+acceptance checks are recorded in
+[CPU_INTEGRATION_ACCEPTANCE.md](archive/CPU_INTEGRATION_ACCEPTANCE.md); they are
+consumer-side tests, not part of this Maven suite.
 
-## Layer 1 — Instruction Exhaustion (add to CoreTest.java)
+## Original Layer 3 audit
 
-Target: one test per instruction mnemonic not already covered, plus edge cases. These run in the
-same `CoreTest.java` file using the existing hand-encoded instruction helpers.
+Related tests do not necessarily exercise the complete proposed guest flow.
 
-**Status: IN PROGRESS**
+| Proposed scenario | Current coverage | Remaining value |
+|---|---|---|
+| Timer interrupt → handler → MRET | Entry and MRET have separate state tests; pending interrupts after MRET are covered. | One complete guest round trip that acknowledges/rearms the timer and resumes without immediate retrapping. |
+| WFI → elapsed-time timer wake | Timer wake is tested from a manually stalled state; other tests execute WFI with pending interrupts. | Execute WFI, observe a stalled call, advance `elapsedUs` across the match, and verify wake/trap state. |
+| User-mode ECALL | Machine-mode ECALL and U-mode CSR/MRET restrictions are tested. | A direct U-mode ECALL test asserting cause 8, saved PC/status and entry into M-mode. |
+| CLINT register access | Baremetal smoke tests include CLINT; no dedicated register assertions. | Verify the supported low/high timer-word reads and compare-word writes through `MMIOBus`. |
+| PC outside the fetch window | Bus-rejected fetches and a compressed word overrun are covered. | Direct precheck tests below the window and at its end, including proof that no bus access or post-exec callback occurs. |
+| Misaligned PC | `misalignedTwoByteFetchTrapsOnlyWithoutHasC` covers the 4-byte versus 2-byte rule. | Strengthen trap-state assertions and add an odd PC with C enabled; avoid duplicating the existing alignment test. |
 
-### New helpers needed
+## Candidates worth implementing
 
-```java
-private static int luiInstruction(int rd, int imm20)
-private static int auipcInstruction(int rd, int imm20)
-private static int jalInstruction(int rd, int relImm)
-private static int jalrInstruction(int rd, int rs1, int imm12)
-private static int branchInstruction(int funct3, int rs1, int rs2, int relImm)
-```
+These concern existing behavior and need no additional ISA work. They are
+proposals, not scheduled implementation:
 
-### RV32I — Upper immediate
+1. **User-mode ECALL** — small, directly relevant to the public privilege contract.
+2. **WFI with elapsed-time timer wake** and **timer-handler/MRET round trip** —
+   exercise transitions currently tested mostly in isolation.
+3. **CLINT register contract** — put this in `cli`, where `CLINTHook` lives, so
+   `core` remains independent of the runner. The current hook recognizes exact
+   word-register addresses; the old plan's blanket promise of byte-accurate
+   partial-register access was not an implemented contract. Define any desired
+   sub-word behavior separately before testing it.
+4. **Fetch prechecks and odd-PC trap state** — target the uncovered branches and
+   observable trap/callback behavior.
 
-- [x] `luiLoadsUpperImmediate` — LUI writes correct upper bits, low 12 are zero
-- [x] `auipcAddsUpperImmediateToPC` — AUIPC result = pc + imm<<12
+## Longer-term validation
 
-### RV32I — Jumps
-
-- [x] `jalLinksAndJumpsForward` — forward jump, rd = return address
-- [x] `jalLinksAndJumpsBackward` — backward jump
-- [x] `jalrJumpsToRegisterPlusOffset` — JALR, rd = pc+4
-- [x] `jalrClearsLowBitOfTarget` — JALR always clears bit 0 of target
-
-### RV32I — Branches (all six conditions, taken and not-taken)
-
-- [x] `beqTakenWhenEqual` / `beqNotTakenWhenNotEqual`
-- [x] `bneTakenWhenNotEqual` / `bneNotTakenWhenEqual`
-- [x] `bltTakenWhenLessThanSigned` — negative < positive
-- [x] `bltNotTakenWhenGreaterSigned`
-- [x] `bgeTakenWhenGreaterOrEqualSigned`
-- [x] `bltuTakenWhenLessThanUnsigned` — 1 < 0xFFFFFFFF unsigned
-- [x] `bgeuTakenWhenGreaterOrEqualUnsigned`
-
-### RV32I — Loads (signed/unsigned sign-extension)
-
-- [x] `lbSignExtendsNegativeByte` — LB 0xFF → -1 in rd
-- [x] `lbuZeroExtendsByte` — LBU 0xFF → 0xFF in rd (not sign-extended)
-- [x] `lhSignExtendsNegativeHalfword` — LH 0x8000 → negative in rd
-- [x] `lhuZeroExtendsHalfword` — LHU 0x8000 → 0x8000 in rd
-
-### RV32I — Stores
-
-- [x] `sbWritesLowByte` — SB writes only low byte, leaves rest unchanged
-- [x] `shWritesLowHalfword` — SH writes only low 16 bits
-
-### RV32I — OP-IMM (all funct3 not yet covered)
-
-- [x] `addiNegativeImmediate` — negative imm sign-extends correctly
-- [x] `sltiSignedComparison` — SLTI: rd=1 when rs1 < imm (signed)
-- [x] `sltiuUnsignedComparison` — SLTIU: rd=1 when rs1 < imm (unsigned)
-- [x] `xoriFlipsBits`
-- [x] `oriSetsBits`
-- [x] `andiClearsBits`
-- [x] `slliShiftsLeft`
-- [x] `srliShiftsRightLogical` — no sign extension
-- [x] `sraiShiftsRightArithmetic` — preserves sign bit
-
-### RV32I — OP (all funct3 not yet covered)
-
-- [x] `subSubtracts`
-- [x] `sllShiftsLeftByRegister`
-- [x] `sltSignedComparison`
-- [x] `sltuUnsignedComparison`
-- [x] `xorXorsBits`
-- [x] `srlShiftsRightLogical`
-- [x] `sraShiftsRightArithmetic`
-- [x] `orOrsBits`
-- [x] `andAndsBits`
-
-### RV32I — Misc
-
-- [x] `writeToX0IsDiscarded` — result of any instruction targeting x0 is not committed
-- [x] `fenceIsNoOp` — FENCE advances PC and does not trap
-- [x] `ebreakRaisesBreakpointTrap` — cause 3, mepc = PC of ebreak
-
-### RV32M — Edge cases
-
-- [x] `mulhSignedUpperHalf`
-- [x] `mulhsuMixedSignUpperHalf`
-- [x] `mulhuUnsignedUpperHalf`
-- [x] `divByZeroReturnsMinusOne`
-- [x] `divuByZeroReturnsMaxUnsigned`
-- [x] `divSignedOverflow` — MIN_VALUE / -1 = MIN_VALUE (no trap)
-- [x] `remByZeroReturnsDividend`
-- [x] `remuByZeroReturnsDividend`
-- [x] `remSignedOverflow` — MIN_VALUE % -1 = 0
-
-### RV32A — Basic AMO correctness (all ops not yet covered)
-
-- [x] `amoswapWritesNewValueAndReturnsOld`
-- [x] `amoadd_addsAndReturnsOld` (AMOADD basic; valid encoding test only hit it as a side effect)
-- [x] `amoxorXorsAndReturnsOld`
-- [x] `amoandAndsAndReturnsOld`
-- [x] `amoorOrsAndReturnsOld`
-
----
-
-## Layer 2 — Compliance-Style Per-Instruction Tests
-
-**Status: DONE**
-
-`RV32IComplianceTest.java` — 158 test invocations across 27 parameterized methods + 8 flat `@Test`
-methods. Uses `@ParameterizedTest` / `@MethodSource` (JUnit 5.10). One method per mnemonic;
-multiple sign-boundary and overflow vectors per method. Vectors derived from the riscv-tests
-reference suite, adapted to 32-bit. Requires `junit-jupiter-params` dependency (added to
-`core/pom.xml`).
-
-Coverage:
-- RV32I OP: ADD, SUB, SLL, SLT, SLTU, XOR, SRL, SRA, OR, AND
-- RV32I OP-IMM: ADDI, SLTI, SLTIU, XORI, ORI, ANDI, SLLI, SRLI, SRAI
-- RV32M: MUL, MULH, MULHSU, MULHU, DIV, DIVU, REM, REMU
-- Flat: LUI (2 cases), AUIPC (2 cases), LB boundary, LH boundary, LB with offset, SB partial write
-
----
-
-## Layer 3 — System-Level Scenario Tests
-
-**Status: NOT STARTED — begin after Layer 2 is committed** (Layer 2 is now committed)
-
-New test class or methods in `CoreTest.java` covering full system flows:
-
-- `timerInterruptFireAndMretCycle` — interrupt entry + MRET round-trips privilege and mstatus
-- `wfiSuspendsAndTimerWakesIt` — WFI stalls, elapsedUs crosses timer match, step returns 0
-- `ecallFromUserModeRaisesUserEcall` — cause 8 (not 11) when privilege = 0
-- `nestedCLINTRegisterAccess` — byte-accurate reads/writes of mtime/mtimecmp halves via CLINTHook
-- `pcOutOfRangeRaisesInstructionAccessFault` — cause 1 (instruction access fault)
-- `pcMisalignedRaisesInstructionAddressMisaligned` — cause 0
-
----
-
-## After Layer 3
-
-- **ISA compliance tests**: modeled on riscv-tests for RV32I/M/A/CSR. Hand-encoded in Java.
-- **Differential tests**: run both this emulator and C mini-rv32ima against same binary; compare
-  register state after N instructions.
-- **Performance baseline**: run hello-world binary, record instructions/sec, gate on regression.
+Integer compliance-style and compressed/FP differential testing already exist.
+A Java-versus-C execution comparison would add a separate oracle for their shared
+ISA subset, accounting for intentional semantic differences. A repeatable
+performance baseline would also be useful before setting any regression threshold;
+neither is currently implemented or scheduled.

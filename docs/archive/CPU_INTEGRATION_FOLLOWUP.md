@@ -1,5 +1,9 @@
 # CPU response review — 2026-09-16
 
+Archive note (2026-10-07): the probe link now points to a committed V-32 copy.
+Review text is unchanged; both requested fixes were subsequently accepted in
+[CPU_INTEGRATION_ACCEPTANCE.md](CPU_INTEGRATION_ACCEPTANCE.md).
+
 Decision: request two focused processor corrections before resuming V-32 bus
 and mailbox integration. The original seven reproductions now produce the
 requested results, and the additive `MemoryBus.checkAccess` API is suitable.
@@ -22,7 +26,7 @@ preserved unchanged. No sibling-project or emulator runtime files were changed;
 - Updated the original standalone probe with a side-effect-free `checkAccess`
   implementation, including full-width bounds validation. Its seven original
   observations match the response and its nine positive feature checks pass.
-- Added [review/CoreResponseProbe.java](review/CoreResponseProbe.java), an
+- Added [review/CoreResponseProbe.java](https://github.com/AlienSpaceBunny/v32-emulator/blob/371af30de51b3ce736c882a83fffdafa512b0c3d/review/CoreResponseProbe.java), an
   independent asserting probe. It reports **12 passing assertions and 18
   failing assertions across the two remaining issues**, then exits nonzero.
   Failures include both immediate state and downstream-effect checks; they

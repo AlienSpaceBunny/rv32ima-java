@@ -6,7 +6,7 @@
 |---|---|
 | [API.md](API.md) | Public API contracts for embedders. Narrative summary; the Javadoc on the five core types is authoritative. |
 | [FEATURE_REQUEST.md](FEATURE_REQUEST.md) | Original feature request: V-32 AP/IOP support (multi-hart, extra ISA extensions). |
-| [FEATURE_REQUEST_PLAN.md](FEATURE_REQUEST_PLAN.md) | Implementation plan for the feature request. Staged P1–P3 lanes. At r6; conditionally signed off, implementation underway. |
+| [FEATURE_REQUEST_PLAN.md](FEATURE_REQUEST_PLAN.md) | Implementation plan for the feature request. At r6; Phases 1–5 fully implemented, with landing commits recorded in place. |
 | [TEST_PLAN.md](TEST_PLAN.md) | Test-suite expansion plan. Layers 1 & 2 done; Layer 3 (system-level scenarios) not started. |
 | [RELEASING.md](RELEASING.md) | Local versioning/tagging/build procedure (`maven-release-plugin`). Central publishing is a separate, on-hold step — see `../RELEASE_TODO.md`. |
 | [EMULATOR_REPO_NOTES.md](EMULATOR_REPO_NOTES.md) | Findings from directly reading the sibling emulator (V-32) repo's source — its architecture, threading model, and multi-hart `MemoryBus` gaps. A dated snapshot, not a live view; check before relying on specifics. |
@@ -23,6 +23,7 @@ Superseded documents, kept for context. Do not treat as current.
 
 | Document | Superseded by |
 |---|---|
+| [archive/CHECKPOINT_PRE_COMPACTION_2026-10-06.md](archive/CHECKPOINT_PRE_COMPACTION_2026-10-06.md) | Historical checkpoint preserved during the 2026-10-06 compaction: completed phases, reviews, cleanup steps, and superseded resume instructions. Current state and pending decisions live in [../CHECKPOINT.md](../CHECKPOINT.md). |
 | [archive/IMPLEMENTATION_TODO.md](archive/IMPLEMENTATION_TODO.md) | P0–P7 all shipped; see git history and `CHECKPOINT.md`. |
 | [archive/REMAINING_WORK.md](archive/REMAINING_WORK.md) | `CHECKPOINT.md` (release-readiness status) and `CLEANUP_TODO.md`. |
 | [archive/PLAN_REVIEW_REQUEST.md](archive/PLAN_REVIEW_REQUEST.md) / [archive/PLAN_REVIEW_RESPONSE.md](archive/PLAN_REVIEW_RESPONSE.md) | Plan-review exchange with the originating LLM (r5 → r6 sign-off, B1–B7). Its outcomes are folded into `FEATURE_REQUEST_PLAN.md` r6, which is fully implemented. |

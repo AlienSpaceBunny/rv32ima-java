@@ -308,6 +308,67 @@ public class MMIOBusTest {
         bus.registerHook(0x4100, 0x10, new RecordingHook());
     }
 
+    // Covered-range fast path: addresses outside every hook, including gaps between hooks,
+    // must still reach RAM, and hook addresses must still reach their hook.
+
+    @Test
+    public void addressesAroundAndBetweenHooksReachRam() {
+        RecordingMemoryBus ram = new RecordingMemoryBus();
+        RecordingHook low = new RecordingHook();
+        RecordingHook high = new RecordingHook();
+        MMIOBus bus = new MMIOBus(ram);
+        bus.registerHook(0x2000, 0x10, low);
+        bus.registerHook(0x5000, 0x10, high);
+        AccessContext ctx = new AccessContext(0, 3, AccessKind.LOAD, 1, 0);
+
+        bus.readByte(0x1fff);
+        bus.readByte(0x2010);
+        bus.readByte(0x3000, ctx);
+        bus.readByte(0x4fff, ctx);
+        bus.readByte(0x5010);
+        assertEquals(5, ram.readByteCount);
+
+        bus.readByte(0x200f, ctx);
+        bus.readByte(0x5000);
+        assertEquals(1, low.readCount);
+        assertEquals(1, high.readCount);
+        assertEquals(5, ram.readByteCount);
+    }
+
+    @Test
+    public void laterLowerHookExtendsTheCoveredRange() {
+        RecordingMemoryBus ram = new RecordingMemoryBus();
+        RecordingHook first = new RecordingHook();
+        RecordingHook lower = new RecordingHook();
+        MMIOBus bus = new MMIOBus(ram);
+        bus.registerHook(0x5000, 0x10, first);
+        bus.readInt(0x1004); // before the lower hook exists: RAM
+        bus.registerHook(0x1000, 0x10, lower);
+
+        bus.readInt(0x1004);
+
+        assertEquals(1, ram.readIntCount);
+        assertEquals(1, lower.readCount);
+    }
+
+    @Test
+    public void contextOverloadOnHookAddressStillDispatchesToSubclassPlainMethod() {
+        // A subclass (like V-32's IOP router) may override the plain methods; the context
+        // overloads reach a hook through them, not around them.
+        int[] plainReads = new int[1];
+        MMIOBus bus = new MMIOBus(new RecordingMemoryBus()) {
+            @Override
+            public int readInt(int address) {
+                plainReads[0]++;
+                return super.readInt(address);
+            }
+        };
+        bus.registerHook(0x10000000, 0x100, new RecordingHook());
+
+        assertEquals(0x89abcdef, bus.readInt(0x10000004, new AccessContext(0, 3, AccessKind.LOAD, 4, 0)));
+        assertEquals(1, plainReads[0]);
+    }
+
     // Context and atomic forwarding (V-32 CPU integration review): a router in front of a
     // multi-hart RAM bus must not drop AccessContext or split atomics at its boundary.
 

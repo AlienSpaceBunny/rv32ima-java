@@ -156,6 +156,12 @@ for how this file is updated as part of cutting a release.
 - `main` now carries a `-SNAPSHOT` version (`0.1.1-SNAPSHOT`); previously every commit
   claimed a bare `0.1.0` with no tags or release history.
 
+- `MMIOBus` skips its per-hook scan for addresses outside the range covered by all
+  registered hooks (typically RAM), and scans an array instead of an `ArrayList`, so no
+  iterator is allocated where the lookup is not inlined. Routing, hook dispatch through the
+  overridable no-context methods, and context forwarding are unchanged. Measured: Native Image
+  `MMIOBus`-backed guest workloads 14–42% faster, JVM 17–55%.
+
 ### Removed
 - Dead `MemoryBus.readIntSigned` default method (never called; `LW` uses `readInt`
   directly).

@@ -1,7 +1,6 @@
 package com.alienspacebunny.emu;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Arrays;
 
 /**
  * A MemoryBus implementation that delegates to another MemoryBus for main RAM
@@ -26,7 +25,14 @@ public class MMIOBus implements MemoryBus {
     private static final long ADDRESS_SPACE_SIZE = 1L << 32;
 
     private final MemoryBus ram;
-    private final List<RangeHook> hooks = new ArrayList<>();
+    // An array, not a List: an indexed scan allocates no iterator, which matters wherever the
+    // lookup is not inlined (for example, a Native Image with several reachable bus classes).
+    private RangeHook[] hooks = new RangeHook[0];
+
+    // Unsigned [hookLow, hookHigh) covers every registered hook (empty until the first one), so
+    // an access outside it -- typically RAM -- skips the per-hook scan entirely.
+    private long hookLow = ADDRESS_SPACE_SIZE;
+    private long hookHigh;
 
     private record RangeHook(long start, long end, HardwareHook hook) {
         boolean contains(int address) {
@@ -78,13 +84,22 @@ public class MMIOBus implements MemoryBus {
             }
         }
 
-        hooks.add(new RangeHook(unsignedStart, unsignedEnd, hook));
+        RangeHook[] grown = Arrays.copyOf(hooks, hooks.length + 1);
+        grown[hooks.length] = new RangeHook(unsignedStart, unsignedEnd, hook);
+        hooks = grown;
+        hookLow = Math.min(hookLow, unsignedStart);
+        hookHigh = Math.max(hookHigh, unsignedEnd);
     }
 
     private HardwareHook getHook(int address) {
-        for (RangeHook rh : hooks) {
-            if (rh.contains(address)) {
-                return rh.hook;
+        long addr = Integer.toUnsignedLong(address);
+        if (addr < hookLow || addr >= hookHigh) {
+            return null;
+        }
+        RangeHook[] current = hooks;
+        for (int i = 0; i < current.length; i++) {
+            if (current[i].contains(address)) {
+                return current[i].hook;
             }
         }
         return null;

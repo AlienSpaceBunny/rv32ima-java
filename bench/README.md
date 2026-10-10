@@ -9,8 +9,8 @@ recommendations for the core.
 
 ## Workloads
 
-Guest programs are generated in Java (`Asm`), so no cross-compiler is needed.
-Every invocation checks an analytical instruction count, final PC, the absence
+Synthetic guest programs are generated in Java (`Asm`); the standard ones are prebuilt
+images from [`guest/`](guest/README.md), so running needs no cross-compiler. Every invocation checks an analytical instruction count, final PC, the absence
 of traps, and an independent Java reference model of registers and memory.
 
 | Workload | What it exercises |
@@ -21,6 +21,9 @@ of traps, and an independent Java reference model of registers and memory.
 | `reg-ap-step1` | `reg-ap` with `step(count=1)`, like V-32's AP attempt loop |
 | `copy4k-ap`, `copy6m-ap` | Word copy + checksum, small and large working sets |
 | `mix-ap` | LB/LH/LW/SB/SH/SW, AMOADD.W and an LR.W/SC.W pair |
+| `fp-ap` | FLW/FSW, FMADD.S, FADD.S, FMUL.S (checked against Java float and `Math.fma`) |
+| `coremark-c`, `coremark-noc` | EEMBC CoreMark (2K performance seeds, 10 iterations), with/without C; see [`guest/`](guest/README.md) |
+| `fpkernels-c`, `fpkernels-noc` | Single-precision sgemm, n-body (`sqrtf`, division), Horner (`fmaf`), with/without C |
 | `host-read6m`, `host-copy4k` | Host-only loops through the bus's context overloads, no core |
 
 ## Buses

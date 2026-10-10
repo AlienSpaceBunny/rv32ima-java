@@ -20,7 +20,8 @@ JAR="${BENCH_JAR:-$(ls "$ROOT"/bench/target/rv32emu-bench-*-SNAPSHOT.jar 2>/dev/
 mkdir -p "$OUT"
 
 # Matches V-32's native flags (O2, compatibility target, Serial GC, shared arenas).
-BASE=(--no-fallback --parallelism=4 -J-Xmx4g -H:+UnlockExperimentalVMOptions -H:+SharedArenaSupport)
+BASE=(--no-fallback --parallelism=4 -J-Xmx4g -H:+UnlockExperimentalVMOptions -H:+SharedArenaSupport
+      "-H:IncludeResources=com/alienspacebunny/bench/guest/.*")
 PKG=com.alienspacebunny.bench
 
 for image in "${IMAGES[@]}"; do

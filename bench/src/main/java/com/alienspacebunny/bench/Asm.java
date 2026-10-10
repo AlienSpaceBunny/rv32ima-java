@@ -153,6 +153,29 @@ final class Asm {
         amo(3, rd, rs2, rs1);
     }
 
+    // ---- RV32F (rm = 0, round to nearest even) ---------------------------------------------
+
+    void flw(int frd, int rs1, int imm) {
+        iType(imm, rs1, 2, frd, 0x07);
+    }
+
+    void fsw(int frs2, int rs1, int imm) {
+        word((((imm >> 5) & 0x7f) << 25) | (frs2 << 20) | (rs1 << 15) | (2 << 12) | ((imm & 0x1f) << 7) | 0x27);
+    }
+
+    void faddS(int frd, int frs1, int frs2) {
+        rType(0x00, frs2, frs1, 0, frd, 0x53);
+    }
+
+    void fmulS(int frd, int frs1, int frs2) {
+        rType(0x08, frs2, frs1, 0, frd, 0x53);
+    }
+
+    /** {@code fmadd.s frd, frs1, frs2, frs3}: {@code frs1 * frs2 + frs3} with one rounding. */
+    void fmaddS(int frd, int frs1, int frs2, int frs3) {
+        word((frs3 << 27) | (frs2 << 20) | (frs1 << 15) | (frd << 7) | 0x43);
+    }
+
     void wfi() {
         word(0x10500073);
     }

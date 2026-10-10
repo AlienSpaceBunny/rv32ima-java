@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
+import java.util.ArrayList;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -449,6 +451,149 @@ public class AccessContextTest {
             new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
 
             assertEquals(0, bus.lastReadInt.privilege());
+        }
+    }
+
+    // ---- Context identity must track the state exactly within and across step() calls:
+    // privilege after MRET/trap mid-batch, hartId changes, and sub-word AMO width/op.
+
+    /** Records every context passed to the context-bearing word read, in order. */
+    private static final class HistoryBus implements MemoryBus {
+        private final FFMMemoryBus delegate;
+        final List<AccessContext> readInts = new ArrayList<>();
+
+        HistoryBus(FFMMemoryBus delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public byte readByte(int address) {
+            return delegate.readByte(address);
+        }
+
+        @Override
+        public short readShort(int address) {
+            return delegate.readShort(address);
+        }
+
+        @Override
+        public int readInt(int address) {
+            return delegate.readInt(address);
+        }
+
+        @Override
+        public void writeByte(int address, byte value) {
+            delegate.writeByte(address, value);
+        }
+
+        @Override
+        public void writeShort(int address, short value) {
+            delegate.writeShort(address, value);
+        }
+
+        @Override
+        public void writeInt(int address, int value) {
+            delegate.writeInt(address, value);
+        }
+
+        @Override
+        public int readInt(int address, AccessContext ctx) {
+            readInts.add(ctx);
+            return delegate.readInt(address);
+        }
+    }
+
+    @Test
+    public void mretToUserModeMidBatchSwitchesContextPrivilege() {
+        int ramSize = 1024;
+        try (FFMMemoryBus backing = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            HistoryBus bus = new HistoryBus(backing);
+            RV32IMAState state = new RV32IMAState();
+            state.pc = RAM_OFFSET;
+            state.extraflags |= 3;
+            state.hartId = 4;
+            state.mepc = RAM_OFFSET + 8; // MRET target; mstatus.MPP == 0 returns to user mode
+            state.regs[1] = RAM_OFFSET + 100;
+            backing.writeInt(RAM_OFFSET, loadInstruction(2, 5, 1, 0)); // lw x5, 0(x1)
+            backing.writeInt(RAM_OFFSET + 4, 0x30200073); // mret
+            backing.writeInt(RAM_OFFSET + 8, loadInstruction(2, 6, 1, 0)); // lw x6, 0(x1)
+
+            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 3, null, null);
+
+            assertEquals(5, bus.readInts.size());
+            assertContext(bus.readInts.get(0), 4, 3, AccessKind.FETCH, 4, 0);
+            assertContext(bus.readInts.get(1), 4, 3, AccessKind.LOAD, 4, 0);
+            assertContext(bus.readInts.get(2), 4, 3, AccessKind.FETCH, 4, 0);
+            assertContext(bus.readInts.get(3), 4, 0, AccessKind.FETCH, 4, 0);
+            assertContext(bus.readInts.get(4), 4, 0, AccessKind.LOAD, 4, 0);
+        }
+    }
+
+    @Test
+    public void trapFromUserModeUsesMachineContextsInHandler() {
+        int ramSize = 1024;
+        try (FFMMemoryBus backing = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            HistoryBus bus = new HistoryBus(backing);
+            RV32IMAState state = new RV32IMAState();
+            state.pc = RAM_OFFSET;
+            state.mtvec = RAM_OFFSET + 64;
+            state.regs[1] = RAM_OFFSET + 100;
+            backing.writeInt(RAM_OFFSET, 0x00000073); // ecall from user mode
+            backing.writeInt(RAM_OFFSET + 64, loadInstruction(2, 5, 1, 0)); // handler: lw x5, 0(x1)
+            RV32IMACore core = new RV32IMACore();
+
+            core.step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            core.step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertEquals(3, bus.readInts.size());
+            assertContext(bus.readInts.get(0), 0, 0, AccessKind.FETCH, 4, 0);
+            assertContext(bus.readInts.get(1), 0, 3, AccessKind.FETCH, 4, 0);
+            assertContext(bus.readInts.get(2), 0, 3, AccessKind.LOAD, 4, 0);
+        }
+    }
+
+    @Test
+    public void hartIdChangeBetweenCallsIsReflectedInContexts() {
+        int ramSize = 1024;
+        try (FFMMemoryBus backing = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            HistoryBus bus = new HistoryBus(backing);
+            RV32IMAState state = new RV32IMAState();
+            state.pc = RAM_OFFSET;
+            state.extraflags |= 3;
+            state.hartId = 1;
+            backing.writeInt(RAM_OFFSET, 0x00000013); // nop
+            backing.writeInt(RAM_OFFSET + 4, 0x00000013); // nop
+            RV32IMACore core = new RV32IMACore();
+
+            core.step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            state.hartId = 9;
+            core.step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+
+            assertContext(bus.readInts.get(0), 1, 3, AccessKind.FETCH, 4, 0);
+            assertContext(bus.readInts.get(1), 9, 3, AccessKind.FETCH, 4, 0);
+        }
+    }
+
+    @Test
+    public void subWordAmoContextsCarryWidthAndOperation() {
+        int ramSize = 1024;
+        try (FFMMemoryBus backing = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
+            RecordingBus bus = new RecordingBus(backing);
+            RV32IMAState state = new RV32IMAState();
+            state.pc = RAM_OFFSET;
+            state.extraflags |= 3;
+            state.hartId = 6;
+            state.regs[1] = RAM_OFFSET + 100;
+            backing.writeInt(RAM_OFFSET, amoInstruction(1, 0, 3, 1, 2)); // amoswap.b x3, x2, (x1)
+            backing.writeInt(RAM_OFFSET + 4, amoInstruction(20, 1, 3, 1, 2)); // amomax.h x3, x2, (x1)
+            RV32IMACore core = new RV32IMACore(new IsaConfig(false, false, false, false, true));
+
+            core.step(state, bus, RAM_OFFSET, ramSize, 0, 2, null, null);
+
+            assertContext(bus.lastReadByte, 6, 3, AccessKind.AMO, 1, 1);
+            assertContext(bus.lastWriteByte, 6, 3, AccessKind.AMO, 1, 1);
+            assertContext(bus.lastReadShort, 6, 3, AccessKind.AMO, 2, 20);
+            assertContext(bus.lastWriteShort, 6, 3, AccessKind.AMO, 2, 20);
         }
     }
 }

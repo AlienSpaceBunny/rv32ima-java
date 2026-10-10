@@ -172,6 +172,12 @@ for how this file is updated as part of cutting a release.
   unchanged. Measured beyond the ALU-decode change: Native Image 2–9% faster, HotSpot 2–18%,
   FP loop neutral, the AMO-heavy loop within ±3%.
 
+- `RV32IMACore` expands compressed instructions through a table precomputed from the existing
+  decoder for all 65,536 encodings (256 KiB, built at class initialization) instead of
+  re-deriving the expansion on every execution. Decoding is unchanged. Measured: CoreMark's
+  C build 10–14% faster under Native Image and 12–16% on HotSpot; compressed-heavy loops
+  24–31% faster. On HotSpot the C build now matches the no-C build.
+
 ### Removed
 - Dead `MemoryBus.readIntSigned` default method (never called; `LW` uses `readInt`
   directly).

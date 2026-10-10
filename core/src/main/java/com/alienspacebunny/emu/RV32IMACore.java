@@ -848,6 +848,22 @@ public class RV32IMACore {
     }
 
     /**
+     * {@link #decodeCompressed} precomputed for every 16-bit value (256 KiB), so executing a
+     * compressed instruction costs one array load instead of re-deriving its expansion each time.
+     * Expansion depends only on the 16 encoding bits, so the table needs no invalidation when
+     * guest code changes. Entries whose low two bits are {@code 0b11} (not compressed) are unused.
+     */
+    private static final int[] COMPRESSED_EXPANSION = buildCompressedExpansion();
+
+    private static int[] buildCompressedExpansion() {
+        int[] table = new int[1 << 16];
+        for (int c = 0; c < table.length; c++) {
+            table[c] = (c & 0x3) == 0x3 ? 0 : decodeCompressed(c);
+        }
+        return table;
+    }
+
+    /**
      * Expands one 16-bit RVC-encoded instruction ({@code c}, zero-extended into an {@code int})
      * into a representative 32-bit RV32I/M word, or returns {@code 0} for a reserved or
      * unimplemented pattern. See the block comment above for the overall approach.
@@ -1511,12 +1527,12 @@ public class RV32IMACore {
                                         new AccessContext(state.hartId, privilege, AccessKind.FETCH, 4, 0);
                                 ir = mem.readInt(pc, fetchCtx32);
                             } else {
-                                // decodeCompressed expands the 16-bit encoding into an equivalent
-                                // standard 32-bit RV32I/M word that the opcode switch below can
-                                // execute unmodified, or returns an opcode with no case in that
-                                // switch (its default branch already means illegal instruction) for
-                                // any reserved 16-bit pattern.
-                                ir = decodeCompressed(lowHalf);
+                                // The precomputed decodeCompressed expansion: an equivalent standard
+                                // 32-bit RV32I/M word that the opcode switch below can execute
+                                // unmodified, or an opcode with no case in that switch (its default
+                                // branch already means illegal instruction) for any reserved 16-bit
+                                // pattern.
+                                ir = COMPRESSED_EXPANSION[lowHalf];
                                 instrLen = 2;
                             }
                         } else {

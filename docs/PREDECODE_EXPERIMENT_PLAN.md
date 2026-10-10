@@ -1,4 +1,4 @@
-# Predecode upper-bound experiment (draft, not started)
+# Predecode upper-bound experiment (draft; tier-1 code ready, not measured)
 
 Drafted 2026-10-10. It answers one question before the V-32 handoff: **how much could
 decode-once execution gain over `HEAD`'s interpreter, at best?** That number decides whether
@@ -19,9 +19,16 @@ The 2026-10-10 evidence ([performance/2026-10-10](performance/2026-10-10/README.
 Predecode attacks all of these uniformly. It also subsumes a prefetch buffer or fetch window,
 since a hit needs no fetch at all, so those are not explored separately.
 
+**Status (2026-10-10, 02:30).** Tier 1 is implemented on branch `exp/predecode` at `04fdf54`.
+It is correctness-smoked at test scale on the `bytearray` and `router` buses, where all 14
+workloads verified, but it is not measured. Run it with the existing images: the cache is
+behind a runtime `--predecode` flag, and `run_matrix.py --predecode` adds `<label>-pd` cells.
+Compare it with a fresh `claude-review` `HEAD` reference, because the experiment branch
+carries one extra branch in the fetch path. Tier 2 is not started.
+
 ## Design of the experiment
 
-**Where it lives.** A throwaway branch `exp/predecode` off `main` (after C4/C5 are resolved),
+**Where it lives.** A throwaway branch `exp/predecode` off `claude-review`,
 modifying `RV32IMACore` behind a constructor flag that only the bench sets. It is never
 merged. The bench gets one entry point that enables the flag (`PredecodeMain`, plus a
 `mono-predecode` native image).

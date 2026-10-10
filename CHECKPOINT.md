@@ -2,7 +2,9 @@
 
 ## Current state
 
-`main` is **`0.1.6-SNAPSHOT`**, with local commits not yet pushed. The public API remains
+Work is on local branch **`claude-review`**, not pushed. It was branched from `main` at
+`f745790` on 2026-10-10 at 00:07, before the first commit; `main` and `origin/main` are
+untouched. The version is still **`0.1.6-SNAPSHOT`**. The public API remains
 unfrozen and publishing is on hold. The first real release target is **`0.2.0`**; no
 release is authorized. CPU feature Phases 1–5 are complete; see
 [FEATURE_REQUEST_PLAN.md](docs/FEATURE_REQUEST_PLAN.md) and the
@@ -42,8 +44,9 @@ Decisions this session (Nate):
 ## Resume / pending
 
 1. **Predecode upper-bound experiment, before handing back to V-32.** Follow the
-   [plan](docs/PREDECODE_EXPERIMENT_PLAN.md). The tier-1 code draft is on branch
-   `exp/predecode` (not measured; see the plan for status). Run tier 1, then tier 2, each with
+   [plan](docs/PREDECODE_EXPERIMENT_PLAN.md). Tier-1 code is drafted on branch
+   `exp/predecode` at `04fdf54`: correctness-smoked, not measured. The plan's status note gives the
+   run commands. Run tier 1, then tier 2, each with
    one matrix against a fresh `HEAD` reference. Fold the result into
    [the response](docs/CPU_ARCHITECTURE_REVIEW_RESPONSE.md) (its predecode bullet says
    "Result pending") and the evidence README.
@@ -52,7 +55,7 @@ Decisions this session (Nate):
      (`./mvnw versions:set -DnewVersion=0.1.7-SNAPSHOT -DgenerateBackupPoms=false`) and update
      `docs/RELEASING.md`
    - run `./mvnw clean verify`, then `./mvnw install -DskipTests`
-   - push `main`, never the `exp/` branch
+   - bring `claude-review` into `main` (fast-forward) and push; never push `exp/predecode`
    - hand the response to V-32, which keeps it active until acknowledged
 3. **Unchanged, carried over:**
    - The release-hold decision and API-freeze review ([RELEASE_TODO.md](RELEASE_TODO.md)).

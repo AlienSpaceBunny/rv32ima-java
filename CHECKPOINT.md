@@ -1,66 +1,82 @@
-# Session Checkpoint — 2026-10-07
+# Session Checkpoint — 2026-10-10
 
 ## Current state
 
-`main` is **`0.1.6-SNAPSHOT`**. The public API remains unfrozen and publishing remains
-on hold. The first real release target is **`0.2.0`**; no release is authorized.
-
-The CPU feature plan's **Phases 1–5 are complete**, including the compressed F
-instructions. P0–P7 fixes, public API Javadoc, compliance-test Layers 1–2, and the
-C1–C7 cleanup pass are also complete. Landing commits and design details remain in
-[FEATURE_REQUEST_PLAN.md](docs/FEATURE_REQUEST_PLAN.md); completed session notes and
-superseded handoffs are preserved in the
+`main` is **`0.1.6-SNAPSHOT`**, with local commits not yet pushed. The public API remains
+unfrozen and publishing is on hold. The first real release target is **`0.2.0`**; no
+release is authorized. CPU feature Phases 1–5 are complete; see
+[FEATURE_REQUEST_PLAN.md](docs/FEATURE_REQUEST_PLAN.md) and the
 [checkpoint archive](docs/archive/CHECKPOINT_PRE_COMPACTION_2026-10-06.md).
 
-**V-32 integration exchange closed:** V-32 accepted `0.1.5-SNAPSHOT` on 2026-09-16,
-with both probes passing (`CoreResponseProbe` 30/30), its Gradle gate green (51
-tests), and no outstanding CPU-project requests. Its acceptance documents completed
-shared-RAM LR/SC, AP permission forwarding, two-hart reset/privilege, mailbox/MEIP,
-and guest ECALL integration. See the
-[acceptance](docs/archive/CPU_INTEGRATION_ACCEPTANCE.md); its `0.1.15-SNAPSHOT`
-reference is a typo for `0.1.5`. That acceptance did not rerun this repo's Maven gate
-or native-image/performance checks.
+**In progress: V-32's CPU architecture / native-performance review**
+([handoff](docs/archive/CPU_ARCHITECTURE_REVIEW_HANDOFF.md)). The response is
+[CPU_ARCHITECTURE_REVIEW_RESPONSE.md](docs/CPU_ARCHITECTURE_REVIEW_RESPONSE.md); the evidence
+is in [performance/2026-10-10](docs/performance/2026-10-10/README.md). Measurements use the
+new unpublished [`bench`](bench/README.md) module: pinned `taskset -c 2,3`, outputs in the
+git-ignored `bench/out/`.
 
-Subsequent build work bumped this repo to `0.1.6-SNAPSHOT` and moved shared build
-configuration to the published **`alienspacebunny-parent:0.1.1`**. Release credentials,
-signing, inherited Central deployment configuration, and the manual release workflow
-are wired. They do not lift the release hold; there is deliberately no push/PR CI.
+Landed locally, all with green gates:
 
-## Resume / pending decisions
+| Commit | Change |
+| --- | --- |
+| `9bdccaf` | bench module |
+| `0eff01b` | `MMIOBus` covering-range lookup |
+| `b5eecfd` | context semantics tests |
+| `a7d7b40` | C3a: base-first ALU decode |
+| `9baaafd` | C3b: cold F/A arms out of `step()`'s loop |
+| `4c22d8b` | `fp-ap`, CoreMark and FP-kernel images |
+| `ffb57c8` | C4: compressed expansion table |
 
-1. **Nate must decide whether V-32's acceptance satisfies the integration condition
-   for lifting the hold.** If agreed, the next step is an explicit API-freeze review
-   against the real consumer before any release. See
-   [RELEASE_TODO.md](RELEASE_TODO.md) for the remaining decisions and
-   [RELEASING.md](docs/RELEASING.md) for current mechanics.
-2. Central deployment is still untested for rv32emu; a smoke test of the published
-   artifact remains open. Never start the manual release workflow without Nate's
-   explicit release request.
-3. No further feature work is authorized. D remains deferred (`hasD` only advertises
-   the misa bit; no D decode). [TEST_PLAN.md](docs/TEST_PLAN.md) now audits existing
-   coverage and proposes the remaining system scenarios. No new tests were added.
-   [RV64_FEASIBILITY_NOTES.md](docs/RV64_FEASIBILITY_NOTES.md)
-   is speculative, with no decision or scheduled implementation.
+Rejected and reverted: C1 (cached `AccessContext`s) and C5 (allocation-free FP rounding).
+Result: CoreMark and integer work is 18–39% faster native and 28–34% faster on HotSpot, with
+a further 10–16% for C-heavy code. FP is unchanged natively.
+
+Decisions this session (Nate):
+
+- C3b landed despite missing the 10% gate on its own.
+- PGO and Oracle GraalVM are excluded; proprietary licence risk.
+- Native targets: `-march=native` dropped; `x86-64-v2`/`v3` measured and gave no gain. The
+  oldest test machines are a Ryzen 2700X and an i7-8650U, both v3.
+- The core stays backend-agnostic; FFM is not the preferred V-32 backend.
+
+## Resume / pending
+
+1. **Predecode upper-bound experiment, before handing back to V-32.** Follow the
+   [plan](docs/PREDECODE_EXPERIMENT_PLAN.md). The tier-1 code draft is on branch
+   `exp/predecode` (not measured; see the plan for status). Run tier 1, then tier 2, each with
+   one matrix against a fresh `HEAD` reference. Fold the result into
+   [the response](docs/CPU_ARCHITECTURE_REVIEW_RESPONSE.md) (its predecode bullet says
+   "Result pending") and the evidence README.
+2. **Finish the task:**
+   - bump to `0.1.7-SNAPSHOT`
+     (`./mvnw versions:set -DnewVersion=0.1.7-SNAPSHOT -DgenerateBackupPoms=false`) and update
+     `docs/RELEASING.md`
+   - run `./mvnw clean verify`, then `./mvnw install -DskipTests`
+   - push `main`, never the `exp/` branch
+   - hand the response to V-32, which keeps it active until acknowledged
+3. **Unchanged, carried over:**
+   - The release-hold decision and API-freeze review ([RELEASE_TODO.md](RELEASE_TODO.md)).
+   - The Central smoke test.
+   - Never start the release workflow without Nate's explicit request. D stays deferred.
+
+**Validation status:** `./mvnw clean verify` is green at `ffb57c8` (535 core, 1 CLI and
+4 bench tests; 0 Checkstyle and 0 SpotBugs findings). Bench evidence is copied into
+`docs/performance/2026-10-10/`. Working outputs remain in the git-ignored `bench/out/`.
 
 ## Constraints for future work
 
 - Follow [AGENTS.md](AGENTS.md) for gates, changelog, version bumps, local install,
   archiving, and commit/push requirements. Shared formatter/tooling versions belong
   in `../alienspacebunny-build`; this repo consumes its published parent.
-- Core stays independent of CLI. `step()`'s long body and eight-argument signature
-  are deliberate; trap dispatch uses an internal cause-plus-one encoding.
+- Core stays independent of CLI and of any memory backend. `step()`'s long body and
+  eight-argument signature are deliberate; cold F/A arms live in `executeColdOpcode`.
+  Measure hot-path changes with `bench/` on JVM and native. Trap dispatch uses an
+  internal cause-plus-one encoding.
 - [API.md](docs/API.md) summarizes contracts; Javadoc is authoritative. Multi-hart
   buses own translated-address reservation coordination, atomicity, sub-word lock
   granularity, and ordering stronger than the single-hart defaults. `aq`/`rl` is
   outside `AccessContext`'s scope. Cross-thread interrupt injection requires caller
-  synchronization. AP-to-IOP trap notification belongs to the emulator's devices.
+  synchronization.
 - F directed rounding needs the exact residual alongside the double approximation;
   a double result alone loses boundary information. Preserve independent
   differential tests when changing that arithmetic.
-
-The 2026-10-07 cleanup refreshed README/API/release guidance, condensed AGENTS.md,
-and archived completed plans. Superseded application architecture and bus-handoff
-notes moved to `../emulator/docs/archive/` with `RV32EMU_`-prefixed filenames;
-the documentation index records their locations (V-32 commit `371af30`). Public
-Javadoc's compressed-F description was corrected. `clean verify` passed; local
-Markdown link targets were checked. Runtime behavior and versions are unchanged.

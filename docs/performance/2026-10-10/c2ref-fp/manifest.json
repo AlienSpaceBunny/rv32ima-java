@@ -1,0 +1,272 @@
+{
+  "started": "2026-10-10T01:26:35-0700",
+  "git_rev": "b5eecfdf6521d276f62729d1e19b14b029a76907",
+  "git_dirty": true,
+  "jar": "bench/out/jars/c2ref-fp.jar",
+  "jar_sha256": "9a0fa827e6173805ec0090f550e045956ae73b1d32361f289c34242d01da478f",
+  "java": "openjdk version \"25.0.4.1\" 2026-08-18 LTS\nOpenJDK Runtime Environment Corretto-25.0.4.8.1 (build 25.0.4.1+8-LTS)\nOpenJDK 64-Bit Server VM Corretto-25.0.4.8.1 (build 25.0.4.1+8-LTS, mixed mode, sharing)",
+  "native_images": {
+    "bench/out/native-c2ref-fp/poly": {
+      "sha256": "be54154b4ae653ad9233c34e4ccc901c652ef32b80307f003927eff5d99d72ac",
+      "compiler": "Graal compiler: optimization level: 2, target machine: compatibility"
+    },
+    "bench/out/native-c2ref-fp/mono-bytearray": {
+      "sha256": "49faaa1b7b3d2ad038afcde594d21c4ca2e9c1f469cd19d7792488e249b8c4ca",
+      "compiler": "Graal compiler: optimization level: 2, target machine: compatibility"
+    },
+    "bench/out/native-c2ref-fp/mono-router": {
+      "sha256": "c23ab63231878a1d73a2f0ff58c39337f2e2340397e9e68b4a143d5f1576d864",
+      "compiler": "Graal compiler: optimization level: 2, target machine: compatibility"
+    }
+  },
+  "warmup_seconds": 10,
+  "samples_per_fork": 3,
+  "forks": 2,
+  "cpus": "2,3",
+  "processes": [
+    {
+      "name": "f1-jvm-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/c2ref-fp.jar",
+        "--bus",
+        "bytearray",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 11.3
+    },
+    {
+      "name": "f1-jvm-router",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/c2ref-fp.jar",
+        "--bus",
+        "router",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 11.5
+    },
+    {
+      "name": "f1-poly-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c2ref-fp/poly",
+        "--bus",
+        "bytearray",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 14.2
+    },
+    {
+      "name": "f1-poly-router",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c2ref-fp/poly",
+        "--bus",
+        "router",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 14.3
+    },
+    {
+      "name": "f1-mono-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c2ref-fp/mono-bytearray",
+        "--bus",
+        "bytearray",
+        "--label",
+        "mono",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 13.8
+    },
+    {
+      "name": "f1-mono-router",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c2ref-fp/mono-router",
+        "--bus",
+        "router",
+        "--label",
+        "mono",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 13.7
+    },
+    {
+      "name": "f2-mono-router",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c2ref-fp/mono-router",
+        "--bus",
+        "router",
+        "--label",
+        "mono",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 13.8
+    },
+    {
+      "name": "f2-mono-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c2ref-fp/mono-bytearray",
+        "--bus",
+        "bytearray",
+        "--label",
+        "mono",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 13.8
+    },
+    {
+      "name": "f2-poly-router",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c2ref-fp/poly",
+        "--bus",
+        "router",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 14.3
+    },
+    {
+      "name": "f2-poly-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c2ref-fp/poly",
+        "--bus",
+        "bytearray",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 14.1
+    },
+    {
+      "name": "f2-jvm-router",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/c2ref-fp.jar",
+        "--bus",
+        "router",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 11.5
+    },
+    {
+      "name": "f2-jvm-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/c2ref-fp.jar",
+        "--bus",
+        "bytearray",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 11.5
+    }
+  ],
+  "finished": "2026-10-10T01:29:13-0700",
+  "complete": true
+}

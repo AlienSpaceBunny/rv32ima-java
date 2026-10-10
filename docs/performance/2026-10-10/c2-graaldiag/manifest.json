@@ -1,0 +1,444 @@
+{
+  "started": "2026-10-10T01:13:37-0700",
+  "git_rev": "f745790b4cef9d45e56e27908fc08b473530e00e",
+  "git_dirty": true,
+  "jar": "bench/out/jars/c2.jar",
+  "jar_sha256": "bf15fee100aa283f8c55a8204e7942d28f3ddd4499b96d7f523bc8cd19c9d017",
+  "java": "openjdk version \"25.0.4.1\" 2026-08-18 LTS\nOpenJDK Runtime Environment Corretto-25.0.4.8.1 (build 25.0.4.1+8-LTS)\nOpenJDK 64-Bit Server VM Corretto-25.0.4.8.1 (build 25.0.4.1+8-LTS, mixed mode, sharing)",
+  "native_images": {
+    "bench/out/native-c2/poly": {
+      "sha256": "04627e28db4504d677627c79c2f47838c33ac8a06610e32026f5395565bca2e6",
+      "compiler": "Graal compiler: optimization level: 2, target machine: compatibility"
+    }
+  },
+  "warmup_seconds": 10,
+  "samples_per_fork": 3,
+  "forks": 2,
+  "cpus": "2,3",
+  "processes": [
+    {
+      "name": "f1-jvm-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/c2.jar",
+        "--bus",
+        "bytearray",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 11.1
+    },
+    {
+      "name": "f1-jvm-mmio",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/c2.jar",
+        "--bus",
+        "mmio",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 11.2
+    },
+    {
+      "name": "f1-jvm-router",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/c2.jar",
+        "--bus",
+        "router",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 11.2
+    },
+    {
+      "name": "f1-jvm-graaljit-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/graalvm-community-25.3.4.1+1.1/bin/java",
+        "-jar",
+        "bench/out/jars/c2.jar",
+        "--bus",
+        "bytearray",
+        "--label",
+        "jvm-graaljit",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 11.1
+    },
+    {
+      "name": "f1-jvm-graaljit-router",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/graalvm-community-25.3.4.1+1.1/bin/java",
+        "-jar",
+        "bench/out/jars/c2.jar",
+        "--bus",
+        "router",
+        "--label",
+        "jvm-graaljit",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 11.3
+    },
+    {
+      "name": "f1-jvm-graalc2-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/graalvm-community-25.3.4.1+1.1/bin/java",
+        "-XX:-UseJVMCICompiler",
+        "-jar",
+        "bench/out/jars/c2.jar",
+        "--bus",
+        "bytearray",
+        "--label",
+        "jvm-graalc2",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 11.1
+    },
+    {
+      "name": "f1-jvm-graalc2-router",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/graalvm-community-25.3.4.1+1.1/bin/java",
+        "-XX:-UseJVMCICompiler",
+        "-jar",
+        "bench/out/jars/c2.jar",
+        "--bus",
+        "router",
+        "--label",
+        "jvm-graalc2",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 11.3
+    },
+    {
+      "name": "f1-poly-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c2/poly",
+        "--bus",
+        "bytearray",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 13.1
+    },
+    {
+      "name": "f1-poly-mmio",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c2/poly",
+        "--bus",
+        "mmio",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 13.0
+    },
+    {
+      "name": "f1-poly-router",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c2/poly",
+        "--bus",
+        "router",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 13.5
+    },
+    {
+      "name": "f2-poly-router",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c2/poly",
+        "--bus",
+        "router",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 13.5
+    },
+    {
+      "name": "f2-poly-mmio",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c2/poly",
+        "--bus",
+        "mmio",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 13.0
+    },
+    {
+      "name": "f2-poly-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c2/poly",
+        "--bus",
+        "bytearray",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 12.4
+    },
+    {
+      "name": "f2-jvm-graalc2-router",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/graalvm-community-25.3.4.1+1.1/bin/java",
+        "-XX:-UseJVMCICompiler",
+        "-jar",
+        "bench/out/jars/c2.jar",
+        "--bus",
+        "router",
+        "--label",
+        "jvm-graalc2",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 11.3
+    },
+    {
+      "name": "f2-jvm-graalc2-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/graalvm-community-25.3.4.1+1.1/bin/java",
+        "-XX:-UseJVMCICompiler",
+        "-jar",
+        "bench/out/jars/c2.jar",
+        "--bus",
+        "bytearray",
+        "--label",
+        "jvm-graalc2",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 11.3
+    },
+    {
+      "name": "f2-jvm-graaljit-router",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/graalvm-community-25.3.4.1+1.1/bin/java",
+        "-jar",
+        "bench/out/jars/c2.jar",
+        "--bus",
+        "router",
+        "--label",
+        "jvm-graaljit",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 11.4
+    },
+    {
+      "name": "f2-jvm-graaljit-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/graalvm-community-25.3.4.1+1.1/bin/java",
+        "-jar",
+        "bench/out/jars/c2.jar",
+        "--bus",
+        "bytearray",
+        "--label",
+        "jvm-graaljit",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 11.3
+    },
+    {
+      "name": "f2-jvm-router",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/c2.jar",
+        "--bus",
+        "router",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 11.3
+    },
+    {
+      "name": "f2-jvm-mmio",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/c2.jar",
+        "--bus",
+        "mmio",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 11.2
+    },
+    {
+      "name": "f2-jvm-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/c2.jar",
+        "--bus",
+        "bytearray",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 11.2
+    }
+  ],
+  "finished": "2026-10-10T01:17:33-0700",
+  "complete": true
+}

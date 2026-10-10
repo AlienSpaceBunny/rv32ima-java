@@ -10,6 +10,10 @@
 | [../RELEASE_TODO.md](../RELEASE_TODO.md) | Release hold, remaining decisions and preparation status. |
 | [../CHANGELOG.md](../CHANGELOG.md) | Public API, behavior and tooling changes. |
 | [FEATURE_REQUEST_PLAN.md](FEATURE_REQUEST_PLAN.md) | Completed V-32 CPU feature design/specification, with landing commits recorded in place. |
+| [CPU_ARCHITECTURE_REVIEW_RESPONSE.md](CPU_ARCHITECTURE_REVIEW_RESPONSE.md) | Response to V-32's 2026-10-10 CPU architecture/native-performance review: assessment, ranked directions, recommended next step. Active until V-32 acknowledges it. |
+| [performance/2026-10-10/README.md](performance/2026-10-10/README.md) | JVM vs Native Image measurements behind the review: method, provenance, baseline decomposition, landed and rejected candidates. |
+| [PREDECODE_EXPERIMENT_PLAN.md](PREDECODE_EXPERIMENT_PLAN.md) | Draft, not started: bounded upper-bound experiment for decode-once execution, with decision rule and the requirements a real design would face. |
+| [../bench/README.md](../bench/README.md) | Unpublished throughput harness: workloads, bench-only buses, native images, how to run the matrix. |
 | [RV64_FEASIBILITY_NOTES.md](RV64_FEASIBILITY_NOTES.md) | Speculative notes on whether/how this library could add RV64 support alongside RV32. No decision made, no work started or scheduled. |
 
 ## Archive
@@ -32,6 +36,7 @@ preserved; link targets are adjusted for the archive layout or the source reposi
 | [archive/CPU_INTEGRATION_RESPONSE.md](archive/CPU_INTEGRATION_RESPONSE.md) | Round 1: response to V-32's 2026-09-15 review — per-finding fixes (`0664be7`), the `MemoryBus.checkAccess` API decision for failing-SC permission checks, alignment/reservation-lifecycle policy. Exchange closed by V-32's acceptance below; the contracts it introduced are now in `API.md` and the Javadoc. |
 | [archive/CPU_INTEGRATION_RESPONSE_2.md](archive/CPU_INTEGRATION_RESPONSE_2.md) | Round 2: answers the follow-up — reservation cleanup before alignment faults, the inert-bus-entry lifecycle policy, in-batch interrupt reevaluation after CSR writes/MRET (`0.1.5-SNAPSHOT`). Closed by the acceptance below. |
 | [archive/CPU_INTEGRATION_ACCEPTANCE.md](archive/CPU_INTEGRATION_ACCEPTANCE.md) | V-32's 2026-09-16 acceptance of `0.1.5-SNAPSHOT`: both probes passed, its Gradle gate green (51 tests), no CPU-side requests outstanding, and completed bus/privilege/mailbox integration. Reproduction commands use V-32-repo paths; `0.1.15-SNAPSHOT` was a typo for `0.1.5`. |
+| [archive/CPU_ARCHITECTURE_REVIEW_HANDOFF.md](archive/CPU_ARCHITECTURE_REVIEW_HANDOFF.md) | V-32's 2026-10-10 CPU architecture and native-performance review request, kept verbatim as the input to `CPU_ARCHITECTURE_REVIEW_RESPONSE.md`. Its evidence paths refer to the V-32 repository. |
 | [archive/CoreFeatureProbe.java](archive/CoreFeatureProbe.java) | V-32's standalone probe from the round-1 review (outside the Maven source sets; run with `java -cp <core jar> CoreFeatureProbe.java`). Expected output against `0.1.4-SNAPSHOT` is in `archive/CPU_INTEGRATION_RESPONSE.md`. V-32's current copy (`../emulator/review/`, alongside its round-2 `CoreResponseProbe.java`) adds a `checkAccess` override and is not mirrored here. |
 
 ## Historical emulator documents

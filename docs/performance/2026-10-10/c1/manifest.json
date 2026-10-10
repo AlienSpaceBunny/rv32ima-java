@@ -1,0 +1,932 @@
+{
+  "started": "2026-10-10T01:01:23-0700",
+  "git_rev": "f745790b4cef9d45e56e27908fc08b473530e00e",
+  "git_dirty": true,
+  "jar": "bench/out/jars/c1.jar",
+  "jar_sha256": "2afe72bef710119afe038bfc8fb6df13b18f1818df5cc37e9386a59152411aa8",
+  "java": "openjdk version \"25.0.4.1\" 2026-08-18 LTS\nOpenJDK Runtime Environment Corretto-25.0.4.8.1 (build 25.0.4.1+8-LTS)\nOpenJDK 64-Bit Server VM Corretto-25.0.4.8.1 (build 25.0.4.1+8-LTS, mixed mode, sharing)",
+  "native_images": {
+    "bench/out/native-c1/poly": {
+      "sha256": "c208c42adc71f8b384229796e3da3a3f6cf81372d0ed13ada999a33ff10bd5fc",
+      "compiler": "Graal compiler: optimization level: 2, target machine: compatibility"
+    },
+    "bench/out/native-c1/mono-bytearray": {
+      "sha256": "096e3e7844d49a239e6d402b69ca19a16bde82fa144ec3d17d7cf011009591a0",
+      "compiler": "Graal compiler: optimization level: 2, target machine: compatibility"
+    },
+    "bench/out/native-c1/mono-ffm": {
+      "sha256": "f8a47b47626f40cf363a85361b5345b8d043f6668b92af6de5bd6e8925020336",
+      "compiler": "Graal compiler: optimization level: 2, target machine: compatibility"
+    },
+    "bench/out/native-c1/mono-directbuffer": {
+      "sha256": "b49a2bef51d53c75413f03039e646f5c0e6ca932e55ab6b707862bf8c1cee85f",
+      "compiler": "Graal compiler: optimization level: 2, target machine: compatibility"
+    },
+    "bench/out/native-c1/mono-router": {
+      "sha256": "702e86902d57d8b24b0e740776e84b35076102d3b618c887d52fd77d03641530",
+      "compiler": "Graal compiler: optimization level: 2, target machine: compatibility"
+    }
+  },
+  "warmup_seconds": 10,
+  "samples_per_fork": 3,
+  "forks": 2,
+  "cpus": "2,3",
+  "processes": [
+    {
+      "name": "f1-jvm-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/c1.jar",
+        "--bus",
+        "bytearray",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 11.2
+    },
+    {
+      "name": "f1-jvm-varhandle",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/c1.jar",
+        "--bus",
+        "varhandle",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 11.1
+    },
+    {
+      "name": "f1-jvm-heapsegment",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/c1.jar",
+        "--bus",
+        "heapsegment",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 11.3
+    },
+    {
+      "name": "f1-jvm-ffm",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/c1.jar",
+        "--bus",
+        "ffm",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 11.4
+    },
+    {
+      "name": "f1-jvm-directbuffer",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/c1.jar",
+        "--bus",
+        "directbuffer",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 11.2
+    },
+    {
+      "name": "f1-jvm-heapbuffer",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/c1.jar",
+        "--bus",
+        "heapbuffer",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 11.1
+    },
+    {
+      "name": "f1-jvm-wrapper",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/c1.jar",
+        "--bus",
+        "wrapper",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 11.3
+    },
+    {
+      "name": "f1-jvm-mmio",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/c1.jar",
+        "--bus",
+        "mmio",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 12.2
+    },
+    {
+      "name": "f1-jvm-router",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/c1.jar",
+        "--bus",
+        "router",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 11.5
+    },
+    {
+      "name": "f1-poly-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c1/poly",
+        "--bus",
+        "bytearray",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 12.4
+    },
+    {
+      "name": "f1-poly-varhandle",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c1/poly",
+        "--bus",
+        "varhandle",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 12.9
+    },
+    {
+      "name": "f1-poly-heapsegment",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c1/poly",
+        "--bus",
+        "heapsegment",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 31.1
+    },
+    {
+      "name": "f1-poly-ffm",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c1/poly",
+        "--bus",
+        "ffm",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 32.3
+    },
+    {
+      "name": "f1-poly-directbuffer",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c1/poly",
+        "--bus",
+        "directbuffer",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 12.8
+    },
+    {
+      "name": "f1-poly-heapbuffer",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c1/poly",
+        "--bus",
+        "heapbuffer",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 12.8
+    },
+    {
+      "name": "f1-poly-wrapper",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c1/poly",
+        "--bus",
+        "wrapper",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 12.5
+    },
+    {
+      "name": "f1-poly-mmio",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c1/poly",
+        "--bus",
+        "mmio",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 14.1
+    },
+    {
+      "name": "f1-poly-router",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c1/poly",
+        "--bus",
+        "router",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 13.4
+    },
+    {
+      "name": "f1-mono-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c1/mono-bytearray",
+        "--bus",
+        "bytearray",
+        "--label",
+        "mono",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 12.5
+    },
+    {
+      "name": "f1-mono-ffm",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c1/mono-ffm",
+        "--bus",
+        "ffm",
+        "--label",
+        "mono",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 28.4
+    },
+    {
+      "name": "f1-mono-directbuffer",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c1/mono-directbuffer",
+        "--bus",
+        "directbuffer",
+        "--label",
+        "mono",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 12.1
+    },
+    {
+      "name": "f1-mono-router",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c1/mono-router",
+        "--bus",
+        "router",
+        "--label",
+        "mono",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 13.2
+    },
+    {
+      "name": "f2-mono-router",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c1/mono-router",
+        "--bus",
+        "router",
+        "--label",
+        "mono",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 13.2
+    },
+    {
+      "name": "f2-mono-directbuffer",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c1/mono-directbuffer",
+        "--bus",
+        "directbuffer",
+        "--label",
+        "mono",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 12.1
+    },
+    {
+      "name": "f2-mono-ffm",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c1/mono-ffm",
+        "--bus",
+        "ffm",
+        "--label",
+        "mono",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 28.5
+    },
+    {
+      "name": "f2-mono-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c1/mono-bytearray",
+        "--bus",
+        "bytearray",
+        "--label",
+        "mono",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 12.5
+    },
+    {
+      "name": "f2-poly-router",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c1/poly",
+        "--bus",
+        "router",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 13.4
+    },
+    {
+      "name": "f2-poly-mmio",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c1/poly",
+        "--bus",
+        "mmio",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 14.1
+    },
+    {
+      "name": "f2-poly-wrapper",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c1/poly",
+        "--bus",
+        "wrapper",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 12.6
+    },
+    {
+      "name": "f2-poly-heapbuffer",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c1/poly",
+        "--bus",
+        "heapbuffer",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 12.8
+    },
+    {
+      "name": "f2-poly-directbuffer",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c1/poly",
+        "--bus",
+        "directbuffer",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 12.8
+    },
+    {
+      "name": "f2-poly-ffm",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c1/poly",
+        "--bus",
+        "ffm",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 32.4
+    },
+    {
+      "name": "f2-poly-heapsegment",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c1/poly",
+        "--bus",
+        "heapsegment",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 31.2
+    },
+    {
+      "name": "f2-poly-varhandle",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c1/poly",
+        "--bus",
+        "varhandle",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 13.0
+    },
+    {
+      "name": "f2-poly-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-c1/poly",
+        "--bus",
+        "bytearray",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 12.4
+    },
+    {
+      "name": "f2-jvm-router",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/c1.jar",
+        "--bus",
+        "router",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 11.5
+    },
+    {
+      "name": "f2-jvm-mmio",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/c1.jar",
+        "--bus",
+        "mmio",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 12.0
+    },
+    {
+      "name": "f2-jvm-wrapper",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/c1.jar",
+        "--bus",
+        "wrapper",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 11.4
+    },
+    {
+      "name": "f2-jvm-heapbuffer",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/c1.jar",
+        "--bus",
+        "heapbuffer",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 11.2
+    },
+    {
+      "name": "f2-jvm-directbuffer",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/c1.jar",
+        "--bus",
+        "directbuffer",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 11.1
+    },
+    {
+      "name": "f2-jvm-ffm",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/c1.jar",
+        "--bus",
+        "ffm",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 11.5
+    },
+    {
+      "name": "f2-jvm-heapsegment",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/c1.jar",
+        "--bus",
+        "heapsegment",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 11.2
+    },
+    {
+      "name": "f2-jvm-varhandle",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/c1.jar",
+        "--bus",
+        "varhandle",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 11.1
+    },
+    {
+      "name": "f2-jvm-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/c1.jar",
+        "--bus",
+        "bytearray",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 11.3
+    }
+  ],
+  "finished": "2026-10-10T01:12:09-0700",
+  "complete": true
+}

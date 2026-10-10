@@ -16,7 +16,8 @@
 
     <name>RV32IMA Emulator (parent)</name>
     <description>Platform-agnostic RISC-V RV32IMA emulator for Java 25 — a port of cnlohr's mini-rv32ima.
-        Multi-module build: rv32emu-core (the library) and rv32emu-cli (a reference runner).</description>
+        Multi-module build: rv32emu-core (the library), rv32emu-cli (a reference runner) and
+        rv32emu-bench (an unpublished throughput harness).</description>
     <url>https://github.com/AlienSpaceBunny/rv32ima-java</url>
     <inceptionYear>2025</inceptionYear>
 
@@ -39,6 +40,7 @@
     <modules>
         <module>core</module>
         <module>cli</module>
+        <module>bench</module>
     </modules>
 
     <scm>
@@ -57,7 +59,7 @@
     <build>
         <!-- Maven Central (-Pcentral-release, profile inherited from alienspacebunny-parent):
              only rv32emu-core and this parent POM are published; the CLI fat jar goes to a
-             GitHub Release instead (RELEASE_TODO.md). -->
+             GitHub Release instead (RELEASE_TODO.md). rv32emu-bench is never published. -->
         <pluginManagement>
             <plugins>
                 <plugin>
@@ -66,6 +68,7 @@
                     <configuration>
                         <excludeArtifacts>
                             <excludeArtifact>rv32emu-cli</excludeArtifact>
+                            <excludeArtifact>rv32emu-bench</excludeArtifact>
                         </excludeArtifacts>
                     </configuration>
                 </plugin>
@@ -132,7 +135,7 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-release-plugin</artifactId>
                 <configuration>
-                    <!-- All 3 poms share one version; don't prompt separately per module. -->
+                    <!-- All poms share one version; don't prompt separately per module. -->
                     <autoVersionSubmodules>true</autoVersionSubmodules>
                     <tagNameFormat>v@{project.version}</tagNameFormat>
                     <!-- Commit + tag locally only; pushing is a separate, explicit step.

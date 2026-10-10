@@ -111,6 +111,12 @@ for how this file is updated as part of cutting a release.
   requires an override to permission-check before returning a failure code and to consume
   its reservation entry before throwing.
 
+- Unpublished `bench` module (`rv32emu-bench`, never deployed): a JVM/Native Image throughput
+  harness with self-verifying guest workloads generated in Java, bench-only `MemoryBus`
+  backends that size backend costs for embedders (the core stays backend-agnostic), polymorphic
+  and closed-world native entry points, and a pinned, reversed-order matrix runner. See
+  `bench/README.md` and `docs/performance/2026-10-10/`.
+
 ### Changed
 - POM `<url>`/`<scm>` now point at `github.com/AlienSpaceBunny/rv32ima-java` (was `nkedel`).
   Release preparation re-formats POMs (`spotless:apply`) after the release plugin rewrites

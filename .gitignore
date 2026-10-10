@@ -1,4 +1,6 @@
 target/
+# Bench jars, native images and timing output (kept outside target/ so `clean` keeps them)
+bench/out/
 !.mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/

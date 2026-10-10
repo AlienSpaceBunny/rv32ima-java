@@ -167,6 +167,11 @@ for how this file is updated as part of cutting a release.
   ALU path no longer evaluates the bitmanip classification. Measured: guest workloads 13–37%
   faster under Native Image and 12–27% on HotSpot, FP neutral to slightly faster.
 
+- `RV32IMACore` executes the F (FLW/FSW, FMA family, OP-FP) and A/Zabha arms in private helper
+  methods returning a packed result, keeping them out of `step()`'s hot loop. Semantics are
+  unchanged. Measured beyond the ALU-decode change: Native Image 2–9% faster, HotSpot 2–18%,
+  FP loop neutral, the AMO-heavy loop within ±3%.
+
 ### Removed
 - Dead `MemoryBus.readIntSigned` default method (never called; `LW` uses `readInt`
   directly).

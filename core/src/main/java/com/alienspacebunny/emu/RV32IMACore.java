@@ -1062,6 +1062,314 @@ public class RV32IMACore {
         }
     }
 
+    // ---- Cold opcode groups (F and A) -------------------------------------------------------
+    //
+    // executeColdOpcode holds the FLW/FSW, FMA-family, OP-FP and RV32A arms, which the hot
+    // integer loop in step() rarely executes. Keeping them out of step()'s loop body matters
+    // for ahead-of-time compilation (Native Image), which has no runtime profile to tell it
+    // these arms are cold: inside the loop they enlarge the code the register allocator and
+    // inliner must budget for on every iteration. The result is packed into a long so no
+    // object is allocated: bits 31-0 are rval (the integer result, or mtval for a trap),
+    // bits 61-32 the "+1"-encoded trap (0 = none), and bit 62 says whether rval is written to
+    // the integer destination register (most F instructions write an FP register instead).
+
+    private static final long COLD_WRITES_RD = 1L << 62;
+    private static final long COLD_TRAP_MASK = 0x3fffffffL;
+
+    /** A completed instruction whose integer destination register receives {@code rval}. */
+    private static long coldIntResult(int rval) {
+        return COLD_WRITES_RD | Integer.toUnsignedLong(rval);
+    }
+
+    /** A completed instruction that writes no integer register. */
+    private static final long COLD_NO_INT_RESULT = 0L;
+
+    /** A synchronous exception with {@code cause}; {@code rval} becomes {@code mtval} unless illegal. */
+    private static long coldTrap(int cause, int rval) {
+        return ((long) exceptionTrap(cause) << 32) | Integer.toUnsignedLong(rval);
+    }
+
+    private static final long COLD_ILLEGAL = coldTrap(EXC_ILLEGAL_INSTRUCTION, 0);
+
+    /**
+     * Executes one FLW/FSW, FMA-family, OP-FP or RV32A instruction. Semantics are exactly those of
+     * the corresponding arms of {@link #step}'s opcode switch; see the packing note above.
+     */
+    private long executeColdOpcode(RV32IMAState state, MemoryBus mem, int ir, int opcode, int rdid, int privilege) {
+        switch (opcode) {
+            case 0x07: // FLW
+            {
+                if (!isaConfig.hasF() || ((ir >> 12) & 0x7) != 2) {
+                    return COLD_ILLEGAL;
+                }
+                int rs1 = state.regs[(ir >> 15) & 0x1f];
+                int imm = ir >>> 20;
+                int immSext = imm | (((imm & 0x800) != 0) ? 0xfffff000 : 0);
+                int addr = rs1 + immSext;
+                try {
+                    int bits = mem.readInt(addr, new AccessContext(state.hartId, privilege, AccessKind.LOAD, 4, 0));
+                    writeFReg(state, rdid, bits);
+                } catch (IndexOutOfBoundsException _) {
+                    return coldTrap(EXC_LOAD_ACCESS_FAULT, addr);
+                }
+                return COLD_NO_INT_RESULT;
+            }
+            case 0x27: // FSW
+            {
+                if (!isaConfig.hasF() || ((ir >> 12) & 0x7) != 2) {
+                    return COLD_ILLEGAL;
+                }
+                int rs1 = state.regs[(ir >> 15) & 0x1f];
+                int fSrcBits = readFReg(state, (ir >> 20) & 0x1f);
+                int imm = ((ir >> 7) & 0x1f) | ((ir & 0xfe000000) >> 20);
+                if ((imm & 0x800) != 0) imm |= 0xfffff000;
+                int addr = rs1 + imm;
+                try {
+                    mem.writeInt(addr, fSrcBits, new AccessContext(state.hartId, privilege, AccessKind.STORE, 4, 0));
+                    state.reservationValid = false;
+                } catch (IndexOutOfBoundsException _) {
+                    return coldTrap(EXC_STORE_ACCESS_FAULT, addr);
+                }
+                return COLD_NO_INT_RESULT;
+            }
+            case 0x43: // FMADD.S
+            case 0x47: // FMSUB.S
+            case 0x4B: // FNMSUB.S
+            case 0x4F: // FNMADD.S
+            {
+                // bits 26:25 are the fmt field (00=S, 01=D, 10=H, 11=Q); D/H/Q are not
+                // implemented, so anything but S traps illegal-instruction below.
+                if (!isaConfig.hasF() || ((ir >>> 25) & 0x3) != 0) {
+                    return COLD_ILLEGAL;
+                }
+                int fmaRs1 = (ir >> 15) & 0x1f;
+                int fmaRs2 = (ir >> 20) & 0x1f;
+                int fmaRs3 = (ir >>> 27) & 0x1f;
+                int rm = resolveRoundingMode(state, (ir >> 12) & 0x7);
+                if (rm < 0) {
+                    return COLD_ILLEGAL;
+                }
+                boolean negA = opcode == 0x4B || opcode == 0x4F; // FNMSUB / FNMADD
+                boolean negC = opcode == 0x47 || opcode == 0x4F; // FMSUB / FNMADD
+                int result = fmaS(
+                        state,
+                        readFReg(state, fmaRs1),
+                        readFReg(state, fmaRs2),
+                        readFReg(state, fmaRs3),
+                        negA,
+                        negC,
+                        rm);
+                writeFReg(state, rdid, result);
+                return COLD_NO_INT_RESULT;
+            }
+            case 0x53: // OP-FP
+                return executeOpFp(state, ir, rdid);
+            default: // 0x2f: RV32A
+                return executeAtomic(state, mem, ir, privilege);
+        }
+    }
+
+    /** OP-FP (opcode 0x53): see {@link #executeColdOpcode}. */
+    private long executeOpFp(RV32IMAState state, int ir, int fRd) {
+        if (!isaConfig.hasF()) {
+            return COLD_ILLEGAL;
+        }
+        // funct7 bits 26:25 are the "fmt" field (00=S, 01=D, 10=H, 11=Q); every funct7 case below
+        // has fmt=00, so the exact match already rejects the D/Q-format encodings of these same
+        // operations without a separate check.
+        int funct7 = (ir >>> 25) & 0x7f;
+        int fFunct3 = (ir >> 12) & 0x7;
+        int fRs1 = (ir >> 15) & 0x1f;
+        int fRs2 = (ir >> 20) & 0x1f;
+        int aBits = readFReg(state, fRs1);
+        int bBits = readFReg(state, fRs2);
+
+        switch (funct7) {
+            case 0x00: // FADD.S
+            case 0x04: // FSUB.S
+            case 0x08: // FMUL.S
+            case 0x0C: // FDIV.S
+            {
+                int rm = resolveRoundingMode(state, fFunct3);
+                if (rm < 0) {
+                    return COLD_ILLEGAL;
+                }
+                int result = switch (funct7) {
+                    case 0x00 -> fAddSubS(state, aBits, bBits, false, rm);
+                    case 0x04 -> fAddSubS(state, aBits, bBits, true, rm);
+                    case 0x08 -> fMulS(state, aBits, bBits, rm);
+                    default -> fDivS(state, aBits, bBits, rm); // 0x0C
+                };
+                writeFReg(state, fRd, result);
+                return COLD_NO_INT_RESULT;
+            }
+            case 0x2C: // FSQRT.S -- fRs2 must be 0 (fixed operand slot, unused)
+            {
+                if (fRs2 != 0) {
+                    return COLD_ILLEGAL;
+                }
+                int sqrtRm = resolveRoundingMode(state, fFunct3);
+                if (sqrtRm < 0) {
+                    return COLD_ILLEGAL;
+                }
+                writeFReg(state, fRd, fSqrtS(state, aBits, sqrtRm));
+                return COLD_NO_INT_RESULT;
+            }
+            case 0x60: // FCVT.W.S / FCVT.WU.S -- integer destination
+            {
+                if (fRs2 > 1) {
+                    return COLD_ILLEGAL; // 2/3: RV64 forms
+                }
+                int cvtWRm = resolveRoundingMode(state, fFunct3);
+                if (cvtWRm < 0) {
+                    return COLD_ILLEGAL;
+                }
+                return coldIntResult(fcvtWS(state, aBits, fRs2 == 1, cvtWRm));
+            }
+            case 0x68: // FCVT.S.W / FCVT.S.WU -- fRs1 is an INTEGER register
+            {
+                if (fRs2 > 1) {
+                    return COLD_ILLEGAL; // 2/3: RV64 forms
+                }
+                int cvtSRm = resolveRoundingMode(state, fFunct3);
+                if (cvtSRm < 0) {
+                    return COLD_ILLEGAL;
+                }
+                writeFReg(state, fRd, fcvtSW(state, state.regs[fRs1], fRs2 == 1, cvtSRm));
+                return COLD_NO_INT_RESULT;
+            }
+            case 0x10: // FSGNJ.S / FSGNJN.S / FSGNJX.S
+                switch (fFunct3) {
+                    case 0:
+                        writeFReg(state, fRd, (bBits & 0x80000000) | (aBits & 0x7fffffff));
+                        return COLD_NO_INT_RESULT;
+                    case 1:
+                        writeFReg(state, fRd, (~bBits & 0x80000000) | (aBits & 0x7fffffff));
+                        return COLD_NO_INT_RESULT;
+                    case 2:
+                        writeFReg(state, fRd, ((aBits ^ bBits) & 0x80000000) | (aBits & 0x7fffffff));
+                        return COLD_NO_INT_RESULT;
+                    default:
+                        return COLD_ILLEGAL;
+                }
+            case 0x14: // FMIN.S / FMAX.S
+                switch (fFunct3) {
+                    case 0:
+                        writeFReg(state, fRd, fMinMaxS(state, aBits, bBits, false));
+                        return COLD_NO_INT_RESULT;
+                    case 1:
+                        writeFReg(state, fRd, fMinMaxS(state, aBits, bBits, true));
+                        return COLD_NO_INT_RESULT;
+                    default:
+                        return COLD_ILLEGAL;
+                }
+            case 0x50: // FLE.S / FLT.S / FEQ.S -- integer destination
+                return switch (fFunct3) {
+                    case 0 -> coldIntResult(fCompareS(state, aBits, bBits, true));
+                    case 1 -> coldIntResult(fCompareS(state, aBits, bBits, false));
+                    case 2 -> coldIntResult(fEqS(state, aBits, bBits));
+                    default -> COLD_ILLEGAL;
+                };
+            case 0x70: // FMV.X.W / FCLASS.S -- integer destination
+                if (fRs2 != 0) {
+                    return COLD_ILLEGAL;
+                }
+                return switch (fFunct3) {
+                    case 0 -> coldIntResult(aBits); // FMV.X.W
+                    case 1 -> coldIntResult(fclassS(aBits)); // FCLASS.S
+                    default -> COLD_ILLEGAL;
+                };
+            case 0x78: // FMV.W.X -- rs1 is an INTEGER register here, not FP
+                if (fRs2 != 0 || fFunct3 != 0) {
+                    return COLD_ILLEGAL;
+                }
+                writeFReg(state, fRd, state.regs[fRs1]);
+                return COLD_NO_INT_RESULT;
+            default:
+                return COLD_ILLEGAL;
+        }
+    }
+
+    /** RV32A and Zabha (opcode 0x2f): see {@link #executeColdOpcode}. */
+    private long executeAtomic(RV32IMAState state, MemoryBus mem, int ir, int privilege) {
+        int rs1 = state.regs[(ir >> 15) & 0x1f];
+        int rs2 = state.regs[(ir >> 20) & 0x1f];
+        int irmid = (ir >> 27) & 0x1f;
+        int funct3 = (ir >> 12) & 7;
+
+        boolean validAtomicOperation = switch (irmid) {
+            case 0, 1, 2, 3, 4, 8, 12, 16, 20, 24, 28 -> true;
+            default -> false;
+        };
+        boolean isWordWidth = funct3 == 2;
+        boolean isSubWordWidth = isaConfig.hasZabha() && (funct3 == 0 || funct3 == 1);
+        // Zabha omits byte/halfword LR.W/SC.W (irmid 2, 3) -- only the nine RMW ops get sub-word
+        // width.
+        boolean subWordOperationAllowed = isSubWordWidth && irmid != 2 && irmid != 3;
+        if (!validAtomicOperation || !(isWordWidth || subWordOperationAllowed)) {
+            return COLD_ILLEGAL;
+        }
+
+        if (irmid == 2 && ((ir >> 20) & 0x1f) != 0) {
+            // LR.W's rs2 field is reserved and must be zero.
+            return COLD_ILLEGAL;
+        }
+
+        int width = isWordWidth ? 4 : (funct3 == 1 ? 2 : 1);
+        // Every LR.W/SC.W attempt consumes the hart's local reservation, whether it goes on to
+        // succeed, fail, or trap (misaligned below, or a bus fault in the switch). Decide SC's local
+        // validity first, then clear, so no exit path -- including the alignment trap -- can leave a
+        // stale reservation that a later SC without a fresh LR could consume.
+        boolean scLocallyValid = irmid == 3 && state.reservationValid && state.reservationAddr == rs1;
+        if (irmid == 2 || irmid == 3) {
+            state.reservationValid = false;
+        }
+        // LR/SC and AMOs must be naturally aligned to their width (the misaligned atomicity granule
+        // PMA is not modelled). Checked before any bus call so a misaligned atomic never reaches the
+        // bus, whose atomicRmw/tryScAndStore contract promises aligned addresses. Ordinary loads and
+        // stores keep their misaligned tolerance; only atomics trap here.
+        if ((rs1 & (width - 1)) != 0) {
+            return coldTrap(irmid == 2 ? EXC_LOAD_MISALIGNED : EXC_STORE_MISALIGNED, rs1);
+        }
+        // irmid is the funct5 encoding; also AccessContext.atomicOp. LR.W is irmid 2 -- a multi-hart
+        // bus detects it via ctx.kind() == AMO && ctx.atomicOp() == 2 on this readInt override, per
+        // AccessContext's Javadoc.
+        AccessContext amoCtx = new AccessContext(state.hartId, privilege, AccessKind.AMO, width, irmid);
+        try {
+            switch (irmid) {
+                case 2: // LR.W
+                {
+                    // The previous reservation was already dropped above; a successful read
+                    // establishes the new one. A faulting read leaves none.
+                    int value = mem.readInt(rs1, amoCtx);
+                    state.reservationAddr = rs1;
+                    state.reservationValid = true;
+                    return coldIntResult(value);
+                }
+                case 3: // SC.W
+                    // The local reservation was consumed above, before the bus is consulted, so a
+                    // thrown access fault cannot skip the clear.
+                    if (scLocallyValid) {
+                        // Local fast-path pre-check passed (Design Decision §5); the bus still makes
+                        // the final atomic decision -- it may reject even though the local state
+                        // says valid, if a cross-hart invalidation landed between this hart's LR and
+                        // SC.
+                        return coldIntResult(mem.tryScAndStore(state.hartId, rs1, rs2, amoCtx));
+                    }
+                    // Locally failed SC: no store happens, but the spec still requires the SC to
+                    // pass memory permission checks before it retires, so the bus gets a
+                    // side-effect-free probe that may throw (-> store/AMO access fault) instead of a
+                    // write.
+                    mem.checkAccess(rs1, amoCtx);
+                    return coldIntResult(1);
+                default: // the 9 validated non-LR/SC AMOs (ADD/SWAP/XOR/AND/OR/MIN[U]/MAX[U])
+                    return coldIntResult(mem.atomicRmw(rs1, irmid, rs2, amoCtx));
+            }
+        } catch (IndexOutOfBoundsException _) {
+            return coldTrap(irmid == 2 ? EXC_LOAD_ACCESS_FAULT : EXC_STORE_ACCESS_FAULT, rs1);
+        }
+    }
+
     /**
      * Executes up to {@code count} instructions on the given hart.
      *
@@ -1291,29 +1599,6 @@ public class RV32IMACore {
                             }
                             break;
                         }
-                        case 0x07: // FLW
-                        {
-                            if (!isaConfig.hasF() || ((ir >> 12) & 0x7) != 2) {
-                                trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
-                                break;
-                            }
-                            int rs1 = state.regs[(ir >> 15) & 0x1f];
-                            int imm = ir >>> 20;
-                            int immSext = imm | (((imm & 0x800) != 0) ? 0xfffff000 : 0);
-                            int addr = rs1 + immSext;
-                            int fRd = rdid;
-                            rdid = 0;
-
-                            try {
-                                int bits = mem.readInt(
-                                        addr, new AccessContext(state.hartId, privilege, AccessKind.LOAD, 4, 0));
-                                writeFReg(state, fRd, bits);
-                            } catch (IndexOutOfBoundsException _) {
-                                trap = exceptionTrap(EXC_LOAD_ACCESS_FAULT);
-                                rval = addr;
-                            }
-                            break;
-                        }
                         case 0x03: // Load
                         {
                             int rs1 = state.regs[(ir >> 15) & 0x1f];
@@ -1360,31 +1645,6 @@ public class RV32IMACore {
                                 rval = addr;
                             }
                             // Note: C code had some MMIO checks here, but our MemoryBus handles it via MMIOBus
-                            break;
-                        }
-                        case 0x27: // FSW
-                        {
-                            if (!isaConfig.hasF() || ((ir >> 12) & 0x7) != 2) {
-                                trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
-                                break;
-                            }
-                            int rs1 = state.regs[(ir >> 15) & 0x1f];
-                            int fSrcBits = readFReg(state, (ir >> 20) & 0x1f);
-                            int imm = ((ir >> 7) & 0x1f) | ((ir & 0xfe000000) >> 20);
-                            if ((imm & 0x800) != 0) imm |= 0xfffff000;
-                            int addr = rs1 + imm;
-                            rdid = 0;
-
-                            try {
-                                mem.writeInt(
-                                        addr,
-                                        fSrcBits,
-                                        new AccessContext(state.hartId, privilege, AccessKind.STORE, 4, 0));
-                                state.reservationValid = false;
-                            } catch (IndexOutOfBoundsException _) {
-                                trap = exceptionTrap(EXC_STORE_ACCESS_FAULT);
-                                rval = addr;
-                            }
                             break;
                         }
                         case 0x23: // Store
@@ -1554,190 +1814,6 @@ public class RV32IMACore {
                         case 0x0f: // FENCE
                             rdid = 0;
                             break;
-                        case 0x43: // FMADD.S
-                        case 0x47: // FMSUB.S
-                        case 0x4B: // FNMSUB.S
-                        case 0x4F: // FNMADD.S
-                        {
-                            // bits 26:25 are the fmt field (00=S, 01=D, 10=H, 11=Q); D/H/Q are not
-                            // implemented, so anything but S traps illegal-instruction below.
-                            if (!isaConfig.hasF() || ((ir >>> 25) & 0x3) != 0) {
-                                trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
-                                break;
-                            }
-                            int fmaRs1 = (ir >> 15) & 0x1f;
-                            int fmaRs2 = (ir >> 20) & 0x1f;
-                            int fmaRs3 = (ir >>> 27) & 0x1f;
-                            int rm = resolveRoundingMode(state, (ir >> 12) & 0x7);
-                            if (rm < 0) {
-                                trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
-                                break;
-                            }
-                            int fRd = rdid;
-                            rdid = 0;
-                            boolean negA = opcode == 0x4B || opcode == 0x4F; // FNMSUB / FNMADD
-                            boolean negC = opcode == 0x47 || opcode == 0x4F; // FMSUB / FNMADD
-                            int result = fmaS(
-                                    state,
-                                    readFReg(state, fmaRs1),
-                                    readFReg(state, fmaRs2),
-                                    readFReg(state, fmaRs3),
-                                    negA,
-                                    negC,
-                                    rm);
-                            writeFReg(state, fRd, result);
-                            break;
-                        }
-                        case 0x53: // OP-FP (Phase 5a subset; rounding-mode-dependent ops are Phase 5b)
-                        {
-                            if (!isaConfig.hasF()) {
-                                trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
-                                break;
-                            }
-                            // funct7 bits 26:25 are the "fmt" field (00=S, 01=D, 10=H, 11=Q); every
-                            // funct7 case below has fmt=00, so the exact match already rejects the
-                            // D/Q-format encodings of these same operations without a separate check.
-                            int funct7 = (ir >>> 25) & 0x7f;
-                            int fFunct3 = (ir >> 12) & 0x7;
-                            int fRs1 = (ir >> 15) & 0x1f;
-                            int fRs2 = (ir >> 20) & 0x1f;
-                            int fRd = rdid;
-                            int aBits = readFReg(state, fRs1);
-                            int bBits = readFReg(state, fRs2);
-
-                            switch (funct7) {
-                                case 0x00: // FADD.S
-                                case 0x04: // FSUB.S
-                                case 0x08: // FMUL.S
-                                case 0x0C: // FDIV.S
-                                {
-                                    int rm = resolveRoundingMode(state, fFunct3);
-                                    if (rm < 0) {
-                                        trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
-                                        break;
-                                    }
-                                    rdid = 0;
-                                    int result = switch (funct7) {
-                                        case 0x00 -> fAddSubS(state, aBits, bBits, false, rm);
-                                        case 0x04 -> fAddSubS(state, aBits, bBits, true, rm);
-                                        case 0x08 -> fMulS(state, aBits, bBits, rm);
-                                        default -> fDivS(state, aBits, bBits, rm); // 0x0C
-                                    };
-                                    writeFReg(state, fRd, result);
-                                    break;
-                                }
-                                case 0x2C: // FSQRT.S -- fRs2 must be 0 (fixed operand slot, unused)
-                                    if (fRs2 != 0) {
-                                        trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
-                                        break;
-                                    }
-                                    int sqrtRm = resolveRoundingMode(state, fFunct3);
-                                    if (sqrtRm < 0) {
-                                        trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
-                                        break;
-                                    }
-                                    rdid = 0;
-                                    writeFReg(state, fRd, fSqrtS(state, aBits, sqrtRm));
-                                    break;
-                                case 0x60: // FCVT.W.S / FCVT.WU.S -- integer destination
-                                    if (fRs2 > 1) {
-                                        trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION); // 2/3: RV64 forms
-                                        break;
-                                    }
-                                    int cvtWRm = resolveRoundingMode(state, fFunct3);
-                                    if (cvtWRm < 0) {
-                                        trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
-                                        break;
-                                    }
-                                    rval = fcvtWS(state, aBits, fRs2 == 1, cvtWRm);
-                                    break;
-                                case 0x68: // FCVT.S.W / FCVT.S.WU -- fRs1 is an INTEGER register
-                                    if (fRs2 > 1) {
-                                        trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION); // 2/3: RV64 forms
-                                        break;
-                                    }
-                                    int cvtSRm = resolveRoundingMode(state, fFunct3);
-                                    if (cvtSRm < 0) {
-                                        trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
-                                        break;
-                                    }
-                                    rdid = 0;
-                                    writeFReg(state, fRd, fcvtSW(state, state.regs[fRs1], fRs2 == 1, cvtSRm));
-                                    break;
-                                case 0x10: // FSGNJ.S / FSGNJN.S / FSGNJX.S
-                                    rdid = 0;
-                                    switch (fFunct3) {
-                                        case 0:
-                                            writeFReg(state, fRd, (bBits & 0x80000000) | (aBits & 0x7fffffff));
-                                            break;
-                                        case 1:
-                                            writeFReg(state, fRd, (~bBits & 0x80000000) | (aBits & 0x7fffffff));
-                                            break;
-                                        case 2:
-                                            writeFReg(
-                                                    state, fRd, ((aBits ^ bBits) & 0x80000000) | (aBits & 0x7fffffff));
-                                            break;
-                                        default:
-                                            trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
-                                    }
-                                    break;
-                                case 0x14: // FMIN.S / FMAX.S
-                                    rdid = 0;
-                                    switch (fFunct3) {
-                                        case 0:
-                                            writeFReg(state, fRd, fMinMaxS(state, aBits, bBits, false));
-                                            break;
-                                        case 1:
-                                            writeFReg(state, fRd, fMinMaxS(state, aBits, bBits, true));
-                                            break;
-                                        default:
-                                            trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
-                                    }
-                                    break;
-                                case 0x50: // FLE.S / FLT.S / FEQ.S -- integer destination
-                                    switch (fFunct3) {
-                                        case 0:
-                                            rval = fCompareS(state, aBits, bBits, true);
-                                            break;
-                                        case 1:
-                                            rval = fCompareS(state, aBits, bBits, false);
-                                            break;
-                                        case 2:
-                                            rval = fEqS(state, aBits, bBits);
-                                            break;
-                                        default:
-                                            trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
-                                    }
-                                    break;
-                                case 0x70: // FMV.X.W / FCLASS.S -- integer destination
-                                    if (fRs2 != 0) {
-                                        trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
-                                        break;
-                                    }
-                                    switch (fFunct3) {
-                                        case 0:
-                                            rval = aBits;
-                                            break; // FMV.X.W
-                                        case 1:
-                                            rval = fclassS(aBits);
-                                            break; // FCLASS.S
-                                        default:
-                                            trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
-                                    }
-                                    break;
-                                case 0x78: // FMV.W.X -- rs1 is an INTEGER register here, not FP
-                                    if (fRs2 != 0 || fFunct3 != 0) {
-                                        trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
-                                        break;
-                                    }
-                                    rdid = 0;
-                                    writeFReg(state, fRd, state.regs[fRs1]);
-                                    break;
-                                default:
-                                    trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
-                            }
-                            break;
-                        }
                         case 0x73: // SYSTEM
                         {
                             int csrno = ir >>> 20;
@@ -1849,96 +1925,21 @@ public class RV32IMACore {
                             }
                             break;
                         }
+                        case 0x07: // FLW
+                        case 0x27: // FSW
+                        case 0x43: // FMADD.S
+                        case 0x47: // FMSUB.S
+                        case 0x4B: // FNMSUB.S
+                        case 0x4F: // FNMADD.S
+                        case 0x53: // OP-FP
                         case 0x2f: // RV32A
                         {
-                            int rs1 = state.regs[(ir >> 15) & 0x1f];
-                            int rs2 = state.regs[(ir >> 20) & 0x1f];
-                            int irmid = (ir >> 27) & 0x1f;
-                            int funct3 = (ir >> 12) & 7;
-
-                            boolean validAtomicOperation = switch (irmid) {
-                                case 0, 1, 2, 3, 4, 8, 12, 16, 20, 24, 28 -> true;
-                                default -> false;
-                            };
-                            boolean isWordWidth = funct3 == 2;
-                            boolean isSubWordWidth = isaConfig.hasZabha() && (funct3 == 0 || funct3 == 1);
-                            // Zabha omits byte/halfword LR.W/SC.W (irmid 2, 3) -- only the nine RMW ops
-                            // get sub-word width.
-                            boolean subWordOperationAllowed = isSubWordWidth && irmid != 2 && irmid != 3;
-                            if (!validAtomicOperation || !(isWordWidth || subWordOperationAllowed)) {
-                                trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
-                                break;
-                            }
-
-                            if (irmid == 2 && ((ir >> 20) & 0x1f) != 0) {
-                                // LR.W's rs2 field is reserved and must be zero.
-                                trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
-                                break;
-                            }
-
-                            int width = isWordWidth ? 4 : (funct3 == 1 ? 2 : 1);
-                            // Every LR.W/SC.W attempt consumes the hart's local reservation, whether it
-                            // goes on to succeed, fail, or trap (misaligned below, or a bus fault in
-                            // the switch). Decide SC's local validity first, then clear, so no exit
-                            // path -- including the alignment trap -- can leave a stale reservation
-                            // that a later SC without a fresh LR could consume.
-                            boolean scLocallyValid =
-                                    irmid == 3 && state.reservationValid && state.reservationAddr == rs1;
-                            if (irmid == 2 || irmid == 3) {
-                                state.reservationValid = false;
-                            }
-                            // LR/SC and AMOs must be naturally aligned to their width (the misaligned
-                            // atomicity granule PMA is not modelled). Checked before any bus call so a
-                            // misaligned atomic never reaches the bus, whose atomicRmw/tryScAndStore
-                            // contract promises aligned addresses. Ordinary loads and stores keep
-                            // their misaligned tolerance; only atomics trap here.
-                            if ((rs1 & (width - 1)) != 0) {
-                                trap = exceptionTrap(irmid == 2 ? EXC_LOAD_MISALIGNED : EXC_STORE_MISALIGNED);
-                                rval = rs1;
-                                break;
-                            }
-                            int accessFaultTrap =
-                                    exceptionTrap(irmid == 2 ? EXC_LOAD_ACCESS_FAULT : EXC_STORE_ACCESS_FAULT);
-                            // irmid is the funct5 encoding; also AccessContext.atomicOp. LR.W is irmid 2 --
-                            // a multi-hart bus detects it via ctx.kind() == AMO && ctx.atomicOp() == 2 on
-                            // this readInt override, per AccessContext's Javadoc.
-                            AccessContext amoCtx =
-                                    new AccessContext(state.hartId, privilege, AccessKind.AMO, width, irmid);
-                            try {
-                                switch (irmid) {
-                                    case 2: // LR.W
-                                        // The previous reservation was already dropped above; a
-                                        // successful read establishes the new one. A faulting read
-                                        // leaves none.
-                                        rval = mem.readInt(rs1, amoCtx);
-                                        state.reservationAddr = rs1;
-                                        state.reservationValid = true;
-                                        break;
-                                    case 3: // SC.W
-                                        // The local reservation was consumed above, before the bus is
-                                        // consulted, so a thrown access fault cannot skip the clear.
-                                        if (scLocallyValid) {
-                                            // Local fast-path pre-check passed (Design Decision §5); the bus
-                                            // still makes the final atomic decision -- it may reject even
-                                            // though the local state says valid, if a cross-hart
-                                            // invalidation landed between this hart's LR and SC.
-                                            rval = mem.tryScAndStore(state.hartId, rs1, rs2, amoCtx);
-                                        } else {
-                                            // Locally failed SC: no store happens, but the spec still
-                                            // requires the SC to pass memory permission checks before it
-                                            // retires, so the bus gets a side-effect-free probe that may
-                                            // throw (-> store/AMO access fault) instead of a write.
-                                            mem.checkAccess(rs1, amoCtx);
-                                            rval = 1;
-                                        }
-                                        break;
-                                    default: // the 9 validated non-LR/SC AMOs (ADD/SWAP/XOR/AND/OR/MIN[U]/MAX[U])
-                                        rval = mem.atomicRmw(rs1, irmid, rs2, amoCtx);
-                                        break;
-                                }
-                            } catch (IndexOutOfBoundsException _) {
-                                trap = accessFaultTrap;
-                                rval = rs1;
+                            // Kept out of this loop so its hot arms stay small; see executeColdOpcode.
+                            long result = executeColdOpcode(state, mem, ir, opcode, rdid, privilege);
+                            rval = (int) result;
+                            trap = (int) ((result >>> 32) & COLD_TRAP_MASK);
+                            if ((result & COLD_WRITES_RD) == 0) {
+                                rdid = 0;
                             }
                             break;
                         }

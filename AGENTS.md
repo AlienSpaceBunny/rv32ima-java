@@ -37,8 +37,10 @@ report that instead.
 - `core` must not depend on `cli`. The CLI depends on core and is distributed as
   a fat jar through GitHub Releases, not as a Central artifact.
 - `RV32IMACore.step()`'s long body and eight-parameter signature are deliberate
-  interpreter idioms. Trap dispatch uses cause-plus-one (`trap == 0` means none);
-  read its class Javadoc and `exceptionTrap()` before changing trap logic.
+  interpreter idioms. Cold F/A arms live in `executeColdOpcode` (packed `long`
+  result) to keep the hot loop small for Native Image; measure hot-path changes
+  with `bench/` on JVM and native. Trap dispatch uses cause-plus-one (`trap == 0`
+  means none); read its class Javadoc and `exceptionTrap()` before changing trap logic.
 - Javadoc on `MemoryBus`, `HardwareHook`, `CSRHook`, `RV32IMACore`, and
   `RV32IMAState` is authoritative; `docs/API.md` is a narrative summary.
 

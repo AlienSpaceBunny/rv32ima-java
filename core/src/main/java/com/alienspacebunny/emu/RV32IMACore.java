@@ -1438,60 +1438,44 @@ public class RV32IMACore {
                             int rs2 = isReg ? state.regs[imm & 0x1f] : imm;
                             int funct3 = (ir >> 12) & 7;
                             int funct7 = (ir >>> 25) & 0x7f;
-                            int rs2Field = imm & 0x1f;
 
-                            boolean zba = isaConfig.hasZba();
-                            boolean zbb = isaConfig.hasZbb();
-                            boolean zbaShAdd =
-                                    isReg && zba && funct7 == 0x10 && (funct3 == 2 || funct3 == 4 || funct3 == 6);
-                            boolean zbbLogicNegate =
-                                    isReg && zbb && funct7 == 0x20 && (funct3 == 4 || funct3 == 6 || funct3 == 7);
-                            boolean zbbMinMax = isReg && zbb && funct7 == 0x05 && funct3 >= 4;
-                            boolean zbbRotateReg = isReg && zbb && funct7 == 0x30 && (funct3 == 1 || funct3 == 5);
-                            boolean zbbZextH = isReg && zbb && funct7 == 0x04 && funct3 == 4 && rs2Field == 0;
-                            boolean zbbCountOrSext = !isReg
-                                    && zbb
-                                    && funct3 == 1
-                                    && funct7 == 0x30
-                                    && (rs2Field == 0
-                                            || rs2Field == 1
-                                            || rs2Field == 2
-                                            || rs2Field == 4
-                                            || rs2Field == 5);
-                            boolean zbbRori = !isReg && zbb && funct3 == 5 && funct7 == 0x30;
-                            boolean zbbOrcb = !isReg && zbb && funct3 == 5 && funct7 == 0x14 && rs2Field == 0x07;
-                            boolean zbbRev8 = !isReg && zbb && funct3 == 5 && funct7 == 0x34 && rs2Field == 0x18;
-                            boolean isBitmanip = zbaShAdd
-                                    || zbbLogicNegate
-                                    || zbbMinMax
-                                    || zbbRotateReg
-                                    || zbbZextH
-                                    || zbbCountOrSext
-                                    || zbbRori
-                                    || zbbOrcb
-                                    || zbbRev8;
-
-                            boolean legalEncoding;
-                            if (isBitmanip) {
-                                legalEncoding = true;
-                            } else if (isReg) {
-                                legalEncoding =
-                                        funct7 == 0 || (funct7 == 0x20 && (funct3 == 0 || funct3 == 5)) || funct7 == 1;
-                            } else if (funct3 == 1) {
-                                legalEncoding = funct7 == 0;
-                            } else if (funct3 == 5) {
-                                legalEncoding = funct7 == 0 || funct7 == 0x20;
-                            } else {
-                                legalEncoding = true;
-                            }
-
-                            if (!legalEncoding) {
-                                trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
-                                break;
-                            }
-
-                            if (isBitmanip) {
-                                rval = computeBitmanip(isReg, funct7, funct3, rs1, rs2, rs2Field);
+                            // Base RV32I encodings are decided first. None of them overlaps an M
+                            // (funct7 == 1) or Zba/Zbb encoding, so the common case needs neither
+                            // the extension flags nor the bitmanip classification below.
+                            boolean baseEncoding = isReg
+                                    ? funct7 == 0 || (funct7 == 0x20 && (funct3 == 0 || funct3 == 5))
+                                    : (funct3 != 1 && funct3 != 5) || funct7 == 0 || (funct3 == 5 && funct7 == 0x20);
+                            if (baseEncoding) {
+                                switch (funct3) {
+                                    case 0:
+                                        rval = (isReg && (ir & 0x40000000) != 0) ? (rs1 - rs2) : (rs1 + rs2);
+                                        break;
+                                    case 1:
+                                        rval = rs1 << (rs2 & 0x1F);
+                                        break;
+                                    case 2:
+                                        rval = rs1 < rs2 ? 1 : 0;
+                                        break;
+                                    case 3:
+                                        rval = Integer.compareUnsigned(rs1, rs2) < 0 ? 1 : 0;
+                                        break;
+                                    case 4:
+                                        rval = rs1 ^ rs2;
+                                        break;
+                                    case 5:
+                                        rval = ((ir & 0x40000000) != 0)
+                                                ? (rs1 >> (rs2 & 0x1F))
+                                                : (rs1 >>> (rs2 & 0x1F));
+                                        break;
+                                    case 6:
+                                        rval = rs1 | rs2;
+                                        break;
+                                    case 7:
+                                        rval = rs1 & rs2;
+                                        break;
+                                    default:
+                                        break; // unreachable: funct3 is 3 bits (0-7), all cases handled above
+                                }
                             } else if (isReg && funct7 == 1) {
                                 // RV32M
                                 switch (funct3) {
@@ -1525,39 +1509,45 @@ public class RV32IMACore {
                                         else rval = (int) (Integer.toUnsignedLong(rs1) % Integer.toUnsignedLong(rs2));
                                         break;
                                     default:
-                                        break; // unreachable: funct7==1 validation above covers 0-7
-                                }
-                            } else {
-                                switch (funct3) {
-                                    case 0:
-                                        rval = (isReg && (ir & 0x40000000) != 0) ? (rs1 - rs2) : (rs1 + rs2);
-                                        break;
-                                    case 1:
-                                        rval = rs1 << (rs2 & 0x1F);
-                                        break;
-                                    case 2:
-                                        rval = rs1 < rs2 ? 1 : 0;
-                                        break;
-                                    case 3:
-                                        rval = Integer.compareUnsigned(rs1, rs2) < 0 ? 1 : 0;
-                                        break;
-                                    case 4:
-                                        rval = rs1 ^ rs2;
-                                        break;
-                                    case 5:
-                                        rval = ((ir & 0x40000000) != 0)
-                                                ? (rs1 >> (rs2 & 0x1F))
-                                                : (rs1 >>> (rs2 & 0x1F));
-                                        break;
-                                    case 6:
-                                        rval = rs1 | rs2;
-                                        break;
-                                    case 7:
-                                        rval = rs1 & rs2;
-                                        break;
-                                    default:
                                         break; // unreachable: funct3 is 3 bits (0-7), all cases handled above
                                 }
+                            } else {
+                                int rs2Field = imm & 0x1f;
+                                boolean zba = isaConfig.hasZba();
+                                boolean zbb = isaConfig.hasZbb();
+                                boolean zbaShAdd =
+                                        isReg && zba && funct7 == 0x10 && (funct3 == 2 || funct3 == 4 || funct3 == 6);
+                                boolean zbbLogicNegate =
+                                        isReg && zbb && funct7 == 0x20 && (funct3 == 4 || funct3 == 6 || funct3 == 7);
+                                boolean zbbMinMax = isReg && zbb && funct7 == 0x05 && funct3 >= 4;
+                                boolean zbbRotateReg = isReg && zbb && funct7 == 0x30 && (funct3 == 1 || funct3 == 5);
+                                boolean zbbZextH = isReg && zbb && funct7 == 0x04 && funct3 == 4 && rs2Field == 0;
+                                boolean zbbCountOrSext = !isReg
+                                        && zbb
+                                        && funct3 == 1
+                                        && funct7 == 0x30
+                                        && (rs2Field == 0
+                                                || rs2Field == 1
+                                                || rs2Field == 2
+                                                || rs2Field == 4
+                                                || rs2Field == 5);
+                                boolean zbbRori = !isReg && zbb && funct3 == 5 && funct7 == 0x30;
+                                boolean zbbOrcb = !isReg && zbb && funct3 == 5 && funct7 == 0x14 && rs2Field == 0x07;
+                                boolean zbbRev8 = !isReg && zbb && funct3 == 5 && funct7 == 0x34 && rs2Field == 0x18;
+                                boolean isBitmanip = zbaShAdd
+                                        || zbbLogicNegate
+                                        || zbbMinMax
+                                        || zbbRotateReg
+                                        || zbbZextH
+                                        || zbbCountOrSext
+                                        || zbbRori
+                                        || zbbOrcb
+                                        || zbbRev8;
+                                if (!isBitmanip) {
+                                    trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
+                                    break;
+                                }
+                                rval = computeBitmanip(isReg, funct7, funct3, rs1, rs2, rs2Field);
                             }
                             break;
                         }

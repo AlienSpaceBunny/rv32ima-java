@@ -162,6 +162,11 @@ for how this file is updated as part of cutting a release.
   overridable no-context methods, and context forwarding are unchanged. Measured: Native Image
   `MMIOBus`-backed guest workloads 14–42% faster, JVM 17–55%.
 
+- `RV32IMACore` decides base RV32I OP/OP-IMM encodings before consulting the M and Zba/Zbb
+  tables. Those encodings are disjoint, so decoding and legality are unchanged; the common
+  ALU path no longer evaluates the bitmanip classification. Measured: guest workloads 13–37%
+  faster under Native Image and 12–27% on HotSpot, FP neutral to slightly faster.
+
 ### Removed
 - Dead `MemoryBus.readIntSigned` default method (never called; `LW` uses `readInt`
   directly).

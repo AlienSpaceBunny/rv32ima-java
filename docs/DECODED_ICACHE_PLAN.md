@@ -3,7 +3,8 @@
 Drafted 2026-10-10. Status: **scoping only; nothing built or measured beyond the
 [predecode upper-bound experiment](PREDECODE_EXPERIMENT_PLAN.md).** Nate has asked V-32 to
 review this as an advisor before work proceeds. The questions for V-32 are at the
-[end](#questions-for-v-32).
+[end](#questions-for-v-32). **V-32's initial review has arrived**
+([copy](DECODED_ICACHE_ADVISORY_REVIEW.md)) and is not yet folded into this draft.
 
 ## Summary
 

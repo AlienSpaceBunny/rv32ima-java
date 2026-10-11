@@ -54,6 +54,14 @@ def cells(args):
         out += [("poly-o3", [str(nd / "poly-o3")], b) for b in FLAG_BUSES]
         out += [("poly-v2", [str(nd / "poly-v2")], b) for b in FLAG_BUSES]
         out += [("poly-v3", [str(nd / "poly-v3")], b) for b in FLAG_BUSES]
+    if args.decoded_cache:
+        # The same binaries with a decoded instruction cache of each listed size.
+        dc = []
+        for slots in args.decoded_cache.split(","):
+            for label, prefix, bus in out:
+                if label in ("jvm", "mono", "poly", "poly-o3"):
+                    dc.append((f"{label}-dc{slots}", prefix + ["--decoded-cache", slots], bus))
+        out += dc
     if args.only:
         labels = set(args.only.split(","))
         out = [c for c in out if c[0] in labels]
@@ -152,6 +160,8 @@ def main():
     p.add_argument("--java", default=os.path.expanduser("~/.jdks/corretto-25.0.4.1/bin/java"))
     p.add_argument("--jar")
     p.add_argument("--graal-java", help="GraalVM JDK java; adds jvm-graaljit / jvm-graalc2 cells")
+    p.add_argument("--decoded-cache",
+                   help="comma-separated slot counts; adds <label>-dc<N> cells for jvm, mono, poly, poly-o3")
     p.add_argument("--only", help="comma-separated image labels to run (e.g. jvm-graaljit,jvm-graalc2)")
     p.add_argument("--warmup-seconds", type=float, default=10)
     p.add_argument("--samples", type=int, default=3)

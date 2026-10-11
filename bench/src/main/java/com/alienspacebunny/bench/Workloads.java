@@ -4,9 +4,13 @@ import static com.alienspacebunny.bench.Asm.A0;
 import static com.alienspacebunny.bench.Asm.A1;
 import static com.alienspacebunny.bench.Asm.A2;
 import static com.alienspacebunny.bench.Asm.A3;
+import static com.alienspacebunny.bench.Asm.A4;
+import static com.alienspacebunny.bench.Asm.A5;
+import static com.alienspacebunny.bench.Asm.RA;
 import static com.alienspacebunny.bench.Asm.S0;
 import static com.alienspacebunny.bench.Asm.S1;
 import static com.alienspacebunny.bench.Asm.S2;
+import static com.alienspacebunny.bench.Asm.S3;
 import static com.alienspacebunny.bench.Asm.S4;
 import static com.alienspacebunny.bench.Asm.S5;
 import static com.alienspacebunny.bench.Asm.T0;
@@ -20,6 +24,7 @@ import static com.alienspacebunny.bench.Asm.ZERO;
 
 import com.alienspacebunny.emu.AccessContext;
 import com.alienspacebunny.emu.AccessKind;
+import com.alienspacebunny.emu.DecodedCacheConfig;
 import com.alienspacebunny.emu.IsaConfig;
 import com.alienspacebunny.emu.MemoryBus;
 import com.alienspacebunny.emu.RV32IMACore;
@@ -27,8 +32,10 @@ import com.alienspacebunny.emu.RV32IMAState;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
+import java.util.Random;
 
 /**
  * The fixed benchmark workloads. Every guest workload has an analytical instruction count and an
@@ -76,6 +83,21 @@ final class Workloads {
     }
 
     static List<Workload> all(Scale scale, long skew) {
+        return all(scale, skew, 0);
+    }
+
+    /**
+     * Decoded-cache slots for the guest workloads' cores; 0 is no cache. Set by {@link
+     * #all(Scale, long, int)} before it constructs any workload.
+     */
+    private static int cacheSlots;
+
+    /**
+     * Every workload, with each guest workload's core given a decoded instruction cache of {@code
+     * slots} slots (0 for none) whose cacheable range is the guest program.
+     */
+    static List<Workload> all(Scale scale, long skew, int slots) {
+        cacheSlots = slots;
         int n = scale.regIterations;
         return List.of(
                 new RegLoop("reg-ima", IMA, false, n, 4096, skew),
@@ -86,6 +108,8 @@ final class Workloads {
                 new CopyLoop("copy6m-ap", scale.largeWords, 1, skew),
                 new MixLoop("mix-ap", scale.mixIterations, skew),
                 new FpLoop("fp-ap", scale.mixIterations, skew),
+                new SpreadCalls("spread-ap", scale.mixIterations, skew),
+                new CollidingCalls("collide-ap", scale.mixIterations, skew),
                 new CoreMarkImage("coremark-c", AP, skew),
                 new CoreMarkImage("coremark-noc", AP_NO_C, skew),
                 new FpKernelsImage("fpkernels-c", AP, skew),
@@ -136,12 +160,32 @@ final class Workloads {
         }
     }
 
+    /** The decoded-cache slots the most recent {@link #all(Scale, long, int)} used. */
+    static int cacheSlots() {
+        return cacheSlots;
+    }
+
+    /** A core for a guest program of {@code programLength} bytes at address 0. */
+    static RV32IMACore newCore(IsaConfig isa, int programLength) {
+        if (cacheSlots == 0) {
+            return new RV32IMACore(isa);
+        }
+        RV32IMACore core = new RV32IMACore(isa, new DecodedCacheConfig(cacheSlots, false));
+        core.addDecodedCacheRange(0, programLength);
+        return core;
+    }
+
     /** One timed unit of work, with untimed preparation and verification around it. */
     abstract static class Workload {
         final String name;
 
         Workload(String name) {
             this.name = name;
+        }
+
+        /** The guest core, or {@code null} for a host-only workload. */
+        RV32IMACore core() {
+            return null;
         }
 
         /** Writes data that no invocation modifies. Called once per process, untimed. */
@@ -167,10 +211,15 @@ final class Workloads {
 
         GuestWorkload(String name, IsaConfig isa, int chunk, Asm asm, long analyticalCount, long skew) {
             super(name);
-            this.core = new RV32IMACore(isa);
-            this.chunk = chunk;
             this.program = asm.bytes();
+            this.core = newCore(isa, program.length);
+            this.chunk = chunk;
             this.expectedInstructions = analyticalCount + skew;
+        }
+
+        @Override
+        RV32IMACore core() {
+            return core;
         }
 
         @Override
@@ -178,12 +227,18 @@ final class Workloads {
             for (int i = 0; i < program.length; i++) {
                 bus.writeByte(i, program[i]);
             }
+            core.flushDecodedCache(); // the program was (re)loaded behind the guest's back
             state = new RV32IMAState();
             state.extraflags = 3; // machine mode, as after reset
             prepareData(bus);
         }
 
         abstract void prepareData(MemoryBus bus);
+
+        /** The PC after the terminating WFI: the end of the program unless overridden. */
+        int endPc() {
+            return program.length;
+        }
 
         @Override
         long run(MemoryBus bus) {
@@ -203,7 +258,7 @@ final class Workloads {
             check(
                     state.getCycle() == expectedInstructions,
                     name + ": executed " + state.getCycle() + " instructions, expected " + expectedInstructions);
-            check(state.pc == program.length, name + ": stopped at pc " + Integer.toHexString(state.pc));
+            check(state.pc == endPc(), name + ": stopped at pc " + Integer.toHexString(state.pc));
             check(state.mcause == 0 && state.mepc == 0, name + ": unexpected trap, mcause " + state.mcause);
             checkResult(bus);
         }
@@ -451,6 +506,240 @@ final class Workloads {
         }
     }
 
+    /**
+     * Calls between guest functions, the shared shape of {@link SpreadCalls} and {@link
+     * CollidingCalls}. A seeded in-guest LCG or a counter picks each call's target; every
+     * function is a straight-line block of mixed 16/32-bit ALU operations on {@code a1..a5}
+     * followed by {@code ret}. The Java model replays the same calls and operations, counting
+     * instructions as it goes.
+     */
+    abstract static class CallWorkload extends GuestWorkload {
+        private static final int[] DATA_REGS = {A1, A2, A3, A4, A5};
+
+        /** One function body operation: kind, destination, sources or immediate. */
+        record Op(int kind, int rd, int rs1, int rs2, int imm) {}
+
+        private final List<List<Op>> functions;
+        private final int calls;
+        private final int endPc;
+
+        CallWorkload(String name, int calls, long skew, Program program) {
+            super(name, AP, 4096, program.asm(), program.instructions(), skew);
+            this.functions = program.functions();
+            this.calls = calls;
+            this.endPc = program.endPc();
+        }
+
+        /**
+         * An assembled program, its model, its analytical instruction count and the PC after its
+         * WFI.
+         */
+        record Program(Asm asm, List<List<Op>> functions, long instructions, int endPc) {}
+
+        @Override
+        int endPc() {
+            return endPc;
+        }
+
+        static List<List<Op>> bodies(long seed, int count, int minOps, int maxOps) {
+            Random rnd = new Random(seed);
+            List<List<Op>> all = new ArrayList<>();
+            for (int f = 0; f < count; f++) {
+                List<Op> ops = new ArrayList<>();
+                int length = minOps + rnd.nextInt(maxOps - minOps + 1);
+                for (int i = 0; i < length; i++) {
+                    int rd = DATA_REGS[rnd.nextInt(5)];
+                    int rs1 = DATA_REGS[rnd.nextInt(5)];
+                    int rs2 = DATA_REGS[rnd.nextInt(5)];
+                    int kind = rnd.nextInt(6);
+                    int imm =
+                            kind == 2 ? (rnd.nextBoolean() ? 1 : -1) * (1 + rnd.nextInt(31)) : rnd.nextInt(4096) - 2048;
+                    ops.add(new Op(kind, rd, rs1, rs2, imm));
+                }
+                all.add(ops);
+            }
+            return all;
+        }
+
+        /** Emits {@code ops} then {@code ret}. */
+        static void emitFunction(Asm asm, List<Op> ops) {
+            for (Op op : ops) {
+                switch (op.kind) {
+                    case 0 -> asm.cAdd(op.rd, op.rs2);
+                    case 1 -> asm.cXor(op.rd, op.rs2);
+                    case 2 -> asm.cAddi(op.rd, op.imm);
+                    case 3 -> asm.add(op.rd, op.rs1, op.rs2);
+                    case 4 -> asm.sub(op.rd, op.rs1, op.rs2);
+                    default -> asm.xori(op.rd, op.rs1, op.imm);
+                }
+            }
+            asm.jalr(ZERO, RA, 0);
+        }
+
+        static void initDataRegs(Asm asm) {
+            for (int i = 0; i < DATA_REGS.length; i++) {
+                asm.addi(DATA_REGS[i], ZERO, i + 1);
+            }
+        }
+
+        /** The target-picking state before the first call. */
+        abstract int initialPickState();
+
+        /** The function index of the next call; advances {@code pickState[0]}. */
+        abstract int target(int[] pickState);
+
+        @Override
+        void prepareData(MemoryBus bus) {}
+
+        @Override
+        void checkResult(MemoryBus bus) {
+            int[] r = new int[32];
+            for (int i = 0; i < DATA_REGS.length; i++) {
+                r[DATA_REGS[i]] = i + 1;
+            }
+            int[] pickState = {initialPickState()};
+            for (int c = 0; c < calls; c++) {
+                for (Op op : functions.get(target(pickState))) {
+                    r[op.rd] = switch (op.kind) {
+                        case 0 -> r[op.rd] + r[op.rs2];
+                        case 1 -> r[op.rd] ^ r[op.rs2];
+                        case 2 -> r[op.rd] + op.imm;
+                        case 3 -> r[op.rs1] + r[op.rs2];
+                        case 4 -> r[op.rs1] - r[op.rs2];
+                        default -> r[op.rs1] ^ op.imm;
+                    };
+                }
+            }
+            for (int reg : DATA_REGS) {
+                check(state.regs[reg] == r[reg], name + ": register x" + reg + " mismatch");
+            }
+        }
+
+        static final int LCG_SEED = 0x2545F491;
+        static final int LCG_MUL = 1664525;
+        static final int LCG_ADD = 1013904223;
+    }
+
+    /**
+     * {@code spread-ap}: 256 functions of 8 to 48 mixed 16/32-bit operations, one per 256-byte
+     * slot over 64 KiB, called in an order drawn from an in-guest LCG. Synthetic: sized to exceed
+     * small decoded caches, not taken from a real workload.
+     */
+    static final class SpreadCalls extends CallWorkload {
+        private static final int FUNCTIONS = 256;
+        private static final int FUNC_BASE = 0x1000;
+
+        SpreadCalls(String name, int calls, long skew) {
+            super(name, calls, skew, program(calls));
+        }
+
+        private static int pick(int[] lcg) {
+            lcg[0] = lcg[0] * LCG_MUL + LCG_ADD;
+            return lcg[0] >>> 24;
+        }
+
+        @Override
+        int initialPickState() {
+            return LCG_SEED;
+        }
+
+        @Override
+        int target(int[] pickState) {
+            return pick(pickState);
+        }
+
+        private static Program program(int calls) {
+            List<List<Op>> functions = bodies(0x5EED, FUNCTIONS, 8, 48);
+            Asm asm = new Asm();
+            asm.li(S2, LCG_MUL);
+            asm.li(S3, LCG_ADD);
+            asm.li(S1, LCG_SEED);
+            asm.li(S4, FUNC_BASE);
+            asm.li(A0, calls);
+            initDataRegs(asm);
+            int setup = (int) asm.count();
+            int loop = asm.pc();
+            asm.mul(S1, S1, S2);
+            asm.add(S1, S1, S3);
+            asm.srli(T0, S1, 24);
+            asm.slli(T0, T0, 8);
+            asm.add(T0, T0, S4);
+            asm.jalr(RA, T0, 0);
+            asm.addi(A0, A0, -1);
+            asm.bne(A0, ZERO, loop);
+            asm.wfi();
+            int endPc = asm.pc();
+            for (int f = 0; f < FUNCTIONS; f++) {
+                asm.padTo(FUNC_BASE + f * 256);
+                emitFunction(asm, functions.get(f));
+            }
+            long n = setup + 1L;
+            int[] lcg = {LCG_SEED};
+            for (int c = 0; c < calls; c++) {
+                n += 8 + functions.get(pick(lcg)).size() + 1L;
+            }
+            return new Program(asm, functions, n, endPc);
+        }
+    }
+
+    /**
+     * {@code collide-ap}: eight 16-operation functions 64 KiB apart, a multiple of the span of
+     * every power-of-two decoded cache up to 32K slots, called round-robin, so in a direct-mapped
+     * cache they evict each other on every call. The adversarial case; synthetic.
+     */
+    static final class CollidingCalls extends CallWorkload {
+        private static final int FUNCTIONS = 8;
+        private static final int FUNC_BASE = 0x1000;
+        private static final int SPACING = 0x10000;
+
+        CollidingCalls(String name, int calls, long skew) {
+            super(name, calls, skew, program(calls));
+        }
+
+        private static int pick(int[] counter) {
+            return counter[0]++ & (FUNCTIONS - 1);
+        }
+
+        @Override
+        int initialPickState() {
+            return 0;
+        }
+
+        @Override
+        int target(int[] pickState) {
+            return pick(pickState);
+        }
+
+        private static Program program(int calls) {
+            List<List<Op>> functions = bodies(0xC011DE, FUNCTIONS, 16, 16);
+            Asm asm = new Asm();
+            asm.li(S4, FUNC_BASE);
+            asm.li(A0, calls);
+            asm.addi(S1, ZERO, 0);
+            initDataRegs(asm);
+            int setup = (int) asm.count();
+            int loop = asm.pc();
+            asm.andi(T0, S1, FUNCTIONS - 1);
+            asm.slli(T0, T0, 16);
+            asm.add(T0, T0, S4);
+            asm.jalr(RA, T0, 0);
+            asm.addi(S1, S1, 1);
+            asm.addi(A0, A0, -1);
+            asm.bne(A0, ZERO, loop);
+            asm.wfi();
+            int endPc = asm.pc();
+            for (int f = 0; f < FUNCTIONS; f++) {
+                asm.padTo(FUNC_BASE + f * SPACING);
+                emitFunction(asm, functions.get(f));
+            }
+            long n = setup + 1L;
+            for (int c = 0; c < calls; c++) {
+                n += 7 + functions.get(c & (FUNCTIONS - 1)).size() + 1L;
+            }
+            return new Program(asm, functions, n, endPc);
+        }
+    }
+
     /** Guest result block written by bench/guest/crt0.S and the guest programs. */
     static final int RESULTS = 0x00FF8000;
 
@@ -479,7 +768,7 @@ final class Workloads {
         return Long.decode(value.trim());
     }
 
-    private static byte[] image(String name) {
+    static byte[] image(String name) {
         try (InputStream in = Workloads.class.getResourceAsStream("guest/" + name + ".bin")) {
             if (in == null) {
                 throw new IllegalStateException("guest image " + name + ".bin missing; run make in bench/guest");
@@ -503,9 +792,14 @@ final class Workloads {
 
         ImageWorkload(String name, IsaConfig isa, long skew) {
             super(name);
-            this.core = new RV32IMACore(isa);
             this.program = image(name);
+            this.core = newCore(isa, program.length);
             this.expectedInstructions = expected(name + ".instructions") + skew;
+        }
+
+        @Override
+        RV32IMACore core() {
+            return core;
         }
 
         @Override
@@ -513,6 +807,7 @@ final class Workloads {
             for (int i = 0; i < program.length; i++) {
                 bus.writeByte(i, program[i]);
             }
+            core.flushDecodedCache(); // the image was (re)loaded behind the guest's back
             for (int i = 0; i < 64; i += 4) {
                 bus.writeInt(RESULTS + i, 0);
             }

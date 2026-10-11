@@ -10,6 +10,7 @@ import java.io.ByteArrayOutputStream;
  */
 final class Asm {
     static final int ZERO = 0;
+    static final int RA = 1;
     static final int T0 = 5;
     static final int T1 = 6;
     static final int T2 = 7;
@@ -19,7 +20,10 @@ final class Asm {
     static final int A1 = 11;
     static final int A2 = 12;
     static final int A3 = 13;
+    static final int A4 = 14;
+    static final int A5 = 15;
     static final int S2 = 18;
+    static final int S3 = 19;
     static final int S4 = 20;
     static final int S5 = 21;
     static final int T3 = 28;
@@ -87,6 +91,40 @@ final class Asm {
 
     void addi(int rd, int rs1, int imm) {
         iType(imm, rs1, 0, rd, 0x13);
+    }
+
+    void xori(int rd, int rs1, int imm) {
+        iType(imm, rs1, 4, rd, 0x13);
+    }
+
+    void andi(int rd, int rs1, int imm) {
+        iType(imm, rs1, 7, rd, 0x13);
+    }
+
+    void slli(int rd, int rs1, int shamt) {
+        iType(shamt & 0x1f, rs1, 1, rd, 0x13);
+    }
+
+    void srli(int rd, int rs1, int shamt) {
+        iType(shamt & 0x1f, rs1, 5, rd, 0x13);
+    }
+
+    void mul(int rd, int rs1, int rs2) {
+        rType(1, rs2, rs1, 0, rd, 0x33);
+    }
+
+    void jalr(int rd, int rs1, int imm) {
+        iType(imm, rs1, 0, rd, 0x67);
+    }
+
+    /** Pads with zero bytes, which are not instructions, up to {@code address}. */
+    void padTo(int address) {
+        if (address < pc()) {
+            throw new IllegalArgumentException("cannot pad backwards to " + address);
+        }
+        while (pc() < address) {
+            out.write(0);
+        }
     }
 
     /** Always two instructions ({@code lui} + {@code addi}), so instruction counts stay fixed. */

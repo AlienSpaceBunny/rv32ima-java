@@ -2,6 +2,7 @@ package com.alienspacebunny.bench;
 
 import com.alienspacebunny.bench.Workloads.Workload;
 import com.alienspacebunny.emu.MemoryBus;
+import com.alienspacebunny.emu.RV32IMACore;
 import java.io.PrintStream;
 import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
@@ -9,6 +10,7 @@ import java.lang.management.ThreadMXBean;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -23,7 +25,9 @@ import java.util.function.IntFunction;
  * <p>Arguments: {@code --bus NAME} (required), {@code --workloads a,b|all}, {@code
  * --warmup-seconds S}, {@code --min-rounds R}, {@code --samples N}, {@code --label L}, {@code
  * --reverse} (reverse workload order), {@code --skew K} (negative check: perturb every
- * expectation by K), {@code --scale full|test}.
+ * expectation by K), {@code --scale full|test}, {@code --decoded-cache N} (give every guest core a
+ * decoded instruction cache of N slots) and {@code --cache-stats} (print each cached core's
+ * counters to stderr at the end, one {@code cache-stats} CSV row per workload).
  */
 final class Harness {
     static final String HEADER = "label,runtime,bus,workload,phase,round,nanos,work,gc_count,gc_ms,alloc_bytes";
@@ -50,6 +54,8 @@ final class Harness {
         boolean reverse = false;
         long skew = 0;
         Workloads.Scale scale = Workloads.Scale.FULL;
+        int cacheSlots = 0;
+        boolean cacheStats = false;
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
                 case "--bus" -> busName = args[++i];
@@ -61,6 +67,8 @@ final class Harness {
                 case "--reverse" -> reverse = true;
                 case "--skew" -> skew = Long.parseLong(args[++i]);
                 case "--scale" -> scale = Workloads.Scale.valueOf(args[++i].toUpperCase(Locale.ROOT));
+                case "--decoded-cache" -> cacheSlots = Integer.parseInt(args[++i]);
+                case "--cache-stats" -> cacheStats = true;
                 default -> throw new IllegalArgumentException("unknown argument " + args[i]);
             }
         }
@@ -69,7 +77,7 @@ final class Harness {
             throw new IllegalArgumentException("--bus must be one of " + buses.keySet());
         }
 
-        List<Workload> workloads = select(Workloads.all(scale, skew), selection);
+        List<Workload> workloads = select(Workloads.all(scale, skew, cacheSlots), selection);
         if (reverse) {
             Collections.reverse(workloads);
         }
@@ -95,6 +103,38 @@ final class Harness {
             for (Workload w : workloads) {
                 runner.invoke(w, "measured", s);
             }
+        }
+        if (cacheStats) {
+            printCacheStats(label, workloads, runner.work);
+        }
+    }
+
+    static final String CACHE_STATS_HEADER =
+            "cache-stats,label,workload,slots,invocations,instructions,fills,bypasses,delegations,flushes";
+
+    /** Every cached core's counters over the whole process, as CSV rows on stderr. */
+    private static void printCacheStats(String label, List<Workload> workloads, Map<Workload, long[]> work) {
+        PrintStream err = new PrintStream(System.err, true, StandardCharsets.UTF_8);
+        err.println(CACHE_STATS_HEADER);
+        for (Workload w : workloads) {
+            RV32IMACore core = w.core();
+            if (core == null || !core.hasDecodedCache()) {
+                continue;
+            }
+            RV32IMACore.DecodedCacheStats stats = core.getDecodedCacheStats();
+            long[] totals = work.getOrDefault(w, new long[2]);
+            err.println(String.join(
+                    ",",
+                    "cache-stats",
+                    label,
+                    w.name,
+                    Integer.toString(Workloads.cacheSlots()),
+                    Long.toString(totals[0]),
+                    Long.toString(totals[1]),
+                    Long.toString(stats.fills()),
+                    Long.toString(stats.bypasses()),
+                    Long.toString(stats.delegations()),
+                    Long.toString(stats.flushes())));
         }
     }
 
@@ -127,6 +167,9 @@ final class Harness {
         private final ThreadMXBean threads = ManagementFactory.getThreadMXBean();
         long timedNanos;
 
+        /** Per workload: invocations and total work, warmup included. */
+        final Map<Workload, long[]> work = new IdentityHashMap<>();
+
         Runner(PrintStream out, String label, String busName, MemoryBus bus) {
             this.out = out;
             this.label = label;
@@ -146,6 +189,9 @@ final class Harness {
             long[] gcAfter = gcTotals();
             w.verify(bus);
             timedNanos += nanos;
+            long[] totals = this.work.computeIfAbsent(w, k -> new long[2]);
+            totals[0]++;
+            totals[1] += work;
             if (phase != null) {
                 long alloc = allocBefore < 0 || allocAfter < 0 ? -1 : allocAfter - allocBefore;
                 out.println(String.join(

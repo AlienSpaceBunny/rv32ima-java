@@ -1,5 +1,6 @@
 package com.alienspacebunny.emu;
 
+import java.util.Arrays;
 import java.util.Objects;
 
 /**
@@ -42,6 +43,13 @@ import java.util.Objects;
 public class RV32IMACore {
     private final IsaConfig isaConfig;
 
+    // Decoded instruction cache (see the "Decoded instruction cache" section below). All three
+    // arrays are null when the cache is off.
+    private final int[] dcTags;
+    private final int[] dcWords;
+    private final long[] dcOps;
+    private final boolean dcCheckMode;
+
     /**
      * Creates a new {@code RV32IMACore} execution engine configured for {@link
      * IsaConfig#RV32IMA_ZICSR} (no optional extensions). Identical to the core before {@link
@@ -59,7 +67,30 @@ public class RV32IMACore {
      * @throws NullPointerException if {@code isaConfig} is {@code null}.
      */
     public RV32IMACore(IsaConfig isaConfig) {
+        this(isaConfig, DecodedCacheConfig.OFF);
+    }
+
+    /**
+     * Creates a new {@code RV32IMACore} with an optional decoded instruction cache. The cache's
+     * coherence contract is in {@link #flushDecodedCache()}'s Javadoc; read it before enabling the
+     * cache. With {@link DecodedCacheConfig#OFF} this is identical to {@link
+     * #RV32IMACore(IsaConfig)}.
+     *
+     * <p>An enabled cache caches nothing until {@link #addDecodedCacheRange} declares where
+     * cacheable code lives.
+     *
+     * @param isaConfig the extension configuration.
+     * @param cacheConfig the cache size and check mode.
+     * @throws NullPointerException if either argument is {@code null}.
+     */
+    public RV32IMACore(IsaConfig isaConfig, DecodedCacheConfig cacheConfig) {
         this.isaConfig = Objects.requireNonNull(isaConfig, "isaConfig");
+        Objects.requireNonNull(cacheConfig, "cacheConfig");
+        int slots = cacheConfig.slots();
+        this.dcTags = slots > 0 ? new int[slots] : null;
+        this.dcWords = slots > 0 ? new int[slots] : null;
+        this.dcOps = slots > 0 ? new long[slots] : null;
+        this.dcCheckMode = cacheConfig.checkMode();
     }
 
     private static final int MSTATUS_MIE = 0x08;
@@ -1449,7 +1480,61 @@ public class RV32IMACore {
             state.mip &= ~MIP_MTIP;
         }
 
-        int trap = 0;
+        // Check for a pending machine interrupt before starting the instruction loop. This core
+        // models only M-mode and U-mode, so mstatus.MIE gates interrupts only while executing in
+        // M-mode: per the privileged spec, a machine interrupt that is individually enabled in
+        // mie is always taken while running below M-mode (here, U-mode), regardless of
+        // mstatus.MIE. Priority when more than one bit is simultaneously pending and enabled:
+        // external > software > timer.
+        int trap = pendingInterruptTrap(state);
+
+        // If WFI, don't run processor -- unless an enabled interrupt is already pending, in which
+        // case the stall ends here and the interrupt is delivered below. This check deliberately
+        // comes after pendingInterruptTrap so a pending bit that was set before the WFI
+        // executed (or set directly on mip by an embedder, without injectInterrupt's WFI clear)
+        // cannot leave the hart stalled with a deliverable interrupt.
+        if ((state.extraflags & EXTRAFLAG_WFI) != 0) {
+            if (trap == 0) {
+                return 1;
+            }
+            state.extraflags &= ~EXTRAFLAG_WFI;
+        }
+
+        if (trap == 0 && dcTags != null) {
+            return stepCached(state, mem, ramOffset, ramSize, count, postExec, csrHook);
+        }
+        return runBatch(state, mem, ramOffset, ramSize, count, postExec, csrHook, trap) & BATCH_WFI;
+    }
+
+    /** {@link #runBatch} result: all {@code count} instructions ran without a trap. */
+    private static final int BATCH_CONTINUE = 0;
+
+    /** {@link #runBatch} result: the hart stalled in WFI; {@link #step} returns 1. */
+    private static final int BATCH_WFI = 1;
+
+    /**
+     * {@link #runBatch} result: the batch ended early on a trap, an interrupt, or a WFI that
+     * completed at once; {@link #step} returns 0.
+     */
+    private static final int BATCH_ENDED = 2;
+
+    /**
+     * The instruction loop and trap tail of {@link #step}, after its timer, interrupt and WFI entry
+     * checks. {@code trap} is the pending interrupt found by those checks, or 0. The decoded cache
+     * calls this with {@code count == 1} to execute any instruction it does not handle itself, so
+     * this loop is the only implementation of the ISA.
+     *
+     * @return {@link #BATCH_CONTINUE}, {@link #BATCH_WFI} or {@link #BATCH_ENDED}.
+     */
+    private int runBatch(
+            RV32IMAState state,
+            MemoryBus mem,
+            int ramOffset,
+            int ramSize,
+            int count,
+            PostExecHook postExec,
+            CSRHook csrHook,
+            int trap) {
         int rval = 0;
         int pc = state.pc;
         int ir = 0;
@@ -1464,26 +1549,6 @@ public class RV32IMACore {
         int instrLen = 4;
         boolean hasC = isaConfig.hasC();
         long cycle = state.getCycle();
-
-        // Check for a pending machine interrupt before starting the instruction loop. This core
-        // models only M-mode and U-mode, so mstatus.MIE gates interrupts only while executing in
-        // M-mode: per the privileged spec, a machine interrupt that is individually enabled in
-        // mie is always taken while running below M-mode (here, U-mode), regardless of
-        // mstatus.MIE. Priority when more than one bit is simultaneously pending and enabled:
-        // external > software > timer.
-        trap = pendingInterruptTrap(state);
-
-        // If WFI, don't run processor -- unless an enabled interrupt is already pending, in which
-        // case the stall ends here and the interrupt is delivered below. This check deliberately
-        // comes after pendingInterruptTrap so a pending bit that was set before the WFI
-        // executed (or set directly on mip by an embedder, without injectInterrupt's WFI clear)
-        // cannot leave the hart stalled with a deliverable interrupt.
-        if ((state.extraflags & EXTRAFLAG_WFI) != 0) {
-            if (trap == 0) {
-                return 1;
-            }
-            state.extraflags &= ~EXTRAFLAG_WFI;
-        }
 
         // Set by an instruction that can change interrupt deliverability (a write to mstatus,
         // mie, or mip, or MRET); checked once that instruction has fully retired so a newly
@@ -1827,8 +1892,13 @@ public class RV32IMACore {
                             }
                             break;
                         }
-                        case 0x0f: // FENCE
+                        case 0x0f: // FENCE, FENCE.I
                             rdid = 0;
+                            if ((ir & 0x7000) == 0x1000 && dcTags != null) {
+                                // FENCE.I flushes this hart's decoded cache. The cached path
+                                // delegates FENCE.I here, whether or not its code is cacheable.
+                                flushDecodedCache();
+                            }
                             break;
                         case 0x73: // SYSTEM
                         {
@@ -1927,10 +1997,10 @@ public class RV32IMACore {
                                                 // mstatus.MIE was masking until the line above set
                                                 // it). WFI completes immediately without stalling;
                                                 // the next step call delivers the interrupt.
-                                                return 0;
+                                                return BATCH_ENDED;
                                             }
                                             state.extraflags |= EXTRAFLAG_WFI;
-                                            return 1;
+                                            return BATCH_WFI;
                                         default:
                                             trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
                                             break;
@@ -1996,22 +2066,597 @@ public class RV32IMACore {
         }
 
         // Handle traps and interrupts.
+        int result = BATCH_CONTINUE;
         if (trap != 0) {
-            if ((trap & INTERRUPT_FLAG) != 0) {
-                state.mcause = trap;
-                state.mtval = 0;
-                pc += instrLen;
-            } else {
-                state.mcause = trap - 1; // undo the "+1" internal encoding
-                state.mtval = state.mcause == EXC_ILLEGAL_INSTRUCTION ? ir : rval;
+            pc = commitTrap(state, pc, trap, ir, rval, instrLen);
+            result = BATCH_ENDED;
+        }
+
+        state.setCycle(cycle);
+        state.pc = pc;
+        return result;
+    }
+
+    /**
+     * Commits a trap or interrupt to the machine CSRs and enters machine mode. {@code pc} is the
+     * trapping instruction's PC, or for an interrupt the next instruction's PC minus {@code
+     * instrLen}; {@code ir} and {@code rval} supply {@code mtval}.
+     *
+     * @return the new PC, {@code mtvec}.
+     */
+    private static int commitTrap(RV32IMAState state, int pc, int trap, int ir, int rval, int instrLen) {
+        if ((trap & INTERRUPT_FLAG) != 0) {
+            state.mcause = trap;
+            state.mtval = 0;
+            pc += instrLen;
+        } else {
+            state.mcause = trap - 1; // undo the "+1" internal encoding
+            state.mtval = state.mcause == EXC_ILLEGAL_INSTRUCTION ? ir : rval;
+        }
+        state.mepc = pc;
+        state.mstatus = (state.mstatus & ~(MSTATUS_MIE | MSTATUS_MPIE | MSTATUS_MPP))
+                | ((state.mstatus & MSTATUS_MIE) << 4)
+                | ((state.extraflags & EXTRAFLAG_PRIV_MASK) << MSTATUS_MPP_SHIFT);
+        state.extraflags |= PRIV_MACHINE; // Enter machine mode
+        return state.mtvec;
+    }
+
+    // ---- Decoded instruction cache ------------------------------------------------------------
+    //
+    // Opt-in through DecodedCacheConfig; per core and direct-mapped. Slot i holds:
+    //
+    //   dcTags[i]   the instruction's window offset (pc - ramOffset), with bit 0 set when it was
+    //               filled in M-mode. Executable offsets are even, so bit 0 is free; using the
+    //               offset rather than the PC keeps that true for an odd ramOffset.
+    //   dcWords[i]  the word the opcode switch acts on (the expansion, for compressed code). It
+    //               is the PostExecHook's ir and an illegal instruction's mtval.
+    //   dcOps[i]    the predecoded operands: the low 32 bits hold the immediate (or branch/jump
+    //               offset, or shift amount); the high 32 bits hold the handler (bits 5:0), rd
+    //               (10:6), rs1 (15:11), rs2 (20:16) and the compressed flag (21). 0 = empty.
+    //
+    // stepCached executes the fast handlers itself. Everything else -- DC_GENERIC entries, and
+    // fetches that are not cached -- runs through runBatch one instruction at a time, so the
+    // cache never becomes a second implementation of the ISA. Predecoding uses encoding fields
+    // only, never conclusions that depend on privilege or CSR/FP state.
+
+    private static final int DC_GENERIC = 1;
+    private static final int DC_LUI = 2;
+    private static final int DC_AUIPC = 3;
+    private static final int DC_JAL = 4;
+    private static final int DC_JALR = 5;
+    private static final int DC_BEQ = 6;
+    private static final int DC_BNE = 7;
+    private static final int DC_BLT = 8;
+    private static final int DC_BGE = 9;
+    private static final int DC_BLTU = 10;
+    private static final int DC_BGEU = 11;
+    private static final int DC_LB = 12;
+    private static final int DC_LH = 13;
+    private static final int DC_LW = 14;
+    private static final int DC_LBU = 15;
+    private static final int DC_LHU = 16;
+    private static final int DC_SB = 17;
+    private static final int DC_SH = 18;
+    private static final int DC_SW = 19;
+    private static final int DC_ADDI = 20;
+    private static final int DC_SLTI = 21;
+    private static final int DC_SLTIU = 22;
+    private static final int DC_XORI = 23;
+    private static final int DC_ORI = 24;
+    private static final int DC_ANDI = 25;
+    private static final int DC_SLLI = 26;
+    private static final int DC_SRLI = 27;
+    private static final int DC_SRAI = 28;
+    private static final int DC_ADD = 29;
+    private static final int DC_SUB = 30;
+    private static final int DC_SLL = 31;
+    private static final int DC_SLT = 32;
+    private static final int DC_SLTU = 33;
+    private static final int DC_XOR = 34;
+    private static final int DC_SRL = 35;
+    private static final int DC_SRA = 36;
+    private static final int DC_OR = 37;
+    private static final int DC_AND = 38;
+    private static final int DC_MUL = 39;
+    private static final int DC_HANDLER_MASK = 0x3f;
+    private static final int DC_COMPRESSED = 1 << 21;
+
+    // Indexed by funct3; 0 means the encoding is not a fast handler (DC_GENERIC).
+    private static final int[] DC_BRANCH = {DC_BEQ, DC_BNE, 0, 0, DC_BLT, DC_BGE, DC_BLTU, DC_BGEU};
+    private static final int[] DC_LOAD = {DC_LB, DC_LH, DC_LW, 0, DC_LBU, DC_LHU, 0, 0};
+    private static final int[] DC_STORE = {DC_SB, DC_SH, DC_SW, 0, 0, 0, 0, 0};
+    private static final int[] DC_OP_IMM = {DC_ADDI, 0, DC_SLTI, DC_SLTIU, DC_XORI, 0, DC_ORI, DC_ANDI};
+    private static final int[] DC_OP = {DC_ADD, DC_SLL, DC_SLT, DC_SLTU, DC_XOR, DC_SRL, DC_OR, DC_AND};
+
+    /** {@link #dcFetch} result for a fetch the bus rejected. No valid result has bit 63 set. */
+    private static final long DC_FETCH_FAULT = -1L;
+
+    // Cacheable ranges as [start, end) pairs of unsigned addresses.
+    private long[] dcRanges = new long[0];
+
+    // The step() arguments the cache contents are valid for (Rule 3).
+    private MemoryBus dcBus;
+    private RV32IMAState dcState;
+    private int dcHartId;
+    private int dcRamOffset;
+    private int dcRamSize;
+
+    // Instrumentation; touched only off the hit path.
+    private long dcFills;
+    private long dcFlushes;
+    private long dcChecks;
+    private long dcDelegations;
+
+    /**
+     * Returns whether this core has a decoded instruction cache.
+     *
+     * @return {@code true} if it was constructed with an enabled {@link DecodedCacheConfig}.
+     */
+    public boolean hasDecodedCache() {
+        return dcTags != null;
+    }
+
+    /**
+     * Flushes this core's decoded instruction cache. Does nothing if the core has no cache.
+     *
+     * <p><b>Coherence protocol.</b> The cache does not watch stores. Code changes become visible as
+     * follows:
+     *
+     * <ol>
+     *   <li>A guest that writes code executes {@code FENCE.I} on the hart that will run it, before
+     *       running it, whoever wrote the code: the same hart, another hart, the host or DMA. Until
+     *       then, whether the hart runs the old or the new code is unspecified, as on hardware.
+     *       Publication must make the writes visible to that hart's thread before its {@code
+     *       FENCE.I}, and must never expose partly written instructions.
+     *   <li>The embedder calls this method whenever code, or the mapping or permissions of code,
+     *       change behind the guest's back: a mapping change, a payload load, reset or relaunch,
+     *       or a host-side patch such as a debugger breakpoint.
+     *   <li>The core flushes on its own on {@code FENCE.I}, when the cacheable ranges change, and
+     *       at {@link #step} entry when the bus instance, the {@link RV32IMAState} instance, its
+     *       {@code hartId}, {@code ramOffset} or {@code ramSize} differ from the previous cached
+     *       call.
+     *   <li>A hit never skips the fetch checks the core performs itself: the window bound and
+     *       alignment are checked on every instruction, and an entry filled in M-mode never hits
+     *       in U-mode. Faulting fetches are never cached, and only instructions lying wholly inside
+     *       a declared cacheable range are, so other fetches reach the bus every time. A bus that
+     *       enforces finer permissions relies on rule 2 when they change.
+     * </ol>
+     *
+     * <p><b>Threading.</b> The cache belongs to this core and is touched only on the thread that
+     * calls {@link #step}. Call this method from that thread between {@code step} calls, or while
+     * the hart is quiescent and the embedder has established happens-before with that thread
+     * (for example, through the monitor it uses to halt and release the hart). Calling it
+     * concurrently with {@code step} is outside the contract.
+     */
+    public void flushDecodedCache() {
+        if (dcOps != null) {
+            Arrays.fill(dcOps, 0L);
+            dcFlushes++;
+        }
+    }
+
+    /**
+     * Declares {@code [base, base + size)} as cacheable code, and flushes the cache. Only memory
+     * whose instruction fetches have no side effects may be declared. Valid only between {@link
+     * #step} calls, under the same threading rule as {@link #flushDecodedCache()}. Ranges are
+     * recorded even if the core has no cache.
+     *
+     * @param base the range's first address (unsigned).
+     * @param size the range's length in bytes (unsigned), not zero.
+     * @throws IllegalArgumentException if {@code size} is zero or the range extends past {@code
+     *     0xFFFFFFFF}.
+     */
+    public void addDecodedCacheRange(int base, int size) {
+        long start = Integer.toUnsignedLong(base);
+        long end = start + Integer.toUnsignedLong(size);
+        if (size == 0 || end > 0x1_0000_0000L) {
+            throw new IllegalArgumentException("invalid cacheable range: base 0x" + Integer.toHexString(base)
+                    + ", size 0x" + Integer.toHexString(size));
+        }
+        long[] ranges = Arrays.copyOf(dcRanges, dcRanges.length + 2);
+        ranges[ranges.length - 2] = start;
+        ranges[ranges.length - 1] = end;
+        dcRanges = ranges;
+        flushDecodedCache();
+    }
+
+    /**
+     * Removes every cacheable range, and flushes the cache. Until a range is added again, nothing
+     * is cached. Valid only between {@link #step} calls, under the same threading rule as {@link
+     * #flushDecodedCache()}.
+     */
+    public void clearDecodedCacheRanges() {
+        dcRanges = new long[0];
+        flushDecodedCache();
+    }
+
+    /**
+     * Returns how many instructions were fetched into the cache. Hits are instructions executed
+     * through the cache ({@link RV32IMAState#getCycle()}'s growth) minus fills and delegations.
+     *
+     * @return the number of cache fills since construction.
+     */
+    public long getDecodedCacheFills() {
+        return dcFills;
+    }
+
+    /**
+     * Returns how many times the cache was flushed, by the embedder or by the core.
+     *
+     * @return the number of flushes since construction.
+     */
+    public long getDecodedCacheFlushes() {
+        return dcFlushes;
+    }
+
+    /**
+     * Returns how many cache hits check mode compared against memory.
+     *
+     * @return the number of check-mode comparisons since construction.
+     */
+    public long getDecodedCacheChecks() {
+        return dcChecks;
+    }
+
+    /**
+     * Returns how many instructions the cached path handed to the uncached interpreter: those
+     * outside every cacheable range, those without a fast handler, and those that trap on fetch
+     * checks.
+     *
+     * @return the number of delegated instructions since construction.
+     */
+    public long getDecodedCacheDelegations() {
+        return dcDelegations;
+    }
+
+    /** The fast-handler entry for a fetched instruction word (the expansion, for compressed code). */
+    private static long dcPredecode(int ir, int instrLen) {
+        int opcode = ir & 0x7f;
+        int rd = (ir >> 7) & 0x1f;
+        int funct3 = (ir >> 12) & 0x7;
+        int funct7 = ir >>> 25;
+        int iImm = ir >> 20;
+        int handler = 0;
+        int imm = 0;
+        switch (opcode) {
+            case 0x37 -> {
+                handler = DC_LUI;
+                imm = ir & 0xfffff000;
             }
-            state.mepc = pc;
-            state.mstatus = (state.mstatus & ~(MSTATUS_MIE | MSTATUS_MPIE | MSTATUS_MPP))
-                    | ((state.mstatus & MSTATUS_MIE) << 4)
-                    | ((state.extraflags & EXTRAFLAG_PRIV_MASK) << MSTATUS_MPP_SHIFT);
-            pc = state.mtvec;
-            state.extraflags |= PRIV_MACHINE; // Enter machine mode
-            trap = 0;
+            case 0x17 -> {
+                handler = DC_AUIPC;
+                imm = ir & 0xfffff000;
+            }
+            case 0x6F -> {
+                handler = DC_JAL;
+                imm = ((ir & 0x80000000) >> 11)
+                        | ((ir & 0x7fe00000) >> 20)
+                        | ((ir & 0x00100000) >> 9)
+                        | (ir & 0x000ff000);
+            }
+            case 0x67 -> { // the opcode switch executes JALR whatever funct3 is
+                handler = DC_JALR;
+                imm = iImm;
+            }
+            case 0x63 -> {
+                handler = DC_BRANCH[funct3];
+                rd = 0;
+                imm = ((ir & 0xf00) >> 7) | ((ir & 0x7e000000) >> 20) | ((ir & 0x80) << 4) | ((ir >> 31) << 12);
+            }
+            case 0x03 -> {
+                handler = DC_LOAD[funct3];
+                imm = iImm;
+            }
+            case 0x23 -> {
+                handler = DC_STORE[funct3];
+                rd = 0;
+                imm = ((ir >> 7) & 0x1f) | ((ir >> 20) & ~0x1f);
+            }
+            case 0x13 -> {
+                if (funct3 == 1) {
+                    handler = funct7 == 0 ? DC_SLLI : 0;
+                } else if (funct3 == 5) {
+                    handler = funct7 == 0 ? DC_SRLI : funct7 == 0x20 ? DC_SRAI : 0;
+                } else {
+                    handler = DC_OP_IMM[funct3];
+                }
+                imm = (funct3 == 1 || funct3 == 5) ? (iImm & 0x1f) : iImm;
+            }
+            case 0x33 -> {
+                if (funct7 == 0) {
+                    handler = DC_OP[funct3];
+                } else if (funct7 == 0x20) {
+                    handler = funct3 == 0 ? DC_SUB : funct3 == 5 ? DC_SRA : 0;
+                } else if (funct7 == 1 && funct3 == 0) {
+                    handler = DC_MUL;
+                }
+            }
+            default -> {}
+        }
+        if (handler == 0) {
+            handler = DC_GENERIC;
+        }
+        int meta = handler
+                | (rd << 6)
+                | (((ir >> 15) & 0x1f) << 11)
+                | (((ir >> 20) & 0x1f) << 16)
+                | (instrLen == 2 ? DC_COMPRESSED : 0);
+        return ((long) meta << 32) | Integer.toUnsignedLong(imm);
+    }
+
+    /**
+     * Fetches the instruction at {@code pc} through the bus exactly as {@link #runBatch} does.
+     *
+     * @return the word the opcode switch would act on in the low 32 bits and the instruction
+     *     length in the high 32 bits, or {@link #DC_FETCH_FAULT}.
+     */
+    private long dcFetch(RV32IMAState state, MemoryBus mem, int pc, int privilege) {
+        int ir;
+        int instrLen = 4;
+        try {
+            if (isaConfig.hasC()) {
+                int lowHalf =
+                        mem.readShort(pc, new AccessContext(state.hartId, privilege, AccessKind.FETCH, 2, 0)) & 0xffff;
+                if ((lowHalf & 0x3) == 0x3) {
+                    ir = mem.readInt(pc, new AccessContext(state.hartId, privilege, AccessKind.FETCH, 4, 0));
+                } else {
+                    ir = COMPRESSED_EXPANSION[lowHalf];
+                    instrLen = 2;
+                }
+            } else {
+                ir = mem.readInt(pc, new AccessContext(state.hartId, privilege, AccessKind.FETCH, 4, 0));
+            }
+        } catch (IndexOutOfBoundsException _) {
+            return DC_FETCH_FAULT;
+        }
+        return ((long) instrLen << 32) | Integer.toUnsignedLong(ir);
+    }
+
+    /**
+     * Whether the four bytes at {@code pc} lie inside the window and one cacheable range. Four
+     * bytes are required even for a compressed instruction, whose length is unknown before the
+     * fetch, so a fill never fetches a byte outside a cacheable range.
+     */
+    private boolean dcCacheable(int pc, int ofsPc, int ramSize) {
+        if (Integer.toUnsignedLong(ofsPc) + 4 > Integer.toUnsignedLong(ramSize)) {
+            return false;
+        }
+        long start = Integer.toUnsignedLong(pc);
+        long end = start + 4;
+        long[] ranges = dcRanges;
+        for (int i = 0; i < ranges.length; i += 2) {
+            if (start >= ranges[i] && end <= ranges[i + 1]) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Fetches and caches the instruction at {@code pc}, which {@link #dcCacheable} accepted.
+     *
+     * @return the new entry; 0 for a reserved compressed encoding, which is not cached; or
+     *     {@link #DC_FETCH_FAULT}.
+     */
+    private long dcFill(RV32IMAState state, MemoryBus mem, int pc, int privilege, int slot, int tag) {
+        long fetched = dcFetch(state, mem, pc, privilege);
+        if (fetched == DC_FETCH_FAULT) {
+            return DC_FETCH_FAULT;
+        }
+        int ir = (int) fetched;
+        if ((ir & 0x3) != 0x3) {
+            return 0; // a reserved compressed pattern; runBatch raises the illegal instruction
+        }
+        long op = dcPredecode(ir, (int) (fetched >>> 32));
+        dcTags[slot] = tag;
+        dcWords[slot] = ir;
+        dcOps[slot] = op;
+        dcFills++;
+        return op;
+    }
+
+    /** Check mode: refetches a hit through the bus and throws if the cached entry is stale. */
+    private void dcCheck(RV32IMAState state, MemoryBus mem, int pc, int privilege, int slot) {
+        dcChecks++;
+        long fetched = dcFetch(state, mem, pc, privilege);
+        int cachedLen = ((int) (dcOps[slot] >>> 32) & DC_COMPRESSED) != 0 ? 2 : 4;
+        long cached = ((long) cachedLen << 32) | Integer.toUnsignedLong(dcWords[slot]);
+        if (fetched != cached) {
+            String memory = fetched == DC_FETCH_FAULT
+                    ? "a fetch fault"
+                    : String.format("0x%08x (length %d)", (int) fetched, (int) (fetched >>> 32));
+            throw new IllegalStateException(String.format(
+                    "stale decoded instruction at pc 0x%08x: cached 0x%08x (length %d), memory has %s;"
+                            + " missing FENCE.I or flushDecodedCache()",
+                    pc, dcWords[slot], cachedLen, memory));
+        }
+    }
+
+    /**
+     * {@link #step}'s batch with the decoded cache, after the entry checks and with no pending
+     * interrupt. Semantics and batch boundaries are those of {@link #runBatch}.
+     */
+    private int stepCached(
+            RV32IMAState state,
+            MemoryBus mem,
+            int ramOffset,
+            int ramSize,
+            int count,
+            PostExecHook postExec,
+            CSRHook csrHook) {
+        if (mem != dcBus
+                || state != dcState
+                || state.hartId != dcHartId
+                || ramOffset != dcRamOffset
+                || ramSize != dcRamSize) {
+            flushDecodedCache();
+            dcBus = mem;
+            dcState = state;
+            dcHartId = state.hartId;
+            dcRamOffset = ramOffset;
+            dcRamSize = ramSize;
+        }
+        int[] tags = dcTags;
+        long[] ops = dcOps;
+        int[] regs = state.regs;
+        int mask = tags.length - 1;
+        boolean hasC = isaConfig.hasC();
+        int slotShift = hasC ? 1 : 2;
+        int alignMask = hasC ? 1 : 3;
+        int pc = state.pc;
+        long cycle = state.getCycle();
+
+        for (int icount = 0; icount < count; icount++) {
+            int privilege = state.extraflags & EXTRAFLAG_PRIV_MASK;
+            int ofsPc = pc - ramOffset;
+            int slot = 0;
+            long op = 0;
+            // A window or alignment failure leaves op == 0, and runBatch raises the trap.
+            if (Integer.compareUnsigned(ofsPc, ramSize) < 0 && (ofsPc & alignMask) == 0) {
+                int tag = ofsPc | (privilege & 1);
+                slot = (ofsPc >>> slotShift) & mask;
+                op = ops[slot];
+                if (tags[slot] != tag || op == 0) {
+                    op = dcCacheable(pc, ofsPc, ramSize) ? dcFill(state, mem, pc, privilege, slot, tag) : 0;
+                    if (op == DC_FETCH_FAULT) {
+                        // As runBatch's fetch fault: no hook call, mtval = pc.
+                        pc = commitTrap(state, pc, exceptionTrap(EXC_INSTRUCTION_ACCESS_FAULT), 0, pc, 4);
+                        state.setCycle(cycle + 1);
+                        state.pc = pc;
+                        return 0;
+                    }
+                } else if (dcCheckMode) {
+                    dcCheck(state, mem, pc, privilege, slot);
+                }
+            }
+            int meta = (int) (op >>> 32);
+            int handler = meta & DC_HANDLER_MASK;
+            if (handler <= DC_GENERIC) {
+                // Not cached, or no fast handler: run exactly this instruction uncached.
+                dcDelegations++;
+                state.pc = pc;
+                state.setCycle(cycle);
+                int result = runBatch(state, mem, ramOffset, ramSize, 1, postExec, csrHook, 0);
+                if (result != BATCH_CONTINUE) {
+                    return result & BATCH_WFI;
+                }
+                pc = state.pc;
+                cycle = state.getCycle();
+                continue;
+            }
+
+            cycle++;
+            int imm = (int) op;
+            int rd = (meta >>> 6) & 0x1f;
+            int rs1 = (meta >>> 11) & 0x1f;
+            int rs2 = (meta >>> 16) & 0x1f;
+            int instrLen = (meta & DC_COMPRESSED) != 0 ? 2 : 4;
+            int nextPc = pc + instrLen;
+            int rval = 0;
+            int trap = 0;
+            switch (handler) {
+                case DC_LUI -> rval = imm;
+                case DC_AUIPC -> rval = pc + imm;
+                case DC_JAL -> {
+                    rval = nextPc;
+                    nextPc = pc + imm;
+                }
+                case DC_JALR -> {
+                    rval = nextPc;
+                    nextPc = (regs[rs1] + imm) & ~1;
+                }
+                case DC_BEQ -> nextPc = regs[rs1] == regs[rs2] ? pc + imm : nextPc;
+                case DC_BNE -> nextPc = regs[rs1] != regs[rs2] ? pc + imm : nextPc;
+                case DC_BLT -> nextPc = regs[rs1] < regs[rs2] ? pc + imm : nextPc;
+                case DC_BGE -> nextPc = regs[rs1] >= regs[rs2] ? pc + imm : nextPc;
+                case DC_BLTU -> nextPc = Integer.compareUnsigned(regs[rs1], regs[rs2]) < 0 ? pc + imm : nextPc;
+                case DC_BGEU -> nextPc = Integer.compareUnsigned(regs[rs1], regs[rs2]) >= 0 ? pc + imm : nextPc;
+                case DC_LB, DC_LH, DC_LW, DC_LBU, DC_LHU -> {
+                    int addr = regs[rs1] + imm;
+                    try {
+                        rval = switch (handler) {
+                            case DC_LB ->
+                                mem.readByteSigned(
+                                        addr, new AccessContext(state.hartId, privilege, AccessKind.LOAD, 1, 0));
+                            case DC_LH ->
+                                mem.readShortSigned(
+                                        addr, new AccessContext(state.hartId, privilege, AccessKind.LOAD, 2, 0));
+                            case DC_LW ->
+                                mem.readInt(addr, new AccessContext(state.hartId, privilege, AccessKind.LOAD, 4, 0));
+                            case DC_LBU ->
+                                mem.readByte(addr, new AccessContext(state.hartId, privilege, AccessKind.LOAD, 1, 0))
+                                        & 0xFF;
+                            default ->
+                                mem.readShort(addr, new AccessContext(state.hartId, privilege, AccessKind.LOAD, 2, 0))
+                                        & 0xFFFF;
+                        };
+                    } catch (IndexOutOfBoundsException _) {
+                        trap = exceptionTrap(EXC_LOAD_ACCESS_FAULT);
+                        rval = addr;
+                    }
+                }
+                case DC_SB, DC_SH, DC_SW -> {
+                    int addr = regs[rs1] + imm;
+                    int value = regs[rs2];
+                    try {
+                        switch (handler) {
+                            case DC_SB ->
+                                mem.writeByte(
+                                        addr,
+                                        (byte) value,
+                                        new AccessContext(state.hartId, privilege, AccessKind.STORE, 1, 0));
+                            case DC_SH ->
+                                mem.writeShort(
+                                        addr,
+                                        (short) value,
+                                        new AccessContext(state.hartId, privilege, AccessKind.STORE, 2, 0));
+                            default ->
+                                mem.writeInt(
+                                        addr,
+                                        value,
+                                        new AccessContext(state.hartId, privilege, AccessKind.STORE, 4, 0));
+                        }
+                        state.reservationValid = false;
+                    } catch (IndexOutOfBoundsException _) {
+                        trap = exceptionTrap(EXC_STORE_ACCESS_FAULT);
+                        rval = addr;
+                    }
+                }
+                case DC_ADDI -> rval = regs[rs1] + imm;
+                case DC_SLTI -> rval = regs[rs1] < imm ? 1 : 0;
+                case DC_SLTIU -> rval = Integer.compareUnsigned(regs[rs1], imm) < 0 ? 1 : 0;
+                case DC_XORI -> rval = regs[rs1] ^ imm;
+                case DC_ORI -> rval = regs[rs1] | imm;
+                case DC_ANDI -> rval = regs[rs1] & imm;
+                case DC_SLLI -> rval = regs[rs1] << imm;
+                case DC_SRLI -> rval = regs[rs1] >>> imm;
+                case DC_SRAI -> rval = regs[rs1] >> imm;
+                case DC_ADD -> rval = regs[rs1] + regs[rs2];
+                case DC_SUB -> rval = regs[rs1] - regs[rs2];
+                case DC_SLL -> rval = regs[rs1] << regs[rs2];
+                case DC_SLT -> rval = regs[rs1] < regs[rs2] ? 1 : 0;
+                case DC_SLTU -> rval = Integer.compareUnsigned(regs[rs1], regs[rs2]) < 0 ? 1 : 0;
+                case DC_XOR -> rval = regs[rs1] ^ regs[rs2];
+                case DC_SRL -> rval = regs[rs1] >>> regs[rs2];
+                case DC_SRA -> rval = regs[rs1] >> regs[rs2];
+                case DC_OR -> rval = regs[rs1] | regs[rs2];
+                case DC_AND -> rval = regs[rs1] & regs[rs2];
+                default -> rval = regs[rs1] * regs[rs2]; // DC_MUL
+            }
+            if (trap != 0) {
+                // As runBatch's load/store access fault: hook first, then the trap; rd unwritten.
+                int ir = dcWords[slot];
+                if (postExec != null) postExec.onPostExec(pc, ir, trap);
+                pc = commitTrap(state, pc, trap, ir, rval, instrLen);
+                state.setCycle(cycle);
+                state.pc = pc;
+                return 0;
+            }
+            if (rd != 0) {
+                regs[rd] = rval;
+            }
+            if (postExec != null) postExec.onPostExec(pc, dcWords[slot], 0);
+            pc = nextPc;
         }
 
         state.setCycle(cycle);

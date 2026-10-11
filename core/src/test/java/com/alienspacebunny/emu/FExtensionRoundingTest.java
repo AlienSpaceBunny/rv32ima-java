@@ -87,7 +87,7 @@ public class FExtensionRoundingTest {
                 stateSetup.accept(state);
             }
             ram.writeInt(RAM_OFFSET, instrWord);
-            new RV32IMACore(config).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create(config).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
             return state;
         }
     }

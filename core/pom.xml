@@ -34,4 +34,41 @@
         </dependency>
     </dependencies>
 
+    <build>
+        <plugins>
+            <!-- Rerun the suite with a decoded instruction cache on every core (see TestCores):
+                 4 slots forces conflicts, 4096 is a realistic size. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>decoded-cache-4</id>
+                        <goals>
+                            <goal>test</goal>
+                        </goals>
+                        <configuration>
+                            <reportsDirectory>${project.build.directory}/surefire-reports-dc4</reportsDirectory>
+                            <systemPropertyVariables>
+                                <rv32emu.test.decodedCacheSlots>4</rv32emu.test.decodedCacheSlots>
+                            </systemPropertyVariables>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>decoded-cache-4096</id>
+                        <goals>
+                            <goal>test</goal>
+                        </goals>
+                        <configuration>
+                            <reportsDirectory>${project.build.directory}/surefire-reports-dc4096</reportsDirectory>
+                            <systemPropertyVariables>
+                                <rv32emu.test.decodedCacheSlots>4096</rv32emu.test.decodedCacheSlots>
+                            </systemPropertyVariables>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
 </project>

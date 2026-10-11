@@ -166,7 +166,7 @@ public class AccessContextTest {
             state.hartId = 7;
             backing.writeInt(RAM_OFFSET, 0x00000013); // nop
 
-            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            TestCores.create().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
 
             assertContext(bus.lastReadInt, 7, 3, AccessKind.FETCH, 4, 0);
         }
@@ -185,7 +185,7 @@ public class AccessContextTest {
             backing.writeByte(RAM_OFFSET + 100, (byte) 0x42);
             backing.writeInt(RAM_OFFSET, loadInstruction(0, 5, 1, 0)); // lb x5, 0(x1)
 
-            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            TestCores.create().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
 
             assertContext(bus.lastReadByteSigned, 2, 3, AccessKind.LOAD, 1, 0);
         }
@@ -203,7 +203,7 @@ public class AccessContextTest {
             state.regs[1] = RAM_OFFSET + 100;
             backing.writeInt(RAM_OFFSET, loadInstruction(1, 5, 1, 0)); // lh x5, 0(x1)
 
-            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            TestCores.create().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
 
             assertContext(bus.lastReadShortSigned, 2, 3, AccessKind.LOAD, 2, 0);
         }
@@ -221,7 +221,7 @@ public class AccessContextTest {
             state.regs[1] = RAM_OFFSET + 100;
             backing.writeInt(RAM_OFFSET, loadInstruction(2, 5, 1, 0)); // lw x5, 0(x1)
 
-            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            TestCores.create().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
 
             assertContext(bus.lastReadInt, 2, 3, AccessKind.LOAD, 4, 0);
         }
@@ -238,7 +238,7 @@ public class AccessContextTest {
             state.regs[1] = RAM_OFFSET + 100;
             backing.writeInt(RAM_OFFSET, loadInstruction(4, 5, 1, 0)); // lbu x5, 0(x1)
 
-            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            TestCores.create().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
 
             assertContext(bus.lastReadByte, 0, 3, AccessKind.LOAD, 1, 0);
         }
@@ -255,7 +255,7 @@ public class AccessContextTest {
             state.regs[1] = RAM_OFFSET + 100;
             backing.writeInt(RAM_OFFSET, loadInstruction(5, 5, 1, 0)); // lhu x5, 0(x1)
 
-            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            TestCores.create().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
 
             assertContext(bus.lastReadShort, 0, 3, AccessKind.LOAD, 2, 0);
         }
@@ -272,7 +272,7 @@ public class AccessContextTest {
             state.regs[1] = RAM_OFFSET + 100;
             backing.writeInt(RAM_OFFSET, storeInstruction(0, 1, 2, 0)); // sb x2, 0(x1)
 
-            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            TestCores.create().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
 
             assertContext(bus.lastWriteByte, 0, 3, AccessKind.STORE, 1, 0);
         }
@@ -289,7 +289,7 @@ public class AccessContextTest {
             state.regs[1] = RAM_OFFSET + 100;
             backing.writeInt(RAM_OFFSET, storeInstruction(1, 1, 2, 0)); // sh x2, 0(x1)
 
-            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            TestCores.create().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
 
             assertContext(bus.lastWriteShort, 0, 3, AccessKind.STORE, 2, 0);
         }
@@ -306,7 +306,7 @@ public class AccessContextTest {
             state.regs[1] = RAM_OFFSET + 100;
             backing.writeInt(RAM_OFFSET, storeInstruction(2, 1, 2, 0)); // sw x2, 0(x1)
 
-            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            TestCores.create().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
 
             assertContext(bus.lastWriteInt, 0, 3, AccessKind.STORE, 4, 0);
         }
@@ -325,7 +325,7 @@ public class AccessContextTest {
             state.regs[2] = 1;
             backing.writeInt(RAM_OFFSET, amoInstruction(0, 2, 3, 1, 2)); // amoadd.w x3, x2, (x1)
 
-            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            TestCores.create().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
 
             assertContext(bus.lastReadInt, 5, 3, AccessKind.AMO, 4, 0);
             assertContext(bus.lastWriteInt, 5, 3, AccessKind.AMO, 4, 0);
@@ -343,7 +343,7 @@ public class AccessContextTest {
             state.regs[1] = RAM_OFFSET + 100;
             backing.writeInt(RAM_OFFSET, amoInstruction(2, 2, 3, 1, 0)); // lr.w x3, (x1)
 
-            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            TestCores.create().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
 
             assertContext(bus.lastReadInt, 0, 3, AccessKind.AMO, 4, 2);
             assertNull(bus.lastWriteInt); // LR.W never writes
@@ -363,7 +363,7 @@ public class AccessContextTest {
             state.reservationAddr = RAM_OFFSET + 100;
             backing.writeInt(RAM_OFFSET, amoInstruction(3, 2, 3, 1, 0)); // sc.w x3, x0, (x1)
 
-            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            TestCores.create().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
 
             assertEquals(0, state.regs[3]); // SC succeeded -- this is exercising the write path
             // SC.W does not call readInt via the core at all (its local pre-check already knows
@@ -432,7 +432,7 @@ public class AccessContextTest {
             backing.writeInt(RAM_OFFSET, storeInstruction(2, 1, 2, 0)); // sw x2, 0(x1)
             backing.writeInt(RAM_OFFSET + 4, loadInstruction(2, 3, 1, 0)); // lw x3, 0(x1)
 
-            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 2, null, null);
+            TestCores.create().step(state, bus, RAM_OFFSET, ramSize, 0, 2, null, null);
 
             assertEquals(0x12345678, state.regs[3]);
         }
@@ -448,7 +448,7 @@ public class AccessContextTest {
             state.regs[1] = RAM_OFFSET + 100;
             backing.writeInt(RAM_OFFSET, loadInstruction(2, 5, 1, 0)); // lw x5, 0(x1)
 
-            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            TestCores.create().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
 
             assertEquals(0, bus.lastReadInt.privilege());
         }
@@ -518,6 +518,7 @@ public class AccessContextTest {
             backing.writeInt(RAM_OFFSET + 4, 0x30200073); // mret
             backing.writeInt(RAM_OFFSET + 8, loadInstruction(2, 6, 1, 0)); // lw x6, 0(x1)
 
+            // A plain core: the cached path fetches an MRET twice on a miss (fill, then interpreter).
             new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 3, null, null);
 
             assertEquals(5, bus.readInts.size());
@@ -540,6 +541,7 @@ public class AccessContextTest {
             state.regs[1] = RAM_OFFSET + 100;
             backing.writeInt(RAM_OFFSET, 0x00000073); // ecall from user mode
             backing.writeInt(RAM_OFFSET + 64, loadInstruction(2, 5, 1, 0)); // handler: lw x5, 0(x1)
+            // A plain core: the cached path fetches an ECALL twice on a miss (fill, then interpreter).
             RV32IMACore core = new RV32IMACore();
 
             core.step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
@@ -563,7 +565,7 @@ public class AccessContextTest {
             state.hartId = 1;
             backing.writeInt(RAM_OFFSET, 0x00000013); // nop
             backing.writeInt(RAM_OFFSET + 4, 0x00000013); // nop
-            RV32IMACore core = new RV32IMACore();
+            RV32IMACore core = TestCores.create();
 
             core.step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
             state.hartId = 9;
@@ -586,7 +588,7 @@ public class AccessContextTest {
             state.regs[1] = RAM_OFFSET + 100;
             backing.writeInt(RAM_OFFSET, amoInstruction(1, 0, 3, 1, 2)); // amoswap.b x3, x2, (x1)
             backing.writeInt(RAM_OFFSET + 4, amoInstruction(20, 1, 3, 1, 2)); // amomax.h x3, x2, (x1)
-            RV32IMACore core = new RV32IMACore(new IsaConfig(false, false, false, false, true));
+            RV32IMACore core = TestCores.create(new IsaConfig(false, false, false, false, true));
 
             core.step(state, bus, RAM_OFFSET, ramSize, 0, 2, null, null);
 

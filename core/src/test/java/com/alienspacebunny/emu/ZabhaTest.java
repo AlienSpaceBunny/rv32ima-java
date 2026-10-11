@@ -35,7 +35,7 @@ public class ZabhaTest {
             state.regs[2] = 0x05;
             ram.writeInt(RAM_OFFSET, amoInstruction(0, 0, 3, 1, 2)); // amoadd.b x3, x2, (x1)
 
-            new RV32IMACore(ZABHA).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create(ZABHA).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
 
             assertEquals(0x07, state.regs[3]); // rd = old value, sign-extended (positive here)
             assertEquals(0x0c, Byte.toUnsignedInt(ram.readByte(RAM_OFFSET + 0x40))); // 0x07+0x05
@@ -53,7 +53,7 @@ public class ZabhaTest {
             state.regs[2] = 0x01;
             ram.writeInt(RAM_OFFSET, amoInstruction(1, 0, 3, 1, 2)); // amoswap.b x3, x2, (x1)
 
-            new RV32IMACore(ZABHA).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create(ZABHA).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
 
             assertEquals(0xffffffff, state.regs[3]);
             assertEquals(0x01, Byte.toUnsignedInt(ram.readByte(RAM_OFFSET + 0x40)));
@@ -69,7 +69,7 @@ public class ZabhaTest {
             state.regs[2] = 0x1234;
             ram.writeInt(RAM_OFFSET, amoInstruction(1, 1, 3, 1, 2)); // amoswap.h x3, x2, (x1)
 
-            new RV32IMACore(ZABHA).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create(ZABHA).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
 
             assertEquals(0xffffffff, state.regs[3]);
             assertEquals((short) 0x1234, ram.readShort(RAM_OFFSET + 0x40));
@@ -86,7 +86,7 @@ public class ZabhaTest {
             state.regs[2] = 0x01;
             ram.writeInt(RAM_OFFSET, amoInstruction(16, 0, 3, 1, 2)); // amomin.b x3, x2, (x1)
 
-            new RV32IMACore(ZABHA).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create(ZABHA).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
 
             assertEquals(0xffffff80, state.regs[3]); // old value, sign-extended
             // signed min(-128, 1) == -128: memory unchanged
@@ -103,7 +103,7 @@ public class ZabhaTest {
             state.regs[2] = 0x01;
             ram.writeInt(RAM_OFFSET, amoInstruction(24, 0, 3, 1, 2)); // amominu.b x3, x2, (x1)
 
-            new RV32IMACore(ZABHA).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create(ZABHA).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
 
             assertEquals(0xffffff80, state.regs[3]); // old value, still sign-extended
             // unsigned min(128, 1) == 1: memory updated (opposite of the signed case above)
@@ -120,7 +120,7 @@ public class ZabhaTest {
             state.regs[2] = 0xdeadbeff; // low byte 0xff; upper bits must be ignored
             ram.writeInt(RAM_OFFSET, amoInstruction(4, 0, 3, 1, 2)); // amoxor.b x3, x2, (x1)
 
-            new RV32IMACore(ZABHA).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create(ZABHA).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
 
             assertEquals(0x0f, state.regs[3]);
             assertEquals(0xf0, Byte.toUnsignedInt(ram.readByte(RAM_OFFSET + 0x40))); // 0x0f ^ 0xff
@@ -134,7 +134,7 @@ public class ZabhaTest {
             state.regs[1] = RAM_OFFSET + 0x40;
             ram.writeInt(RAM_OFFSET, amoInstruction(2, 0, 3, 1, 0)); // lr.b x3, (x1) -- not a real op
 
-            new RV32IMACore(ZABHA).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create(ZABHA).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
 
             assertEquals(2, state.mcause); // illegal instruction
         }
@@ -148,7 +148,7 @@ public class ZabhaTest {
             state.regs[2] = 1;
             ram.writeInt(RAM_OFFSET, amoInstruction(0, 0, 3, 1, 2)); // amoadd.b, no Zabha
 
-            new RV32IMACore().step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create().step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
 
             assertEquals(2, state.mcause); // illegal instruction
         }

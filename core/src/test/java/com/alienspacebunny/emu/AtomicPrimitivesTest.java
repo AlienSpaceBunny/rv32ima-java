@@ -143,7 +143,7 @@ public class AtomicPrimitivesTest {
             backing.writeInt(dataAddr, 5);
             backing.writeInt(RAM_OFFSET, amoInstruction(0, 2, 3, 1, 2)); // amoadd.w x3, x2, (x1)
 
-            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            TestCores.create().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
 
             assertEquals(1, bus.atomicRmwCalls);
             assertEquals(0, bus.lastAtomicRmwFunct5); // AMOADD.W's funct5
@@ -170,7 +170,7 @@ public class AtomicPrimitivesTest {
             state.regs[2] = 1;
             backing.writeInt(RAM_OFFSET, amoInstruction(1, 2, 3, 1, 2)); // amoswap.w x3, x2, (x1)
 
-            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            TestCores.create().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
 
             assertEquals(0x7777, state.regs[3]);
         }
@@ -187,7 +187,7 @@ public class AtomicPrimitivesTest {
             state.regs[1] = RAM_OFFSET + 0x100;
             backing.writeInt(RAM_OFFSET, amoInstruction(2, 2, 3, 1, 0)); // lr.w x3, (x1)
 
-            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            TestCores.create().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
 
             assertEquals(0, bus.atomicRmwCalls);
             assertEquals(0, bus.tryScAndStoreCalls);
@@ -206,7 +206,7 @@ public class AtomicPrimitivesTest {
             state.regs[1] = RAM_OFFSET + 0x100;
             backing.writeInt(RAM_OFFSET, amoInstruction(3, 2, 3, 1, 0)); // sc.w x3, x0, (x1)
 
-            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            TestCores.create().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
 
             assertEquals(1, state.regs[3]); // failed
             assertEquals(0, bus.tryScAndStoreCalls);
@@ -229,7 +229,7 @@ public class AtomicPrimitivesTest {
             state.reservationAddr = RAM_OFFSET + 0x100;
             backing.writeInt(RAM_OFFSET, amoInstruction(3, 2, 3, 1, 2)); // sc.w x3, x2, (x1)
 
-            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            TestCores.create().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
 
             assertEquals(0, state.regs[3]); // succeeded
             assertEquals(1, bus.tryScAndStoreCalls);
@@ -260,7 +260,7 @@ public class AtomicPrimitivesTest {
             backing.writeInt(RAM_OFFSET + 0x100, 0xdeadbeef);
             backing.writeInt(RAM_OFFSET, amoInstruction(3, 2, 3, 1, 2)); // sc.w x3, x2, (x1)
 
-            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            TestCores.create().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
 
             assertEquals(99, state.regs[3]); // the bus's rejection code, not the local check's
             assertEquals(1, bus.tryScAndStoreCalls);
@@ -286,7 +286,7 @@ public class AtomicPrimitivesTest {
             state.regs[2] = 10;
             backing.writeInt(RAM_OFFSET, amoInstruction(0, 2, 3, 1, 2)); // amoadd.w x3, x2, (x1)
 
-            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            TestCores.create().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
 
             assertEquals(1, bus.atomicRmwCalls);
             assertEquals(7, state.mcause);
@@ -311,7 +311,7 @@ public class AtomicPrimitivesTest {
             state.reservationAddr = dataAddr;
             backing.writeInt(RAM_OFFSET, amoInstruction(3, 2, 3, 1, 2)); // sc.w x3, x2, (x1)
 
-            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            TestCores.create().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
 
             assertEquals(1, bus.tryScAndStoreCalls);
             assertEquals(7, state.mcause);
@@ -333,7 +333,7 @@ public class AtomicPrimitivesTest {
             state.regs[1] = dataAddr;
             backing.writeInt(RAM_OFFSET, amoInstruction(2, 2, 3, 1, 0)); // lr.w x3, (x1)
 
-            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            TestCores.create().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
 
             assertEquals(4, state.mcause);
             assertEquals(dataAddr, state.mtval);
@@ -362,7 +362,7 @@ public class AtomicPrimitivesTest {
                 backing.writeInt(RAM_OFFSET, c[0]);
                 backing.writeInt(RAM_OFFSET + 0x100, 0);
 
-                new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+                TestCores.create().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
 
                 assertEquals(6, state.mcause, Integer.toHexString(c[0]));
                 assertEquals(dataAddr, state.mtval);
@@ -385,7 +385,7 @@ public class AtomicPrimitivesTest {
             state.regs[2] = 1;
             backing.writeInt(RAM_OFFSET, amoInstruction(0, 1, 3, 1, 2)); // amoadd.h
 
-            new RV32IMACore(new IsaConfig(false, false, false, false, true))
+            TestCores.create(new IsaConfig(false, false, false, false, true))
                     .step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
 
             assertEquals(6, state.mcause);
@@ -404,7 +404,7 @@ public class AtomicPrimitivesTest {
             state.regs[2] = 1;
             backing.writeInt(RAM_OFFSET, amoInstruction(0, 0, 3, 1, 2)); // amoadd.b
 
-            new RV32IMACore(new IsaConfig(false, false, false, false, true))
+            TestCores.create(new IsaConfig(false, false, false, false, true))
                     .step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
 
             assertEquals(0, state.mcause);
@@ -422,7 +422,7 @@ public class AtomicPrimitivesTest {
             int encoding = amoInstruction(2, 2, 3, 1, 2); // lr.w with rs2 = x2
             backing.writeInt(RAM_OFFSET, encoding);
 
-            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            TestCores.create().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
 
             assertEquals(2, state.mcause);
             assertEquals(encoding, state.mtval);
@@ -444,7 +444,7 @@ public class AtomicPrimitivesTest {
             backing.writeInt(RAM_OFFSET, amoInstruction(3, 2, 3, 1, 2)); // sc.w x3, x2, (x1)
             backing.writeInt(dataAddr, 0x11111111);
 
-            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            TestCores.create().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
 
             assertEquals(0, state.mcause);
             assertEquals(1, state.regs[3]); // failed, retired
@@ -469,7 +469,7 @@ public class AtomicPrimitivesTest {
             state.regs[3] = 0x7777;
             backing.writeInt(RAM_OFFSET, amoInstruction(3, 2, 3, 1, 2)); // sc.w x3, x2, (x1)
 
-            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            TestCores.create().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
 
             assertEquals(7, state.mcause);
             assertEquals(dataAddr, state.mtval);
@@ -490,7 +490,7 @@ public class AtomicPrimitivesTest {
             state.regs[1] = dataAddr;
             ram.writeInt(RAM_OFFSET, amoInstruction(3, 2, 3, 1, 2)); // sc.w x3, x2, (x1)
 
-            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            TestCores.create().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
 
             assertEquals(7, state.mcause);
             assertEquals(dataAddr, state.mtval);
@@ -510,7 +510,7 @@ public class AtomicPrimitivesTest {
             state.reservationAddr = dataAddr;
             backing.writeInt(RAM_OFFSET, amoInstruction(3, 2, 3, 1, 2)); // sc.w x3, x2, (x1)
 
-            new RV32IMACore().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
+            TestCores.create().step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
 
             assertEquals(7, state.mcause);
             assertEquals(false, state.reservationValid);
@@ -528,7 +528,7 @@ public class AtomicPrimitivesTest {
             state.regs[1] = RAM_OFFSET + ramSize; // unmapped
             ram.writeInt(RAM_OFFSET, amoInstruction(2, 2, 3, 1, 0)); // lr.w x3, (x1)
 
-            new RV32IMACore().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
+            TestCores.create().step(state, ram, RAM_OFFSET, ramSize, 0, 1, null, null);
 
             assertEquals(5, state.mcause);
             assertEquals(false, state.reservationValid);
@@ -550,7 +550,7 @@ public class AtomicPrimitivesTest {
             backing.writeInt(RAM_OFFSET, amoInstruction(2, 2, 3, 1, 0)); // lr.w x3, (x1)
             backing.writeInt(RAM_OFFSET + 4, amoInstruction(3, 2, 3, 1, 2)); // sc.w x3, x2, (x1)
             backing.writeInt(RAM_OFFSET + 0x80, amoInstruction(3, 2, 3, 1, 2)); // sc.w at mtvec
-            RV32IMACore core = new RV32IMACore();
+            RV32IMACore core = TestCores.create();
 
             state.regs[1] = dataAddr;
             core.step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);
@@ -583,7 +583,7 @@ public class AtomicPrimitivesTest {
             backing.writeInt(RAM_OFFSET, amoInstruction(2, 2, 3, 1, 0)); // lr.w x3, (x1)
             backing.writeInt(RAM_OFFSET + 4, amoInstruction(2, 2, 3, 1, 0)); // lr.w again
             backing.writeInt(RAM_OFFSET + 0x80, amoInstruction(3, 2, 3, 1, 2)); // sc.w at mtvec
-            RV32IMACore core = new RV32IMACore();
+            RV32IMACore core = TestCores.create();
 
             state.regs[1] = dataAddr;
             core.step(state, bus, RAM_OFFSET, ramSize, 0, 1, null, null);

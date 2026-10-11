@@ -13,9 +13,9 @@
 | [CPU_ARCHITECTURE_REVIEW_RESPONSE.md](CPU_ARCHITECTURE_REVIEW_RESPONSE.md) | Response to V-32's 2026-10-10 CPU architecture/native-performance review: assessment, ranked directions, recommended next step. Active until V-32 acknowledges it. |
 | [performance/2026-10-10/README.md](performance/2026-10-10/README.md) | JVM vs Native Image measurements behind the review: method, provenance, baseline decomposition, landed and rejected candidates. |
 | [PREDECODE_EXPERIMENT_PLAN.md](PREDECODE_EXPERIMENT_PLAN.md) | Complete: bounded upper-bound experiment for decode-once execution. Its decision rule's top band was met (1.46–2.51× native on CoreMark); it lists the requirements a real design would face. |
-| [DECODED_ICACHE_PLAN.md](DECODED_ICACHE_PLAN.md) | **Current work.** Steps 1–6 done on `feature/decoded-icache`; V-32 trial build out. Agreed design and ordered next steps for the opt-in decoded instruction cache: API, structure, validation, measurement, V-32 trial build. |
+| [DECODED_ICACHE_PLAN.md](DECODED_ICACHE_PLAN.md) | Complete: merged as `0.1.8-SNAPSHOT`. Agreed design and ordered next steps for the opt-in decoded instruction cache: API, structure, validation, measurement, V-32 trial build. |
 | [performance/2026-10-10/decoded-cache/README.md](performance/2026-10-10/decoded-cache/README.md) | Decoded-cache measurements: default-off cost, sizing at 256–16K slots against `main` and the tier-2 ceiling, counters, and the Native Image unswitching finding. |
-| [V32_DECODED_CACHE_TRIAL.md](V32_DECODED_CACHE_TRIAL.md) | **Current.** Trial handoff to V-32 for `0.1.8-icache-SNAPSHOT`: wiring the AP, flush sites, a check-mode boot and four timed boot configurations. Awaiting V-32's results. |
+| [V32_CACHE_MERGE_AND_EXECUTION_API_FEEDBACK.md](V32_CACHE_MERGE_AND_EXECUTION_API_FEEDBACK.md) | **Current.** V-32's trial result and merge recommendation, plus its requirements for a batched execution API with per-attempt boundaries. Input to the execution API design. |
 | [V32_AP_STEPPING_RESPONSE.md](V32_AP_STEPPING_RESPONSE.md) | V-32's answer on AP stepping: `step(count=1)` is its current path (cache off there on HotSpot is an acceptable fallback); committed per-instruction boundaries could live inside a batched call; pacing belongs to the embedder; the core API is unstable and changes are coordinated between the repos. |
 | [DECODED_ICACHE_PROTOCOL.md](DECODED_ICACHE_PROTOCOL.md) | Cache coherence protocol (`FENCE.I` plus embedder flush) and V-32 case mapping, accepted by V-32. |
 | [CPU_REVIEW_FOLLOWUP_RESPONSE.md](CPU_REVIEW_FOLLOWUP_RESPONSE.md) | CPU agent's reply to V-32's cache review and boot follow-up: agreements, Nate's decisions, boot-result analysis, and an addendum on V-32's AP WFI/attempt loop. |
@@ -31,6 +31,7 @@ preserved; link targets are adjusted for the archive layout or the source reposi
 
 | Document | Superseded by |
 |---|---|
+| [archive/V32_DECODED_CACHE_TRIAL.md](archive/V32_DECODED_CACHE_TRIAL.md) | Completed trial handoff for `0.1.8-icache-SNAPSHOT`; V-32's result is in [V32_CACHE_MERGE_AND_EXECUTION_API_FEEDBACK.md](V32_CACHE_MERGE_AND_EXECUTION_API_FEEDBACK.md). |
 | [archive/DECODED_ICACHE_SCOPE_DRAFT_2026-10-10.md](archive/DECODED_ICACHE_SCOPE_DRAFT_2026-10-10.md) | [Agreed plan](DECODED_ICACHE_PLAN.md) and [protocol](DECODED_ICACHE_PROTOCOL.md); keeps the nine questions V-32 answered. |
 | [archive/CLEANUP_TODO.md](archive/CLEANUP_TODO.md) | Completed C1–C7 standards pass; retained as implementation history. |
 | [archive/FEATURE_REQUEST.md](archive/FEATURE_REQUEST.md) | Original V-32 request; implemented by `FEATURE_REQUEST_PLAN.md`. |

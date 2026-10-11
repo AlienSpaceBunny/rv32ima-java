@@ -1,9 +1,14 @@
 # Decoded instruction cache: agreed plan and next steps
 
-Agreed 2026-10-10 by Nate, V-32 and the CPU agent. Status: **steps 1–5 done on branch
-`feature/decoded-icache` (`d8e55aa`). Step 6 is under way:** Nate asked for V-32's trial before
-deciding on the merge. The trial build `0.1.8-icache-SNAPSHOT` is installed, and the handoff is
-[V32_DECODED_CACHE_TRIAL.md](V32_DECODED_CACHE_TRIAL.md). The evidence is in
+Agreed 2026-10-10 by Nate, V-32 and the CPU agent. Status: **complete; merged to `main` as
+`0.1.8-SNAPSHOT` on 2026-10-11.**
+- **V-32 trial** ([handoff](archive/V32_DECODED_CACHE_TRIAL.md)): 4K AP slots cut headless
+  boot time by 36–44% on JVM and 38–42% on native.
+- **Decision:** V-32 recommended merging
+  ([feedback](V32_CACHE_MERGE_AND_EXECUTION_API_FEEDBACK.md)) and Nate approved.
+- **Still with V-32:** production enablement.
+
+The evidence is in
 [performance/2026-10-10/decoded-cache](performance/2026-10-10/decoded-cache/README.md).
 
 **Where the implementation departs from the design below, and why** (measured on native):

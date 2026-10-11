@@ -1,13 +1,13 @@
-# Session Checkpoint — 2026-10-10
+# Session Checkpoint — 2026-10-11
 
 ## Current state
 
-`main` is on **`0.1.7-SNAPSHOT`** and carries the CPU architecture review work, fast-forwarded
-from local branch `claude-review`, which can now be deleted. The public API remains unfrozen
-and publishing is on hold. The first real release target is **`0.2.0`**; no release is
-authorized. CPU feature Phases 1–5 are complete; see
-[FEATURE_REQUEST_PLAN.md](docs/FEATURE_REQUEST_PLAN.md) and the
-[checkpoint archive](docs/archive/CHECKPOINT_PRE_COMPACTION_2026-10-06.md).
+`main` is on **`0.1.8-SNAPSHOT`**. It carries the CPU architecture review work and the opt-in
+decoded instruction cache. The public API remains unfrozen, and publishing is on hold. The
+first real release target is **`0.2.0`**; no release is authorized.
+
+CPU feature Phases 1–5 are complete; see [FEATURE_REQUEST_PLAN.md](docs/FEATURE_REQUEST_PLAN.md)
+and the [checkpoint archive](docs/archive/CHECKPOINT_PRE_COMPACTION_2026-10-06.md).
 
 **V-32's CPU architecture review is answered.** The response is
 [CPU_ARCHITECTURE_REVIEW_RESPONSE.md](docs/CPU_ARCHITECTURE_REVIEW_RESPONSE.md); the evidence
@@ -24,46 +24,47 @@ pushed, with patches beside the evidence.
 
 ## Resume / pending
 
-1. **Decoded instruction cache: V-32 trial under way on branch `feature/decoded-icache`,
-   pushed, at version `0.1.8-icache-SNAPSHOT`.**
-   - **Where things stand:**
-     - [V32_DECODED_CACHE_TRIAL.md](docs/V32_DECODED_CACHE_TRIAL.md) is the handoff, sent to
-       V-32 through Nate.
-     - The build is installed in `~/.m2`.
-     - `0.1.7-SNAPSHOT` was reinstalled from `main`. An earlier install had held early branch
-       code.
-   - **Next:** wait for V-32's check-mode boot and timed boots, then Nate decides on the merge
-     (plan step 7).
-   - **At merge:** set the real version, not `-icache`.
-   - **Also pending: a design draft for a committed-attempt API, for V-32's review.** This is a
-     batched call that keeps each instruction's commit, interrupt and stop points. The draft
-     builds on `runCached()`; see
-     [V32_AP_STEPPING_RESPONSE.md](docs/V32_AP_STEPPING_RESPONSE.md). The core API is unstable
-     and has no external consumers, so changes are coordinated with V-32 directly. Nate approved
-     the draft. Whether to send it before or after V-32's benchmark is still open.
-   - **Evidence:** [plan](docs/DECODED_ICACHE_PLAN.md) and
+1. **Next: draft a design for a batched execution API for V-32's review.** Nate has approved
+   drafting it.
+   - **What it is:** one core call that runs many instructions while keeping each one's
+     commit, interrupt and stop points.
+   - **Requirements:**
+     [V32_CACHE_MERGE_AND_EXECUTION_API_FEEDBACK.md](docs/V32_CACHE_MERGE_AND_EXECUTION_API_FEEDBACK.md),
+     with background in [V32_AP_STEPPING_RESPONSE.md](docs/V32_AP_STEPPING_RESPONSE.md). They
+     are:
+     - owner-thread callbacks before and after each attempt;
+     - a committed stop with no exceptions;
+     - attempt and exit accounting;
+     - defined timer semantics;
+     - pacing and locks owned by the embedder;
+     - no per-attempt allocation, and execution code shared by the cached and uncached paths.
+   - **Starting contract:** V-32's committed-attempt oracle. Port its cases with the cache
+     off, on and in check mode.
+   - **Constraints:**
+     - The core API is unstable and has no external consumers. Coordinate changes and V-32's
+       migration directly.
+     - Build it on `runCached()`. Keep inner loops out of interpreter loops; they stop Native
+       Image's loop unswitching.
+     - Evaluate it with V-32's real callbacks on JVM and native.
+   - **Related:** the existing `PostExecHook` quirk, where a taken jump reports target minus
+     instruction length. It is not fixed, and the new API should not inherit it.
+2. **Decoded instruction cache: merged as `0.1.8-SNAPSHOT` (2026-10-11).**
+   - [Plan](docs/DECODED_ICACHE_PLAN.md) and
      [measurements](docs/performance/2026-10-10/decoded-cache/README.md).
-   - **Key results:**
-     - Cache off is 0.98–1.01× of `main`, except `step(count=1)` on `mono` at +4–9%.
-     - Cache on gives CoreMark 1.65–2.17× native and 1.47–1.50× HotSpot.
-     - `step(count=1)` is 1.26–1.77× native but 0.82× on HotSpot. V-32 accepts the cache being
-       off there as a fallback.
-   - **Open:** the existing `PostExecHook` quirk, where a taken jump reports target minus
-     instruction length. It is not fixed.
-   - **Native Image rule learned:** keep inner loops (array fills, flushes) out of interpreter
-     loops; they stop loop unswitching.
-   - **Housekeeping:** `exp/predecode` stays local. Local branch `claude-review` can be deleted.
-2. **Optional, not blocking:** boot attribution, which is V-32's call. `getCycle()` counts
+   - V-32's trial: 4K AP slots cut boot time 36–44% on JVM and 38–42% on native.
+   - Production enablement is V-32's change.
+   - Housekeeping: `exp/predecode` stays local. Branch `feature/decoded-icache` (also on
+     `origin`) and local `claude-review` can be deleted.
+3. **Optional, not blocking:** boot attribution, which is V-32's call. `getCycle()` counts
    instructions *attempted*, including trapping ones, not retired instructions.
-3. **Unchanged, carried over:**
+4. **Unchanged, carried over:**
    - The release-hold decision and API-freeze review ([RELEASE_TODO.md](RELEASE_TODO.md)).
    - The Central smoke test.
    - Never start the release workflow without Nate's explicit request. D stays deferred.
 
-**Validation status:** on `feature/decoded-icache` at `0.1.8-icache-SNAPSHOT`, `./mvnw clean install` is green: the core
-suite runs three times (uncached, and every core cached at 4 and 4096 slots), 570 tests each,
-plus 1 CLI and 6 bench tests, with 0 Checkstyle and 0 SpotBugs findings. `main` is unchanged at
-`0.1.7-SNAPSHOT`, and its gate passed on reinstall.
+**Validation status:** `main` at `0.1.8-SNAPSHOT`: `./mvnw clean install` is green. The
+core suite runs three times (uncached, and every core cached at 4 and 4096 slots), 570 tests
+each, plus 1 CLI and 6 bench tests, with 0 Checkstyle and 0 SpotBugs findings.
 
 ## Constraints for future work
 

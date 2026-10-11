@@ -1,0 +1,15 @@
+cache-stats,label,workload,slots,invocations,instructions,fills,bypasses,delegations,flushes
+cache-stats,dc4096,reg-ima,4096,3,15000018,33,0,3,7
+cache-stats,dc4096,reg-ap,4096,3,15000018,33,0,3,7
+cache-stats,dc4096,regc-ap,4096,3,15000018,33,0,3,7
+cache-stats,dc4096,reg-ap-step1,4096,3,15000018,33,0,3,7
+cache-stats,dc4096,copy4k-ap,4096,3,33057816,63,0,3,7
+cache-stats,dc4096,copy6m-ap,4096,3,33030186,63,0,3,7
+cache-stats,dc4096,mix-ap,4096,3,10200024,75,0,1800003,7
+cache-stats,dc4096,fp-ap,4096,3,4800015,39,0,3600003,7
+cache-stats,dc4096,spread-ap,4096,3,21829797,12260145,0,3,7
+cache-stats,dc4096,collide-ap,4096,3,14400033,10125057,0,3,7
+cache-stats,dc4096,coremark-c,4096,3,7738488,5475,0,129429,7
+cache-stats,dc4096,coremark-noc,4096,3,7738488,5475,0,129429,7
+cache-stats,dc4096,fpkernels-c,4096,3,5822643,2169,3,4288095,7
+cache-stats,dc4096,fpkernels-noc,4096,3,5822643,2172,0,4288092,7

@@ -1,0 +1,15 @@
+cache-stats,label,workload,slots,invocations,instructions,fills,bypasses,delegations,flushes
+cache-stats,dc256,reg-ima,256,3,15000018,33,0,3,7
+cache-stats,dc256,reg-ap,256,3,15000018,33,0,3,7
+cache-stats,dc256,regc-ap,256,3,15000018,33,0,3,7
+cache-stats,dc256,reg-ap-step1,256,3,15000018,33,0,3,7
+cache-stats,dc256,copy4k-ap,256,3,33057816,63,0,3,7
+cache-stats,dc256,copy6m-ap,256,3,33030186,63,0,3,7
+cache-stats,dc256,mix-ap,256,3,10200024,75,0,1800003,7
+cache-stats,dc256,fp-ap,256,3,4800015,39,0,3600003,7
+cache-stats,dc256,spread-ap,256,3,21829797,17530083,0,3,7
+cache-stats,dc256,collide-ap,256,3,14400033,11250051,0,3,7
+cache-stats,dc256,coremark-c,256,3,7738488,251529,0,129429,7
+cache-stats,dc256,coremark-noc,256,3,7738488,191517,0,129429,7
+cache-stats,dc256,fpkernels-c,256,3,5822643,48891,3,4288095,7
+cache-stats,dc256,fpkernels-noc,256,3,5822643,2172,0,4288092,7

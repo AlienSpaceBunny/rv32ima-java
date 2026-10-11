@@ -1,0 +1,329 @@
+{
+  "started": "2026-10-10T20:17:58-0700",
+  "git_rev": "bc37ec5b3ccf2e16a4d439edbbd4a24fa1ecd6a7",
+  "git_dirty": false,
+  "jar": "/home/nate/work/rv32ima-java/bench/out/jars/pd-t2.jar",
+  "jar_sha256": "5b75ddbb24359b70ae93decb8870107b0d7cf35fd4f9d6c915542235654ae986",
+  "java": "openjdk version \"25.0.4.1\" 2026-08-18 LTS\nOpenJDK Runtime Environment Corretto-25.0.4.8.1 (build 25.0.4.1+8-LTS)\nOpenJDK 64-Bit Server VM Corretto-25.0.4.8.1 (build 25.0.4.1+8-LTS, mixed mode, sharing)",
+  "native_images": {
+    "/home/nate/work/rv32ima-java/bench/out/native-pd-t2/poly": {
+      "sha256": "538b6fdfdc848593d5640652a083e7f1964d77ead9f71f3111e3bc04842832e7",
+      "compiler": "Graal compiler: optimization level: 2, target machine: compatibility"
+    },
+    "/home/nate/work/rv32ima-java/bench/out/native-pd-t2/mono-bytearray": {
+      "sha256": "1a5c1d1a56e24d2bfc5efb72359327cb37b61edc2495e82a0c79e20914ce73fc",
+      "compiler": "Graal compiler: optimization level: 2, target machine: compatibility"
+    },
+    "/home/nate/work/rv32ima-java/bench/out/native-pd-t2/mono-router": {
+      "sha256": "d75448f03418b9068fb673514805a87fd5d562ecf10bccb2352eb80128a9430f",
+      "compiler": "Graal compiler: optimization level: 2, target machine: compatibility"
+    },
+    "/home/nate/work/rv32ima-java/bench/out/native-pd-t2/poly-o3": {
+      "sha256": "ef7dbbc0c9ce360d8fa47ca1f9380fa5b065e3064fcc2c5e6ff5b690d5d20c40",
+      "compiler": "Graal compiler: optimization level: 3, target machine: compatibility"
+    }
+  },
+  "warmup_seconds": 10,
+  "samples_per_fork": 3,
+  "forks": 2,
+  "cpus": "2,3",
+  "processes": [
+    {
+      "name": "f1-jvm-pd-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "/home/nate/work/rv32ima-java/bench/out/jars/pd-t2.jar",
+        "--predecode",
+        "--bus",
+        "bytearray",
+        "--label",
+        "jvm-pd",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 11.0
+    },
+    {
+      "name": "f1-jvm-pd-router",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "/home/nate/work/rv32ima-java/bench/out/jars/pd-t2.jar",
+        "--predecode",
+        "--bus",
+        "router",
+        "--label",
+        "jvm-pd",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 11.0
+    },
+    {
+      "name": "f1-poly-pd-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/work/rv32ima-java/bench/out/native-pd-t2/poly",
+        "--predecode",
+        "--bus",
+        "bytearray",
+        "--label",
+        "poly-pd",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 13.8
+    },
+    {
+      "name": "f1-poly-pd-router",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/work/rv32ima-java/bench/out/native-pd-t2/poly",
+        "--predecode",
+        "--bus",
+        "router",
+        "--label",
+        "poly-pd",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 13.6
+    },
+    {
+      "name": "f1-mono-pd-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/work/rv32ima-java/bench/out/native-pd-t2/mono-bytearray",
+        "--predecode",
+        "--bus",
+        "bytearray",
+        "--label",
+        "mono-pd",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 13.9
+    },
+    {
+      "name": "f1-mono-pd-router",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/work/rv32ima-java/bench/out/native-pd-t2/mono-router",
+        "--predecode",
+        "--bus",
+        "router",
+        "--label",
+        "mono-pd",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 13.6
+    },
+    {
+      "name": "f1-poly-o3-pd-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/work/rv32ima-java/bench/out/native-pd-t2/poly-o3",
+        "--predecode",
+        "--bus",
+        "bytearray",
+        "--label",
+        "poly-o3-pd",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 13.5
+    },
+    {
+      "name": "f2-poly-o3-pd-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/work/rv32ima-java/bench/out/native-pd-t2/poly-o3",
+        "--predecode",
+        "--bus",
+        "bytearray",
+        "--label",
+        "poly-o3-pd",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 13.5
+    },
+    {
+      "name": "f2-mono-pd-router",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/work/rv32ima-java/bench/out/native-pd-t2/mono-router",
+        "--predecode",
+        "--bus",
+        "router",
+        "--label",
+        "mono-pd",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 13.6
+    },
+    {
+      "name": "f2-mono-pd-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/work/rv32ima-java/bench/out/native-pd-t2/mono-bytearray",
+        "--predecode",
+        "--bus",
+        "bytearray",
+        "--label",
+        "mono-pd",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 13.9
+    },
+    {
+      "name": "f2-poly-pd-router",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/work/rv32ima-java/bench/out/native-pd-t2/poly",
+        "--predecode",
+        "--bus",
+        "router",
+        "--label",
+        "poly-pd",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 13.5
+    },
+    {
+      "name": "f2-poly-pd-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/work/rv32ima-java/bench/out/native-pd-t2/poly",
+        "--predecode",
+        "--bus",
+        "bytearray",
+        "--label",
+        "poly-pd",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 13.8
+    },
+    {
+      "name": "f2-jvm-pd-router",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "/home/nate/work/rv32ima-java/bench/out/jars/pd-t2.jar",
+        "--predecode",
+        "--bus",
+        "router",
+        "--label",
+        "jvm-pd",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 11.1
+    },
+    {
+      "name": "f2-jvm-pd-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "/home/nate/work/rv32ima-java/bench/out/jars/pd-t2.jar",
+        "--predecode",
+        "--bus",
+        "bytearray",
+        "--label",
+        "jvm-pd",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 11.2
+    }
+  ],
+  "finished": "2026-10-10T20:20:59-0700",
+  "complete": true
+}

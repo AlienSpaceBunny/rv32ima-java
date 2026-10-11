@@ -24,15 +24,24 @@ pushed, with patches beside the evidence.
 
 ## Resume / pending
 
-1. **Decoded instruction cache: follow [DECODED_ICACHE_PLAN.md](docs/DECODED_ICACHE_PLAN.md),
-   "Next steps, in order".** All parties agree; nothing is built yet. Start with step 1, branch
-   `feature/decoded-icache` from `main`. Summary: opt-in and default-off, the `FENCE.I` plus
-   embedder-flush [protocol](docs/DECODED_ICACHE_PROTOCOL.md) (accepted by V-32), the
-   uncached loop unchanged, sizes 256/1K/4K/16K, and no preset bar: Nate judges. When Nate is
-   happy with the branch, cut a V-32 trial build (`0.1.8-icache-SNAPSHOT`, branch only) for
-   matched boot timing. Expect a small boot effect: V-32's AP runs `step(count=1)` per
-   instruction under a monitor and spins on WFI (see the
-   [addendum](docs/CPU_REVIEW_FOLLOWUP_RESPONSE.md#addendum-the-aps-wfi-and-attempt-loop-read-2026-10-10)).
+1. **Decoded instruction cache: steps 1–4 are done on branch `feature/decoded-icache`
+   (`d8e55aa` plus docs, pushed); step 5, Nate's review, is next.** Follow
+   [DECODED_ICACHE_PLAN.md](docs/DECODED_ICACHE_PLAN.md), whose status block lists where the build
+   departs from the design. Evidence:
+   [performance/2026-10-10/decoded-cache](docs/performance/2026-10-10/decoded-cache/README.md).
+   - **Cache off vs `main`:** 0.98–1.01× per-workload median on both runtimes;
+     `step(count=1)` is +4–9% on closed-world `mono` images.
+   - **Cache on (4K slots) vs `main`:** CoreMark 1.65–2.17× native and 1.47–1.50× HotSpot.
+     `step(count=1)` is 1.26–1.77× native but **0.82× on HotSpot**. Misses cost more than no
+     cache (`collide-ap` 0.63–0.91×).
+   - **For Nate's decision:** merge or not; whether HotSpot `step(count=1)` matters for V-32;
+     the existing `PostExecHook` quirk (a taken jump reports target − length, against its
+     Javadoc), which the cache reproduces and which is not fixed.
+   - **After Nate is satisfied:** plan step 6, the V-32 trial build `0.1.8-icache-SNAPSHOT`,
+     on the branch only.
+   - **Native Image rule learned:** keep inner loops (array fills, flushes) out of interpreter
+     loops; they stop loop unswitching. `bench/out/symdiag/` has the symbolized builds.
+   - **Housekeeping:** `exp/predecode` stays local. Local branch `claude-review` can be deleted.
 2. **Optional, not blocking:** boot attribution, which is V-32's call. `getCycle()` counts
    instructions *attempted*, including trapping ones, not retired instructions.
 3. **Unchanged, carried over:**
@@ -40,8 +49,10 @@ pushed, with patches beside the evidence.
    - The Central smoke test.
    - Never start the release workflow without Nate's explicit request. D stays deferred.
 
-**Validation status:** `./mvnw clean verify` is green at the `0.1.7-SNAPSHOT` bump (535 core,
-1 CLI and 4 bench tests; 0 Checkstyle and 0 SpotBugs findings), and `./mvnw install` has run.
+**Validation status:** on `feature/decoded-icache`, `./mvnw clean verify` is green: the core
+suite runs three times (uncached, and every core cached at 4 and 4096 slots), 570 tests each,
+plus 1 CLI and 6 bench tests, with 0 Checkstyle and 0 SpotBugs findings. `main` is unchanged at
+`0.1.7-SNAPSHOT`; no version bump until the merge.
 
 ## Constraints for future work
 

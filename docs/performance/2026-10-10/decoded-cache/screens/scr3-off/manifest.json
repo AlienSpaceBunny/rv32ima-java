@@ -1,0 +1,112 @@
+{
+  "started": "2026-10-10T20:33:30-0700",
+  "git_rev": "e0249b6a52bb0f46d1ae9a436340866753107ec7",
+  "git_dirty": true,
+  "jar": "bench/out/jars/dc3.jar",
+  "jar_sha256": "448df5a4ea21b1318d62c92c9ad7955f856f667cadbecc2c3ce5991a3957a408",
+  "java": "openjdk version \"25.0.4.1\" 2026-08-18 LTS\nOpenJDK Runtime Environment Corretto-25.0.4.8.1 (build 25.0.4.1+8-LTS)\nOpenJDK 64-Bit Server VM Corretto-25.0.4.8.1 (build 25.0.4.1+8-LTS, mixed mode, sharing)",
+  "native_images": {
+    "bench/out/native-dc3/poly": {
+      "sha256": "2253530e7a7d9a4caf4bbc68d20d0cc71ef4247dca8a7e00b61a7b28129f455b",
+      "compiler": "Graal compiler: optimization level: 2, target machine: compatibility"
+    },
+    "bench/out/native-dc3/mono-bytearray": {
+      "sha256": "053a6d98ab4dcfe712d0628cd083a974e4ed3c6c0b884df4930507b5ad931fc8",
+      "compiler": "Graal compiler: optimization level: 2, target machine: compatibility"
+    }
+  },
+  "warmup_seconds": 10,
+  "samples_per_fork": 3,
+  "forks": 2,
+  "cpus": "2,3",
+  "processes": [
+    {
+      "name": "f1-poly-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-dc3/poly",
+        "--bus",
+        "bytearray",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--workloads",
+        "reg-ima,reg-ap,regc-ap,reg-ap-step1,copy4k-ap,copy6m-ap,mix-ap,fp-ap,coremark-c,coremark-noc,fpkernels-c,fpkernels-noc,host-read6m,host-copy4k"
+      ],
+      "exit": 0,
+      "seconds": 13.6
+    },
+    {
+      "name": "f1-mono-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-dc3/mono-bytearray",
+        "--bus",
+        "bytearray",
+        "--label",
+        "mono",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--workloads",
+        "reg-ima,reg-ap,regc-ap,reg-ap-step1,copy4k-ap,copy6m-ap,mix-ap,fp-ap,coremark-c,coremark-noc,fpkernels-c,fpkernels-noc,host-read6m,host-copy4k"
+      ],
+      "exit": 0,
+      "seconds": 13.6
+    },
+    {
+      "name": "f2-mono-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-dc3/mono-bytearray",
+        "--bus",
+        "bytearray",
+        "--label",
+        "mono",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse",
+        "--workloads",
+        "reg-ima,reg-ap,regc-ap,reg-ap-step1,copy4k-ap,copy6m-ap,mix-ap,fp-ap,coremark-c,coremark-noc,fpkernels-c,fpkernels-noc,host-read6m,host-copy4k"
+      ],
+      "exit": 0,
+      "seconds": 13.6
+    },
+    {
+      "name": "f2-poly-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-dc3/poly",
+        "--bus",
+        "bytearray",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse",
+        "--workloads",
+        "reg-ima,reg-ap,regc-ap,reg-ap-step1,copy4k-ap,copy6m-ap,mix-ap,fp-ap,coremark-c,coremark-noc,fpkernels-c,fpkernels-noc,host-read6m,host-copy4k"
+      ],
+      "exit": 0,
+      "seconds": 13.7
+    }
+  ],
+  "finished": "2026-10-10T20:34:25-0700",
+  "complete": true
+}

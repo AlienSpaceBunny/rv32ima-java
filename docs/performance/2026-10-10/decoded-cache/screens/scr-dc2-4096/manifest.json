@@ -1,0 +1,112 @@
+{
+  "started": "2026-10-10T20:27:48-0700",
+  "git_rev": "e0249b6a52bb0f46d1ae9a436340866753107ec7",
+  "git_dirty": false,
+  "jar": "bench/out/jars/dc2.jar",
+  "jar_sha256": "04dc0dde0aaa533ca36b1cbcbaa50730c4c4332821c6bb8d9cce5b0e8f3c654b",
+  "java": "openjdk version \"25.0.4.1\" 2026-08-18 LTS\nOpenJDK Runtime Environment Corretto-25.0.4.8.1 (build 25.0.4.1+8-LTS)\nOpenJDK 64-Bit Server VM Corretto-25.0.4.8.1 (build 25.0.4.1+8-LTS, mixed mode, sharing)",
+  "native_images": {
+    "bench/out/native-dc2/poly": {
+      "sha256": "961b7fe42be43e046b72a5fd4ea41f9350ed161455b93fe3faf5dbbe3b98ef11",
+      "compiler": "Graal compiler: optimization level: 2, target machine: compatibility"
+    },
+    "bench/out/native-dc2/mono-bytearray": {
+      "sha256": "5863f74d6bb76ebae61f8e2269478739f1149b65b45d2754f70beea89f29056f",
+      "compiler": "Graal compiler: optimization level: 2, target machine: compatibility"
+    }
+  },
+  "warmup_seconds": 10,
+  "samples_per_fork": 3,
+  "forks": 2,
+  "cpus": "2,3",
+  "processes": [
+    {
+      "name": "f1-poly-dc4096-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-dc2/poly",
+        "--decoded-cache",
+        "4096",
+        "--bus",
+        "bytearray",
+        "--label",
+        "poly-dc4096",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 15.6
+    },
+    {
+      "name": "f1-mono-dc4096-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-dc2/mono-bytearray",
+        "--decoded-cache",
+        "4096",
+        "--bus",
+        "bytearray",
+        "--label",
+        "mono-dc4096",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 15.5
+    },
+    {
+      "name": "f2-mono-dc4096-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-dc2/mono-bytearray",
+        "--decoded-cache",
+        "4096",
+        "--bus",
+        "bytearray",
+        "--label",
+        "mono-dc4096",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 15.5
+    },
+    {
+      "name": "f2-poly-dc4096-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-dc2/poly",
+        "--decoded-cache",
+        "4096",
+        "--bus",
+        "bytearray",
+        "--label",
+        "poly-dc4096",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 15.5
+    }
+  ],
+  "finished": "2026-10-10T20:28:50-0700",
+  "complete": true
+}

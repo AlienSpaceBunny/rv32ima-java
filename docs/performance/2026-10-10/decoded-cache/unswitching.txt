@@ -1,0 +1,13 @@
+nm -S sizes of RV32IMACore loops in mono-bytearray built with -H:-DeleteLocalSymbols (hex bytes), and ByteArrayBus.readInt call sites (2x = loop unswitched)
+main step size=0x0000000000004ad9 readInt-calls=6
+dc2 step size=0x0000000000002d39 readInt-calls=3
+dc2 stepCached size=0x0000000000004b01 readInt-calls=2
+dc3 step size=0x0000000000004f09 readInt-calls=6
+dc3 stepCached size=0x00000000000031c1 readInt-calls=1
+dc4 step size=0x0000000000004f39 readInt-calls=6
+dc4 stepCached size=0x0000000000002b39 readInt-calls=1
+dc5 step size=0x0000000000004f39 readInt-calls=6
+dc5 stepCached size=0x00000000000002e7 readInt-calls=
+dc5 runCached size=0x0000000000004869 readInt-calls=2
+dc6 step size=0x0000000000004fe1 readInt-calls=6
+dc6 runCached size=0x0000000000004b81 readInt-calls=2

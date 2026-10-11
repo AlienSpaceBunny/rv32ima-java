@@ -1,7 +1,20 @@
 # Decoded instruction cache: agreed plan and next steps
 
-Agreed 2026-10-10 by Nate, V-32 and the CPU agent. Status: **ready to implement; nothing built
-yet.**
+Agreed 2026-10-10 by Nate, V-32 and the CPU agent. Status: **steps 1–4 done on branch
+`feature/decoded-icache` (`d8e55aa`); step 5, Nate's review, is next.** The evidence is in
+[performance/2026-10-10/decoded-cache](performance/2026-10-10/decoded-cache/README.md).
+
+**Where the implementation departs from the design below, and why** (measured on native):
+
+- **`step()` keeps its loop.** The first candidate (moving it into a private method) and any
+  inner loop inlined into the interpreter loop stop Native Image from unswitching it, which cost
+  the cache-off path 3–15%.
+- **Delegation re-enters `step(count=1)` with a private mode that skips the entry checks.**
+- **`FENCE.I` only sets a flag in `step()`'s loop; the flush runs outside both loops.**
+- **F and A also run from the cache, through the shared `executeColdOpcode()`.** Delegating
+  them made FP code slower than uncached.
+- **Counters are one `DecodedCacheStats` record** (fills, bypasses, delegations, flushes,
+  checks).
 
 - [DECODED_ICACHE_PROTOCOL.md](DECODED_ICACHE_PROTOCOL.md) is the coherence contract, accepted
   by V-32.

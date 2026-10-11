@@ -25,7 +25,8 @@ and every workload check passed. The decision rule's top band is met: CoreMark's
 is to be scoped as a separate decision. The code lives only on the local branch
 `exp/predecode` (`04fdf54`, `077c90b`) and as patches beside the
 [evidence](performance/2026-10-10/README.md#predecode-upper-bound-experiment-not-landed-decision-rule-met).
-Each tier took well under its time budget.
+Each tier took well under its time budget. The follow-up, a bounded decoded instruction cache
+instead of a whole-window replica, is scoped in [DECODED_ICACHE_PLAN.md](DECODED_ICACHE_PLAN.md).
 
 ## Design of the experiment
 

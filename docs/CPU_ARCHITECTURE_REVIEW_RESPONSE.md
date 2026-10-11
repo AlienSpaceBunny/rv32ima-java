@@ -27,8 +27,10 @@ below are inputs to V-32's own storage decision.
 - **Predecode is the one large core-side lever left.** An upper-bound experiment, with no
   invalidation and not landed, made CoreMark 1.46–2.04× faster natively by caching fetched
   words alone, and 1.84–2.51× with operand predecode, 1.30–1.50× on HotSpot. Native would then
-  overtake today's HotSpot. Whether to design it properly, with invalidation, is a separate
-  decision; it does not block V-32's next step.
+  overtake today's HotSpot. The experiment kept a decoded copy of the whole window; the
+  proposed real form is a bounded, embedder-sized decoded instruction cache, scoped in
+  [DECODED_ICACHE_PLAN.md](DECODED_ICACHE_PLAN.md) for V-32's advisory review. It does not
+  block V-32's next step.
 - **Recommended next step:** adopt `0.1.7-SNAPSHOT`, build native images with `-O3`, and
   rerun V-32's existing AP controls. Then make one accessor decision for native builds. Details
   are at the end.
@@ -71,7 +73,7 @@ CoreMark's own CRCs and a Java FP reference.
 | --- | --- | --- | --- | --- |
 | Per-instruction decode work and code size in `step()`'s loop | Core | Large; AOT has no profile to discount cold arms | Moderate | Fixed by C3: −18% to −39% native, −28% to −34% HotSpot |
 | Polymorphic bus call (one interface dispatch per access) | Core design | 19–27% of native core time | ≈0 (C2 inlines from profiles) | Remains. Not caused by allocation: C1, which removed all per-access allocation, was slower and was rejected. |
-| Compressed fetch and expansion | Core | 17–30% | 17–30% | Expansion fixed by C4. ~11% native remains, from the required halfword probe. |
+| Instruction fetch: bus calls, compressed probe and expansion | Core | 46–104% (upper-bound experiment) | 2–6% | Expansion fixed by C4. ~11% native compressed penalty remains from the halfword probe on every uncached fetch. A decoded instruction cache would remove both; scoped, awaiting review. |
 | FP arithmetic helpers | Core | Dominant in FP code: 33–41 vs 81–87 MIPS | — | Open. The per-operation rounding record was not the cost (C5 rejected); the remaining allocation source is unidentified. |
 | `MemorySegment` scalar accessor | V-32 backend | 4–7× core slowdown; 72 B per access | ≈0 | V-32 decision |
 | Per-attempt sampling and per-access monitors (`mailbox.updateInterrupt` ×2, `syscon`, `SystemRAMBus`) | V-32 | ~77 ns per attempt | the same | V-32 decision |
@@ -95,6 +97,8 @@ moved only ~3.5%. Not implemented here; it awaits a separately scoped API decisi
 **2. Which hot-path structures matter under Native Image?**
 
 - **Measured, significant:**
+  - instruction fetch itself, through the bus calls and halfword probe: 46–104% native in the
+    predecode experiment, against 2–6% on HotSpot
   - decode work and cold code inside the loop (fixed by C3)
   - the non-inlined polymorphic bus call (19–27%)
   - compressed expansion (fixed by C4)
@@ -141,7 +145,9 @@ moved only ~3.5%. Not implemented here; it awaits a separately scoped API decisi
   penalty. The disabled code slowed the uncached path by up to 21% natively, so a design must
   leave that loop untouched. Its obligations are listed in the plan: opt-in, invalidation
   for the core's own stores, other harts and the host, and remap or MPU changes, fault fidelity,
-  bounded memory, and lockstep differential testing. Details are in the
+  bounded memory, and lockstep differential testing. The measured form, a decoded copy of the
+  whole window, is an upper bound only: it costs 6× the window per core. A bounded cache is
+  scoped in [DECODED_ICACHE_PLAN.md](DECODED_ICACHE_PLAN.md). Details are in the
   [evidence](performance/2026-10-10/README.md#predecode-upper-bound-experiment-not-landed-decision-rule-met).
 
 **4. Is the shared driver maintainable; could its modes cause native duplication?** Sharing
@@ -168,6 +174,10 @@ attempt, so no outcome would change a decision. Redirect to the recommended next
    `syscon` for every AP bus access while `stepCycles` already holds it. This affects both
    runtimes and likely outweighs every remaining core item. Preserve and re-verify the ordering
    contracts with V-32's mailbox and terminal-fault tests.
+4. **Core: an optional decoded instruction cache.** It is the largest remaining core-side
+   lever, but it changes the fetch contract and needs invalidation. Its scope is in
+   [DECODED_ICACHE_PLAN.md](DECODED_ICACHE_PLAN.md), and V-32's advice is requested there
+   before any sizing experiment.
 
 ## Recommended next step
 

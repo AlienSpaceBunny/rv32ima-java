@@ -13,6 +13,7 @@
 | [CPU_ARCHITECTURE_REVIEW_RESPONSE.md](CPU_ARCHITECTURE_REVIEW_RESPONSE.md) | Response to V-32's 2026-10-10 CPU architecture/native-performance review: assessment, ranked directions, recommended next step. Active until V-32 acknowledges it. |
 | [performance/2026-10-10/README.md](performance/2026-10-10/README.md) | JVM vs Native Image measurements behind the review: method, provenance, baseline decomposition, landed and rejected candidates. |
 | [PREDECODE_EXPERIMENT_PLAN.md](PREDECODE_EXPERIMENT_PLAN.md) | Complete: bounded upper-bound experiment for decode-once execution. Its decision rule's top band was met (1.46–2.51× native on CoreMark); it lists the requirements a real design would face. |
+| [DECODED_ICACHE_PLAN.md](DECODED_ICACHE_PLAN.md) | Draft scope for an optional, bounded, embedder-sized decoded instruction cache: design, invalidation, validation, sizing experiment, and questions for V-32's advisory review. Nothing built. |
 | [../bench/README.md](../bench/README.md) | Unpublished throughput harness: workloads, bench-only buses, native images, how to run the matrix. |
 | [RV64_FEASIBILITY_NOTES.md](RV64_FEASIBILITY_NOTES.md) | Speculative notes on whether/how this library could add RV64 support alongside RV32. No decision made, no work started or scheduled. |
 

@@ -24,10 +24,13 @@ pushed, with patches beside the evidence.
 
 ## Resume / pending
 
-1. **Hand the response to V-32** (Nate). It now includes the predecode result.
-2. **Decide whether to scope a real predecode design** (Nate). Its requirements are listed in the
-   plan: opt-in, invalidation, fault fidelity, bounded memory and differential testing. The
-   uncached loop must stay untouched; the disabled experiment code cost up to 21% natively.
+1. **V-32 advisory review of [DECODED_ICACHE_PLAN.md](docs/DECODED_ICACHE_PLAN.md)** (Nate is
+   arranging it). It replaces the whole-window replica, which Nate declined to ratify, with an
+   optional, bounded, embedder-sized decoded instruction cache. **Do not build or measure until
+   the review is back.** The response to V-32 now includes the predecode result and points to
+   the plan.
+2. **After the review:** the plan's sizing experiment on `exp/predecode`, then decide on a real
+   implementation.
 3. **Unchanged, carried over:**
    - The release-hold decision and API-freeze review ([RELEASE_TODO.md](RELEASE_TODO.md)).
    - The Central smoke test.

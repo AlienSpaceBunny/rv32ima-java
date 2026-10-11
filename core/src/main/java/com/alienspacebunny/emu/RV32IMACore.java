@@ -91,6 +91,7 @@ public class RV32IMACore {
         this.dcWords = slots > 0 ? new int[slots] : null;
         this.dcOps = slots > 0 ? new long[slots] : null;
         this.dcCheckMode = cacheConfig.checkMode();
+        this.dcMode = slots > 0 ? DC_MODE_ON : DC_MODE_OFF;
     }
 
     private static final int MSTATUS_MIE = 0x08;
@@ -1472,10 +1473,10 @@ public class RV32IMACore {
             int count,
             PostExecHook postExec,
             CSRHook csrHook) {
-        // A delegated instruction from the decoded cache (see stepCached) skips these entry
+        // A delegated instruction from the decoded cache (see runCached) skips these entry
         // checks: they already ran at the start of the cached batch.
         int trap = 0;
-        if (!dcDelegating) {
+        if (dcMode != DC_MODE_DELEGATING) {
             long currentTimer = state.getTimer();
             long newTimer = currentTimer + elapsedUs;
             state.setTimer(newTimer);
@@ -1509,8 +1510,11 @@ public class RV32IMACore {
                 state.extraflags &= ~EXTRAFLAG_WFI;
             }
 
-            if (trap == 0 && dcTags != null) {
-                return stepCached(state, mem, ramOffset, ramSize, count, postExec, csrHook);
+            if (trap == 0 && dcMode == DC_MODE_ON) {
+                int result = runCached(state, mem, ramOffset, ramSize, count, postExec, csrHook);
+                return dcFenceI
+                        ? continueAfterFenceI(state, mem, ramOffset, ramSize, count, postExec, csrHook, result)
+                        : result;
             }
         }
 
@@ -1873,10 +1877,11 @@ public class RV32IMACore {
                         }
                         case 0x0f: // FENCE, FENCE.I
                             rdid = 0;
-                            if ((ir & 0x7000) == 0x1000 && dcTags != null) {
-                                // FENCE.I flushes this hart's decoded cache. The cached path
-                                // delegates FENCE.I here, whether or not its code is cacheable.
-                                flushDecodedCache();
+                            if ((ir & 0x7000) == 0x1000) {
+                                // FENCE.I: the cached path, which delegates every FENCE.I here,
+                                // flushes on seeing this. Only a store, so this loop stays free of
+                                // inner loops (a flush here kept Native Image from unswitching it).
+                                dcFenceI = true;
                             }
                             break;
                         case 0x73: // SYSTEM
@@ -2093,7 +2098,7 @@ public class RV32IMACore {
     //               offset, or shift amount); the high 32 bits hold the handler (bits 5:0), rd
     //               (10:6), rs1 (15:11), rs2 (20:16) and the compressed flag (21). 0 = empty.
     //
-    // stepCached executes the fast handlers itself. Everything else -- DC_GENERIC entries, and
+    // runCached executes the fast handlers itself. Everything else -- DC_GENERIC entries, and
     // fetches that are not cached -- runs through step()'s own loop one instruction at a time, so the
     // cache never becomes a second implementation of the ISA. Predecoding uses encoding fields
     // only, never conclusions that depend on privilege or CSR/FP state.
@@ -2154,10 +2159,17 @@ public class RV32IMACore {
     // Cacheable ranges as [start, end) pairs of unsigned addresses.
     private long[] dcRanges = new long[0];
 
-    // Set while stepCached runs one instruction through step()'s own loop, which then skips its
-    // entry checks; that loop sets dcBatchEnded when the instruction ends the batch.
-    private boolean dcDelegating;
+    // DC_MODE_DELEGATING while runCached runs one instruction through step()'s own loop, which
+    // then skips its entry checks; that loop sets dcBatchEnded when the instruction ends the
+    // batch. One int, so the cache-off step() pays a single field test per call.
+    private static final int DC_MODE_OFF = 0;
+    private static final int DC_MODE_ON = 1;
+    private static final int DC_MODE_DELEGATING = 2;
+    private int dcMode;
     private boolean dcBatchEnded;
+
+    // Set by step()'s loop on FENCE.I, cached or not; runCached flushes and clears it.
+    private boolean dcFenceI;
 
     // The step() arguments the cache contents are valid for (Rule 3).
     private MemoryBus dcBus;
@@ -2448,10 +2460,47 @@ public class RV32IMACore {
     }
 
     /**
-     * {@link #step}'s batch with the decoded cache, after the entry checks and with no pending
-     * interrupt. Semantics and batch boundaries are those of {@link #step}'s loop.
+     * Finishes a cached batch that {@link #runCached} interrupted after a delegated {@code
+     * FENCE.I}: flushes, then runs the rest of the batch. The flush runs here, never inside
+     * runCached's loop: an inner loop (the flush's array fill) inlined into the hot loop keeps
+     * Native Image from unswitching it, which measurably slows every instruction.
+     *
+     * @param result runCached's result: minus the instructions it ran if it stopped early.
      */
-    private int stepCached(
+    private int continueAfterFenceI(
+            RV32IMAState state,
+            MemoryBus mem,
+            int ramOffset,
+            int ramSize,
+            int count,
+            PostExecHook postExec,
+            CSRHook csrHook,
+            int result) {
+        int remaining = count;
+        while (true) {
+            dcFenceI = false;
+            flushDecodedCache();
+            if (result >= 0) {
+                return result;
+            }
+            remaining += result;
+            if (remaining == 0) {
+                return 0;
+            }
+            result = runCached(state, mem, ramOffset, ramSize, remaining, postExec, csrHook);
+            if (!dcFenceI) {
+                return result;
+            }
+        }
+    }
+
+    /**
+     * {@link #step}'s batch with the decoded cache, after the entry checks and with no pending
+     * interrupt. Semantics and batch boundaries are those of {@link #step}'s loop. Returns {@link
+     * #step}'s result, or minus the number of instructions run if it stopped early after a
+     * delegated {@code FENCE.I}, leaving {@code dcFenceI} set for the caller to flush.
+     */
+    private int runCached(
             RV32IMAState state,
             MemoryBus mem,
             int ramOffset,
@@ -2515,15 +2564,18 @@ public class RV32IMACore {
                 state.pc = pc;
                 state.setCycle(cycle);
                 dcBatchEnded = false;
-                dcDelegating = true;
+                dcMode = DC_MODE_DELEGATING;
                 int result;
                 try {
                     result = step(state, mem, ramOffset, ramSize, 0, 1, postExec, csrHook);
                 } finally {
-                    dcDelegating = false;
+                    dcMode = DC_MODE_ON;
                 }
                 if (result != 0 || dcBatchEnded) {
                     return result; // WFI, a trap or an interrupt ends the batch, as in the loop
+                }
+                if (dcFenceI) {
+                    return -(icount + 1); // the delegated step already wrote pc and cycle back
                 }
                 pc = state.pc;
                 cycle = state.getCycle();

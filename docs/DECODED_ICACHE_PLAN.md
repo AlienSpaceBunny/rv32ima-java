@@ -1,7 +1,9 @@
 # Decoded instruction cache: agreed plan and next steps
 
-Agreed 2026-10-10 by Nate, V-32 and the CPU agent. Status: **steps 1–4 done on branch
-`feature/decoded-icache` (`d8e55aa`); step 5, Nate's review, is next.** The evidence is in
+Agreed 2026-10-10 by Nate, V-32 and the CPU agent. Status: **steps 1–5 done on branch
+`feature/decoded-icache` (`d8e55aa`). Step 6 is under way:** Nate asked for V-32's trial before
+deciding on the merge. The trial build `0.1.8-icache-SNAPSHOT` is installed, and the handoff is
+[V32_DECODED_CACHE_TRIAL.md](V32_DECODED_CACHE_TRIAL.md). The evidence is in
 [performance/2026-10-10/decoded-cache](performance/2026-10-10/decoded-cache/README.md).
 
 **Where the implementation departs from the design below, and why** (measured on native):

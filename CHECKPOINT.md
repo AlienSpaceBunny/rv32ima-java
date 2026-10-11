@@ -24,23 +24,34 @@ pushed, with patches beside the evidence.
 
 ## Resume / pending
 
-1. **Decoded instruction cache: steps 1–4 are done on branch `feature/decoded-icache`
-   (`d8e55aa` plus docs, pushed); step 5, Nate's review, is next.** Follow
-   [DECODED_ICACHE_PLAN.md](docs/DECODED_ICACHE_PLAN.md), whose status block lists where the build
-   departs from the design. Evidence:
-   [performance/2026-10-10/decoded-cache](docs/performance/2026-10-10/decoded-cache/README.md).
-   - **Cache off vs `main`:** 0.98–1.01× per-workload median on both runtimes;
-     `step(count=1)` is +4–9% on closed-world `mono` images.
-   - **Cache on (4K slots) vs `main`:** CoreMark 1.65–2.17× native and 1.47–1.50× HotSpot.
-     `step(count=1)` is 1.26–1.77× native but **0.82× on HotSpot**. Misses cost more than no
-     cache (`collide-ap` 0.63–0.91×).
-   - **For Nate's decision:** merge or not; whether HotSpot `step(count=1)` matters for V-32;
-     the existing `PostExecHook` quirk (a taken jump reports target − length, against its
-     Javadoc), which the cache reproduces and which is not fixed.
-   - **After Nate is satisfied:** plan step 6, the V-32 trial build `0.1.8-icache-SNAPSHOT`,
-     on the branch only.
+1. **Decoded instruction cache: V-32 trial under way on branch `feature/decoded-icache`,
+   pushed, at version `0.1.8-icache-SNAPSHOT`.**
+   - **Where things stand:**
+     - [V32_DECODED_CACHE_TRIAL.md](docs/V32_DECODED_CACHE_TRIAL.md) is the handoff, sent to
+       V-32 through Nate.
+     - The build is installed in `~/.m2`.
+     - `0.1.7-SNAPSHOT` was reinstalled from `main`. An earlier install had held early branch
+       code.
+   - **Next:** wait for V-32's check-mode boot and timed boots, then Nate decides on the merge
+     (plan step 7).
+   - **At merge:** set the real version, not `-icache`.
+   - **Also pending: a design draft for a committed-attempt API, for V-32's review.** This is a
+     batched call that keeps each instruction's commit, interrupt and stop points. The draft
+     builds on `runCached()`; see
+     [V32_AP_STEPPING_RESPONSE.md](docs/V32_AP_STEPPING_RESPONSE.md). The core API is unstable
+     and has no external consumers, so changes are coordinated with V-32 directly. Nate approved
+     the draft. Whether to send it before or after V-32's benchmark is still open.
+   - **Evidence:** [plan](docs/DECODED_ICACHE_PLAN.md) and
+     [measurements](docs/performance/2026-10-10/decoded-cache/README.md).
+   - **Key results:**
+     - Cache off is 0.98–1.01× of `main`, except `step(count=1)` on `mono` at +4–9%.
+     - Cache on gives CoreMark 1.65–2.17× native and 1.47–1.50× HotSpot.
+     - `step(count=1)` is 1.26–1.77× native but 0.82× on HotSpot. V-32 accepts the cache being
+       off there as a fallback.
+   - **Open:** the existing `PostExecHook` quirk, where a taken jump reports target minus
+     instruction length. It is not fixed.
    - **Native Image rule learned:** keep inner loops (array fills, flushes) out of interpreter
-     loops; they stop loop unswitching. `bench/out/symdiag/` has the symbolized builds.
+     loops; they stop loop unswitching.
    - **Housekeeping:** `exp/predecode` stays local. Local branch `claude-review` can be deleted.
 2. **Optional, not blocking:** boot attribution, which is V-32's call. `getCycle()` counts
    instructions *attempted*, including trapping ones, not retired instructions.
@@ -49,10 +60,10 @@ pushed, with patches beside the evidence.
    - The Central smoke test.
    - Never start the release workflow without Nate's explicit request. D stays deferred.
 
-**Validation status:** on `feature/decoded-icache`, `./mvnw clean verify` is green: the core
+**Validation status:** on `feature/decoded-icache` at `0.1.8-icache-SNAPSHOT`, `./mvnw clean install` is green: the core
 suite runs three times (uncached, and every core cached at 4 and 4096 slots), 570 tests each,
 plus 1 CLI and 6 bench tests, with 0 Checkstyle and 0 SpotBugs findings. `main` is unchanged at
-`0.1.7-SNAPSHOT`; no version bump until the merge.
+`0.1.7-SNAPSHOT`, and its gate passed on reinstall.
 
 ## Constraints for future work
 

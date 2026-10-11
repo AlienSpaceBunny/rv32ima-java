@@ -9,7 +9,7 @@ started explicitly.
 
 ## Model
 
-`main` always carries a `-SNAPSHOT` version (currently `0.1.7-SNAPSHOT`; expect several more
+`main` always carries a `-SNAPSHOT` version (currently `0.1.8-SNAPSHOT`; expect several more
 plain bumps before a real release — see [release readiness](../RELEASE_TODO.md)). The first
 real release will be `0.2.0`, whichever `-SNAPSHOT` `main` is on when it's eventually cut;
 `0.1.0`/`0.1.1` are both skipped (`0.1.0` because that version number is already referenced

@@ -24,8 +24,9 @@ pushed, with patches beside the evidence.
 
 ## Resume / pending
 
-1. **Next: draft a design for a batched execution API for V-32's review.** Nate has approved
-   drafting it.
+1. **Batched execution API: draft written,
+   [EXECUTION_API_DESIGN.md](docs/EXECUTION_API_DESIGN.md); awaiting V-32's review** through Nate,
+   with five open questions. Implement only after V-32's answers and Nate's go.
    - **What it is:** one core call that runs many instructions while keeping each one's
      commit, interrupt and stop points.
    - **Requirements:**

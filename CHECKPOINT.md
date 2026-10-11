@@ -2,69 +2,39 @@
 
 ## Current state
 
-Work is on local branch **`claude-review`**, not pushed. It was branched from `main` at
-`f745790` on 2026-10-10 at 00:07, before the first commit; `main` and `origin/main` are
-untouched. The version is still **`0.1.6-SNAPSHOT`**. The public API remains
-unfrozen and publishing is on hold. The first real release target is **`0.2.0`**; no
-release is authorized. CPU feature Phases 1–5 are complete; see
+`main` is on **`0.1.7-SNAPSHOT`** and carries the CPU architecture review work, fast-forwarded
+from local branch `claude-review`, which can now be deleted. The public API remains unfrozen
+and publishing is on hold. The first real release target is **`0.2.0`**; no release is
+authorized. CPU feature Phases 1–5 are complete; see
 [FEATURE_REQUEST_PLAN.md](docs/FEATURE_REQUEST_PLAN.md) and the
 [checkpoint archive](docs/archive/CHECKPOINT_PRE_COMPACTION_2026-10-06.md).
 
-**In progress: V-32's CPU architecture / native-performance review**
-([handoff](docs/archive/CPU_ARCHITECTURE_REVIEW_HANDOFF.md)). The response is
+**V-32's CPU architecture review is answered.** The response is
 [CPU_ARCHITECTURE_REVIEW_RESPONSE.md](docs/CPU_ARCHITECTURE_REVIEW_RESPONSE.md); the evidence
-is in [performance/2026-10-10](docs/performance/2026-10-10/README.md). Measurements use the
-new unpublished [`bench`](bench/README.md) module: pinned `taskset -c 2,3`, outputs in the
-git-ignored `bench/out/`.
+is in [performance/2026-10-10](docs/performance/2026-10-10/README.md). It stays active until
+V-32 acknowledges it; then archive it. Measurements use the unpublished
+[`bench`](bench/README.md) module, pinned with `taskset -c 2,3`, with outputs in the git-ignored
+`bench/out/`.
 
-Landed locally, all with green gates:
-
-| Commit | Change |
-| --- | --- |
-| `9bdccaf` | bench module |
-| `0eff01b` | `MMIOBus` covering-range lookup |
-| `b5eecfd` | context semantics tests |
-| `a7d7b40` | C3a: base-first ALU decode |
-| `9baaafd` | C3b: cold F/A arms out of `step()`'s loop |
-| `4c22d8b` | `fp-ap`, CoreMark and FP-kernel images |
-| `ffb57c8` | C4: compressed expansion table |
-
-Rejected and reverted: C1 (cached `AccessContext`s) and C5 (allocation-free FP rounding).
-Result: CoreMark and integer work is 18–39% faster native and 28–34% faster on HotSpot, with
-a further 10–16% for C-heavy code. FP is unchanged natively.
-
-Decisions this session (Nate):
-
-- C3b landed despite missing the 10% gate on its own.
-- PGO and Oracle GraalVM are excluded; proprietary licence risk.
-- Native targets: `-march=native` dropped; `x86-64-v2`/`v3` measured and gave no gain. The
-  oldest test machines are a Ryzen 2700X and an i7-8650U, both v3.
-- The core stays backend-agnostic; FFM is not the preferred V-32 backend.
+**Predecode experiment: complete.** Following the [plan](docs/PREDECODE_EXPERIMENT_PLAN.md),
+the decision rule's top band was met. CoreMark's C build ran 1.46–2.04× faster natively with
+cached fetched words (tier 1) and 1.84–2.51× with operand predecode (tier 2), and 1.30–1.50×
+on HotSpot. The code is on the local-only branch `exp/predecode` (`04fdf54`, `077c90b`), never
+pushed, with patches beside the evidence.
 
 ## Resume / pending
 
-1. **Predecode upper-bound experiment, before handing back to V-32.** Follow the
-   [plan](docs/PREDECODE_EXPERIMENT_PLAN.md). Tier-1 code is drafted on branch
-   `exp/predecode` at `04fdf54`: correctness-smoked, not measured. The plan's status note gives the
-   run commands. Run tier 1, then tier 2, each with
-   one matrix against a fresh `HEAD` reference. Fold the result into
-   [the response](docs/CPU_ARCHITECTURE_REVIEW_RESPONSE.md) (its predecode bullet says
-   "Result pending") and the evidence README.
-2. **Finish the task:**
-   - bump to `0.1.7-SNAPSHOT`
-     (`./mvnw versions:set -DnewVersion=0.1.7-SNAPSHOT -DgenerateBackupPoms=false`) and update
-     `docs/RELEASING.md`
-   - run `./mvnw clean verify`, then `./mvnw install -DskipTests`
-   - bring `claude-review` into `main` (fast-forward) and push; never push `exp/predecode`
-   - hand the response to V-32, which keeps it active until acknowledged
+1. **Hand the response to V-32** (Nate). It now includes the predecode result.
+2. **Decide whether to scope a real predecode design** (Nate). Its requirements are listed in the
+   plan: opt-in, invalidation, fault fidelity, bounded memory and differential testing. The
+   uncached loop must stay untouched; the disabled experiment code cost up to 21% natively.
 3. **Unchanged, carried over:**
    - The release-hold decision and API-freeze review ([RELEASE_TODO.md](RELEASE_TODO.md)).
    - The Central smoke test.
    - Never start the release workflow without Nate's explicit request. D stays deferred.
 
-**Validation status:** `./mvnw clean verify` is green at `ffb57c8` (535 core, 1 CLI and
-4 bench tests; 0 Checkstyle and 0 SpotBugs findings). Bench evidence is copied into
-`docs/performance/2026-10-10/`. Working outputs remain in the git-ignored `bench/out/`.
+**Validation status:** `./mvnw clean verify` is green at the `0.1.7-SNAPSHOT` bump (535 core,
+1 CLI and 4 bench tests; 0 Checkstyle and 0 SpotBugs findings), and `./mvnw install` has run.
 
 ## Constraints for future work
 

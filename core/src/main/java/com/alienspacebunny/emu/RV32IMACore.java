@@ -2185,6 +2185,7 @@ public class RV32IMACore {
     private long dcFills;
     private long dcFlushes;
     private long dcChecks;
+    private long dcBypasses;
     private long dcDelegations;
 
     /**
@@ -2271,42 +2272,30 @@ public class RV32IMACore {
     }
 
     /**
-     * Returns how many instructions were fetched into the cache. Hits are instructions executed
-     * through the cache ({@link RV32IMAState#getCycle()}'s growth) minus fills and delegations.
+     * Counters of a core's decoded instruction cache, for instrumented runs. All count from the
+     * core's construction. Of the instructions a cached core executes ({@link
+     * RV32IMAState#getCycle()}'s growth), {@code fills} missed and were cached, {@code bypasses}
+     * could not be cached, and the rest hit.
      *
-     * @return the number of cache fills since construction.
+     * @param fills instructions fetched into the cache on a miss.
+     * @param bypasses instructions the cache could not serve: outside every cacheable range, a
+     *     range's or the window's last bytes, misaligned or outside the window, or a reserved
+     *     compressed encoding.
+     * @param delegations instructions the cached path handed to the uncached interpreter: every
+     *     bypass, and every instruction without a fast handler (CSR, system, F, A, division,
+     *     bit-manipulation and others), whether it hit or missed.
+     * @param flushes flushes, by the embedder or by the core.
+     * @param checks hits that check mode compared against memory.
      */
-    public long getDecodedCacheFills() {
-        return dcFills;
-    }
+    public record DecodedCacheStats(long fills, long bypasses, long delegations, long flushes, long checks) {}
 
     /**
-     * Returns how many times the cache was flushed, by the embedder or by the core.
+     * Returns this core's decoded instruction cache counters; all zero if it has no cache.
      *
-     * @return the number of flushes since construction.
+     * @return a snapshot of the counters.
      */
-    public long getDecodedCacheFlushes() {
-        return dcFlushes;
-    }
-
-    /**
-     * Returns how many cache hits check mode compared against memory.
-     *
-     * @return the number of check-mode comparisons since construction.
-     */
-    public long getDecodedCacheChecks() {
-        return dcChecks;
-    }
-
-    /**
-     * Returns how many instructions the cached path handed to the uncached interpreter: those
-     * outside every cacheable range, those without a fast handler, and those that trap on fetch
-     * checks.
-     *
-     * @return the number of delegated instructions since construction.
-     */
-    public long getDecodedCacheDelegations() {
-        return dcDelegations;
+    public DecodedCacheStats getDecodedCacheStats() {
+        return new DecodedCacheStats(dcFills, dcBypasses, dcDelegations, dcFlushes, dcChecks);
     }
 
     /** The fast-handler entry for a fetched instruction word (the expansion, for compressed code). */
@@ -2533,6 +2522,9 @@ public class RV32IMACore {
             int handler = meta & DC_HANDLER_MASK;
             if (handler <= DC_GENERIC) {
                 // Not cached, or no fast handler: run exactly this instruction uncached.
+                if (op == 0) {
+                    dcBypasses++;
+                }
                 dcDelegations++;
                 state.pc = pc;
                 state.setCycle(cycle);
@@ -2655,7 +2647,9 @@ public class RV32IMACore {
             if (rd != 0) {
                 regs[rd] = rval;
             }
-            if (postExec != null) postExec.onPostExec(pc, dcWords[slot], 0);
+            // runBatch redirects pc to "target - instrLen" before its hook call, so a taken jump
+            // or branch reports that value rather than its own PC; match it exactly.
+            if (postExec != null) postExec.onPostExec(nextPc - instrLen, dcWords[slot], 0);
             pc = nextPc;
         }
 

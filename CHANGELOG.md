@@ -11,8 +11,8 @@ for how this file is updated as part of cutting a release.
 ### Added
 - Opt-in decoded instruction cache: `new RV32IMACore(IsaConfig, DecodedCacheConfig)`, with
   `DecodedCacheConfig(slots, checkMode)` (0 or a power of two; off by default),
-  `addDecodedCacheRange`/`clearDecodedCacheRanges`, `flushDecodedCache()` and fill, flush, check
-  and delegation counters. Coherence is `FENCE.I` plus an embedder flush; see
+  `addDecodedCacheRange`/`clearDecodedCacheRanges`, `flushDecodedCache()` and
+  `getDecodedCacheStats()` counters. Coherence is `FENCE.I` plus an embedder flush; see
   `flushDecodedCache()`'s Javadoc and `docs/DECODED_ICACHE_PROTOCOL.md`. With the cache on,
   `FENCE.I` flushes it. Cores built without a `DecodedCacheConfig` behave as before.
 - Manual GitHub release workflow (`.github/workflows/release.yml`, `workflow_dispatch` only):

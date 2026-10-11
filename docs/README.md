@@ -13,9 +13,9 @@
 | [CPU_ARCHITECTURE_REVIEW_RESPONSE.md](CPU_ARCHITECTURE_REVIEW_RESPONSE.md) | Response to V-32's 2026-10-10 CPU architecture/native-performance review: assessment, ranked directions, recommended next step. Active until V-32 acknowledges it. |
 | [performance/2026-10-10/README.md](performance/2026-10-10/README.md) | JVM vs Native Image measurements behind the review: method, provenance, baseline decomposition, landed and rejected candidates. |
 | [PREDECODE_EXPERIMENT_PLAN.md](PREDECODE_EXPERIMENT_PLAN.md) | Complete: bounded upper-bound experiment for decode-once execution. Its decision rule's top band was met (1.46–2.51× native on CoreMark); it lists the requirements a real design would face. |
-| [DECODED_ICACHE_PLAN.md](DECODED_ICACHE_PLAN.md) | Draft scope for an optional, bounded, embedder-sized decoded instruction cache: design, invalidation, validation, sizing experiment, and questions for V-32's advisory review. Nothing built. |
+| [DECODED_ICACHE_PLAN.md](DECODED_ICACHE_PLAN.md) | **Current work.** Agreed design and ordered next steps for the opt-in decoded instruction cache: API, structure, validation, measurement, V-32 trial build. |
 | [DECODED_ICACHE_PROTOCOL.md](DECODED_ICACHE_PROTOCOL.md) | Proposed cache coherence protocol (`FENCE.I` plus embedder flush) and V-32 case mapping, awaiting V-32's confirmation. |
-| [CPU_REVIEW_FOLLOWUP_RESPONSE.md](CPU_REVIEW_FOLLOWUP_RESPONSE.md) | CPU agent's reply to V-32's cache review and boot follow-up: what is accepted, Nate's differing decisions, boot-result analysis, requests to V-32. |
+| [CPU_REVIEW_FOLLOWUP_RESPONSE.md](CPU_REVIEW_FOLLOWUP_RESPONSE.md) | CPU agent's reply to V-32's cache review and boot follow-up: agreements, Nate's decisions, boot-result analysis, and an addendum on V-32's AP WFI/attempt loop. |
 | [DECODED_ICACHE_ADVISORY_REVIEW.md](DECODED_ICACHE_ADVISORY_REVIEW.md) | V-32's advisory review of the cache scope (copied from V-32 at `805d76d`): answers to the nine questions, contract changes needed, experiment bounds. |
 | [CPU_ARCHITECTURE_REVIEW_FOLLOWUP.md](CPU_ARCHITECTURE_REVIEW_FOLLOWUP.md) | V-32's follow-up (copied at `805d76d`): matched boot results and code-publication cases. |
 | [../bench/README.md](../bench/README.md) | Unpublished throughput harness: workloads, bench-only buses, native images, how to run the matrix. |
@@ -28,6 +28,7 @@ preserved; link targets are adjusted for the archive layout or the source reposi
 
 | Document | Superseded by |
 |---|---|
+| [archive/DECODED_ICACHE_SCOPE_DRAFT_2026-10-10.md](archive/DECODED_ICACHE_SCOPE_DRAFT_2026-10-10.md) | [Agreed plan](DECODED_ICACHE_PLAN.md) and [protocol](DECODED_ICACHE_PROTOCOL.md); keeps the nine questions V-32 answered. |
 | [archive/CLEANUP_TODO.md](archive/CLEANUP_TODO.md) | Completed C1–C7 standards pass; retained as implementation history. |
 | [archive/FEATURE_REQUEST.md](archive/FEATURE_REQUEST.md) | Original V-32 request; implemented by `FEATURE_REQUEST_PLAN.md`. |
 | [archive/RELEASE_TODO_PRE_CLEANUP_2026-10-07.md](archive/RELEASE_TODO_PRE_CLEANUP_2026-10-07.md) | [Current release checklist](../RELEASE_TODO.md); preserves completed steps and superseded recommendations. |

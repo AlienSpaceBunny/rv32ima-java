@@ -24,17 +24,17 @@ pushed, with patches beside the evidence.
 
 ## Resume / pending
 
-1. **Implement the opt-in decoded instruction cache on a branch, then measure it.** All three
-   parties are aligned: V-32 accepted the [protocol](docs/DECODED_ICACHE_PROTOCOL.md) at
-   `../emulator` `77b2e47`, with its replies in
-   [CPU_REVIEW_FOLLOWUP_RESPONSE.md](docs/CPU_REVIEW_FOLLOWUP_RESPONSE.md) and the copied
-   follow-up and review. The contract is `FENCE.I` plus an embedder flush: no store snooping
-   and no cross-thread invalidation. Mapping changes flush fully. The cache is default-off, and
-   V-32 wires the flush boundaries before enabling it. There is no preset bar: Nate judges the
-   sizing results (256/1K/4K/16K slots) before any merge. First revise
-   [DECODED_ICACHE_PLAN.md](docs/DECODED_ICACHE_PLAN.md) from these documents.
-2. **Optional, not blocking:** boot attribution. `getCycle()` counts instructions *attempted*,
-   including trapping ones, not retired instructions.
+1. **Decoded instruction cache: follow [DECODED_ICACHE_PLAN.md](docs/DECODED_ICACHE_PLAN.md),
+   "Next steps, in order".** All parties agree; nothing is built yet. Start with step 1, branch
+   `feature/decoded-icache` from `main`. Summary: opt-in and default-off, the `FENCE.I` plus
+   embedder-flush [protocol](docs/DECODED_ICACHE_PROTOCOL.md) (accepted by V-32), the
+   uncached loop unchanged, sizes 256/1K/4K/16K, and no preset bar: Nate judges. When Nate is
+   happy with the branch, cut a V-32 trial build (`0.1.8-icache-SNAPSHOT`, branch only) for
+   matched boot timing. Expect a small boot effect: V-32's AP runs `step(count=1)` per
+   instruction under a monitor and spins on WFI (see the
+   [addendum](docs/CPU_REVIEW_FOLLOWUP_RESPONSE.md#addendum-the-aps-wfi-and-attempt-loop-read-2026-10-10)).
+2. **Optional, not blocking:** boot attribution, which is V-32's call. `getCycle()` counts
+   instructions *attempted*, including trapping ones, not retired instructions.
 3. **Unchanged, carried over:**
    - The release-hold decision and API-freeze review ([RELEASE_TODO.md](RELEASE_TODO.md)).
    - The Central smoke test.

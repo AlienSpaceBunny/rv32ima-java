@@ -103,3 +103,37 @@ CoreMark.
    the default in the configuration that matters.
 3. Name a representative compute-heavy AP workload, if one exists, for the sizing report
    alongside CoreMark and the new synthetic workload.
+
+## Addendum: the AP's WFI and attempt loop (read 2026-10-10)
+
+Nate asked where WFI waiting lives. **The core never sleeps.** `step()` sets the WFI flag and
+returns `1`; while no enabled interrupt is pending, every further call returns `1` at once.
+Waiting is the embedder's job. In V-32 at `77b2e47`:
+
+- **The IOP sleeps properly.** `IOProcessor.run` waits with `wakeup.await(observed, timed,
+  deadline)`, computing the deadline from a wall-clock-driven timer.
+- **The AP spins.** `ApplicationProcessor.run` calls `Thread.yield()` after a non-zero result
+  and moves on to the next scanline. Each scanline call takes the `syscon` monitor, calls the
+  synchronized `mailbox.updateInterrupt`, and calls `step()`, which returns `1` immediately. A
+  waiting AP therefore occupies a host core and keeps acquiring the monitors the IOP and the
+  10 ms boot observer also need.
+- **The AP's timer is virtual.** It advances 1 µs per scanline call (`elapsedUs` is 1 on the
+  first instruction of each `stepCycles` batch), not with wall time. A guest timer wait ends
+  after a number of spins, so its wall-clock length depends on host spin speed and differs
+  between JVM and native.
+- **Every AP instruction is its own `step(count=1)` call,** under the `syscon` monitor, with two
+  synchronized `mailbox.updateInterrupt` calls around it: 1,061 calls per scanline. This is the
+  per-attempt path the review response estimated at ~77 ns against ~5 ns of core work.
+
+**Implications, as hypotheses for V-32:**
+
+- Faster core execution, including the decoded cache, only shortens the core's share of each
+  attempt. With this loop, a large core speedup can produce a small boot change, which matches
+  the inconclusive screen without proving the cause.
+- Spinning in WFI may compete with the IOP for the `syscon` and mailbox monitors during boot.
+  JVM and native differ in spin and monitor cost, which could add to the native gap and the
+  wide native ranges.
+- Possible V-32 directions, none of them proposed as decided:
+  - park the AP thread on WFI until a mailbox signal or the next due timer, as the IOP does
+  - decide whether the AP timer should follow wall time
+  - batch AP attempts when no boundary sampling is needed

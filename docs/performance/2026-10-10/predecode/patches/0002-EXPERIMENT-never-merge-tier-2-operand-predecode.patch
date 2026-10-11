@@ -1,0 +1,325 @@
+From 077c90b0f6259b955e81b9c882394040e48ded04 Mon Sep 17 00:00:00 2001
+From: Nate Edel <nate@natecodes.com>
+Date: Sat, 10 Oct 2026 17:25:48 -0700
+Subject: [PATCH 2/2] EXPERIMENT (never merge): tier-2 operand predecode
+
+Per halfword slot, a long beside the tier-1 word holds a handler index,
+rd/rs1/rs2, the compressed flag and the pre-extracted immediate. Hot base
+RV32I instructions plus MUL run in a fast path in step(); everything else
+falls back to the tier-1 word and the ordinary opcode switch. Same opt-in
+flag and no invalidation, per docs/PREDECODE_EXPERIMENT_PLAN.md.
+Test-scale smoke verified on bytearray, router, mmio, ffm and wrapper.
+---
+ .../com/alienspacebunny/emu/RV32IMACore.java  | 269 +++++++++++++++++-
+ 1 file changed, 268 insertions(+), 1 deletion(-)
+
+diff --git a/core/src/main/java/com/alienspacebunny/emu/RV32IMACore.java b/core/src/main/java/com/alienspacebunny/emu/RV32IMACore.java
+index 12699e0..3e44d07 100644
+--- a/core/src/main/java/com/alienspacebunny/emu/RV32IMACore.java
++++ b/core/src/main/java/com/alienspacebunny/emu/RV32IMACore.java
+@@ -90,13 +90,148 @@ public class RV32IMACore {
+ 
+     private int[] decodedWordsFor(int ramOffset, int ramSize) {
+         if (decodedWords == null || cacheOffset != ramOffset || cacheSize != ramSize) {
+-            decodedWords = new int[(int) ((Integer.toUnsignedLong(ramSize) + 1) >>> 1)];
++            int slots = (int) ((Integer.toUnsignedLong(ramSize) + 1) >>> 1);
++            decodedWords = new int[slots];
++            predecoded = new long[slots];
+             cacheOffset = ramOffset;
+             cacheSize = ramSize;
+         }
+         return decodedWords;
+     }
+ 
++    // ---- EXPERIMENT: tier-2 operand predecode -------------------------------------------------
++    //
++    // Parallel to decodedWords, one long per halfword slot: the low 32 bits hold the
++    // sign-extended immediate (or branch/jump offset, or shift amount), the high 32 bits the
++    // handler index (bits 5:0), rd (10:6), rs1 (15:11), rs2 (20:16) and a compressed flag (bit
++    // 21). 0 = empty. PD_GENERIC means "use decodedWords and the ordinary opcode switch";
++    // handlers above it run in step()'s fast path and are exactly the base encodings the switch
++    // would execute the same way. Filled together with decodedWords on a successful fetch.
++    private long[] predecoded;
++
++    private static final int PD_GENERIC = 1;
++    private static final int PD_LUI = 2;
++    private static final int PD_AUIPC = 3;
++    private static final int PD_JAL = 4;
++    private static final int PD_JALR = 5;
++    private static final int PD_BEQ = 6;
++    private static final int PD_BNE = 7;
++    private static final int PD_BLT = 8;
++    private static final int PD_BGE = 9;
++    private static final int PD_BLTU = 10;
++    private static final int PD_BGEU = 11;
++    private static final int PD_LB = 12;
++    private static final int PD_LH = 13;
++    private static final int PD_LW = 14;
++    private static final int PD_LBU = 15;
++    private static final int PD_LHU = 16;
++    private static final int PD_SB = 17;
++    private static final int PD_SH = 18;
++    private static final int PD_SW = 19;
++    private static final int PD_ADDI = 20;
++    private static final int PD_SLTI = 21;
++    private static final int PD_SLTIU = 22;
++    private static final int PD_XORI = 23;
++    private static final int PD_ORI = 24;
++    private static final int PD_ANDI = 25;
++    private static final int PD_SLLI = 26;
++    private static final int PD_SRLI = 27;
++    private static final int PD_SRAI = 28;
++    private static final int PD_ADD = 29;
++    private static final int PD_SUB = 30;
++    private static final int PD_SLL = 31;
++    private static final int PD_SLT = 32;
++    private static final int PD_SLTU = 33;
++    private static final int PD_XOR = 34;
++    private static final int PD_SRL = 35;
++    private static final int PD_SRA = 36;
++    private static final int PD_OR = 37;
++    private static final int PD_AND = 38;
++    private static final int PD_MUL = 39;
++    private static final int PD_HANDLER_MASK = 0x3f;
++    private static final int PD_COMPRESSED = 1 << 21;
++
++    private static final int[] PD_BRANCH = {PD_BEQ, PD_BNE, 0, 0, PD_BLT, PD_BGE, PD_BLTU, PD_BGEU};
++    private static final int[] PD_LOAD = {PD_LB, PD_LH, PD_LW, 0, PD_LBU, PD_LHU, 0, 0};
++    private static final int[] PD_STORE = {PD_SB, PD_SH, PD_SW, 0, 0, 0, 0, 0};
++    private static final int[] PD_OP_IMM = {PD_ADDI, 0, PD_SLTI, PD_SLTIU, PD_XORI, 0, PD_ORI, PD_ANDI};
++    private static final int[] PD_OP = {PD_ADD, PD_SLL, PD_SLT, PD_SLTU, PD_XOR, PD_SRL, PD_OR, PD_AND};
++
++    /** Tier-2 entry for a fetched standard 32-bit word (the C expansion for compressed code). */
++    private static long predecodeEntry(int ir, int instrLen) {
++        int opcode = ir & 0x7f;
++        int rd = (ir >> 7) & 0x1f;
++        int funct3 = (ir >> 12) & 0x7;
++        int funct7 = ir >>> 25;
++        int iImm = ir >> 20;
++        int handler = 0;
++        int imm = 0;
++        switch (opcode) {
++            case 0x37 -> {
++                handler = PD_LUI;
++                imm = ir & 0xfffff000;
++            }
++            case 0x17 -> {
++                handler = PD_AUIPC;
++                imm = ir & 0xfffff000;
++            }
++            case 0x6F -> {
++                handler = PD_JAL;
++                imm = ((ir & 0x80000000) >> 11)
++                        | ((ir & 0x7fe00000) >> 20)
++                        | ((ir & 0x00100000) >> 9)
++                        | (ir & 0x000ff000);
++            }
++            case 0x67 -> { // the opcode switch executes JALR whatever funct3 is
++                handler = PD_JALR;
++                imm = iImm;
++            }
++            case 0x63 -> {
++                handler = PD_BRANCH[funct3];
++                rd = 0;
++                imm = ((ir & 0xf00) >> 7) | ((ir & 0x7e000000) >> 20) | ((ir & 0x80) << 4) | ((ir >> 31) << 12);
++            }
++            case 0x03 -> {
++                handler = PD_LOAD[funct3];
++                imm = iImm;
++            }
++            case 0x23 -> {
++                handler = PD_STORE[funct3];
++                rd = 0;
++                imm = ((ir >> 7) & 0x1f) | ((ir >> 20) & ~0x1f);
++            }
++            case 0x13 -> {
++                if (funct3 == 1) {
++                    handler = funct7 == 0 ? PD_SLLI : 0;
++                } else if (funct3 == 5) {
++                    handler = funct7 == 0 ? PD_SRLI : funct7 == 0x20 ? PD_SRAI : 0;
++                } else {
++                    handler = PD_OP_IMM[funct3];
++                }
++                imm = (funct3 == 1 || funct3 == 5) ? (iImm & 0x1f) : iImm;
++            }
++            case 0x33 -> {
++                if (funct7 == 0) {
++                    handler = PD_OP[funct3];
++                } else if (funct7 == 0x20) {
++                    handler = funct3 == 0 ? PD_SUB : funct3 == 5 ? PD_SRA : 0;
++                } else if (funct7 == 1 && funct3 == 0) {
++                    handler = PD_MUL;
++                }
++            }
++            default -> {}
++        }
++        if (handler == 0) {
++            handler = PD_GENERIC;
++        }
++        int meta = handler
++                | (rd << 6)
++                | (((ir >> 15) & 0x1f) << 11)
++                | (((ir >> 20) & 0x1f) << 16)
++                | (instrLen == 2 ? PD_COMPRESSED : 0);
++        return ((long) meta << 32) | Integer.toUnsignedLong(imm);
++    }
++
+     private static final int MSTATUS_MIE = 0x08;
+     private static final int MSTATUS_MPIE = 0x80;
+     private static final int MSTATUS_MPP = 0x1800;
+@@ -1521,6 +1656,7 @@ public class RV32IMACore {
+         }
+ 
+         int[] wordCache = predecode ? decodedWordsFor(ramOffset, ramSize) : null;
++        long[] predecodedOps = predecoded;
+ 
+         // Set by an instruction that can change interrupt deliverability (a write to mstatus,
+         // mie, or mip, or MRET); checked once that instruction has fully retired so a newly
+@@ -1550,6 +1686,136 @@ public class RV32IMACore {
+                     break;
+                 } else {
+                     int cacheSlot = ofsPc >>> 1;
++                    long entry = wordCache != null ? predecodedOps[cacheSlot] : 0;
++                    int meta = (int) (entry >>> 32);
++                    int handler = meta & PD_HANDLER_MASK;
++                    if (handler > PD_GENERIC) {
++                        // EXPERIMENT tier 2: execute a predecoded hot base instruction directly.
++                        int imm = (int) entry;
++                        int[] regs = state.regs;
++                        int fRd = (meta >>> 6) & 0x1f;
++                        int fRs1 = (meta >>> 11) & 0x1f;
++                        int fRs2 = (meta >>> 16) & 0x1f;
++                        instrLen = (meta & PD_COMPRESSED) != 0 ? 2 : 4;
++                        int nextPc = pc + instrLen;
++                        int fval = 0;
++                        int fault = 0;
++                        switch (handler) {
++                            case PD_LUI -> fval = imm;
++                            case PD_AUIPC -> fval = pc + imm;
++                            case PD_JAL -> {
++                                fval = nextPc;
++                                nextPc = pc + imm;
++                            }
++                            case PD_JALR -> {
++                                fval = nextPc;
++                                nextPc = (regs[fRs1] + imm) & ~1;
++                            }
++                            case PD_BEQ -> nextPc = regs[fRs1] == regs[fRs2] ? pc + imm : nextPc;
++                            case PD_BNE -> nextPc = regs[fRs1] != regs[fRs2] ? pc + imm : nextPc;
++                            case PD_BLT -> nextPc = regs[fRs1] < regs[fRs2] ? pc + imm : nextPc;
++                            case PD_BGE -> nextPc = regs[fRs1] >= regs[fRs2] ? pc + imm : nextPc;
++                            case PD_BLTU ->
++                                nextPc = Integer.compareUnsigned(regs[fRs1], regs[fRs2]) < 0 ? pc + imm : nextPc;
++                            case PD_BGEU ->
++                                nextPc = Integer.compareUnsigned(regs[fRs1], regs[fRs2]) >= 0 ? pc + imm : nextPc;
++                            case PD_LB, PD_LH, PD_LW, PD_LBU, PD_LHU -> {
++                                int addr = regs[fRs1] + imm;
++                                try {
++                                    fval = switch (handler) {
++                                        case PD_LB ->
++                                            mem.readByteSigned(
++                                                    addr,
++                                                    new AccessContext(state.hartId, privilege, AccessKind.LOAD, 1, 0));
++                                        case PD_LH ->
++                                            mem.readShortSigned(
++                                                    addr,
++                                                    new AccessContext(state.hartId, privilege, AccessKind.LOAD, 2, 0));
++                                        case PD_LW ->
++                                            mem.readInt(
++                                                    addr,
++                                                    new AccessContext(state.hartId, privilege, AccessKind.LOAD, 4, 0));
++                                        case PD_LBU ->
++                                            mem.readByte(
++                                                            addr,
++                                                            new AccessContext(
++                                                                    state.hartId, privilege, AccessKind.LOAD, 1, 0))
++                                                    & 0xFF;
++                                        default ->
++                                            mem.readShort(
++                                                            addr,
++                                                            new AccessContext(
++                                                                    state.hartId, privilege, AccessKind.LOAD, 2, 0))
++                                                    & 0xFFFF;
++                                    };
++                                } catch (IndexOutOfBoundsException _) {
++                                    fault = exceptionTrap(EXC_LOAD_ACCESS_FAULT);
++                                    fval = addr;
++                                }
++                            }
++                            case PD_SB, PD_SH, PD_SW -> {
++                                int addr = regs[fRs1] + imm;
++                                int value = regs[fRs2];
++                                try {
++                                    switch (handler) {
++                                        case PD_SB ->
++                                            mem.writeByte(
++                                                    addr,
++                                                    (byte) value,
++                                                    new AccessContext(state.hartId, privilege, AccessKind.STORE, 1, 0));
++                                        case PD_SH ->
++                                            mem.writeShort(
++                                                    addr,
++                                                    (short) value,
++                                                    new AccessContext(state.hartId, privilege, AccessKind.STORE, 2, 0));
++                                        default ->
++                                            mem.writeInt(
++                                                    addr,
++                                                    value,
++                                                    new AccessContext(state.hartId, privilege, AccessKind.STORE, 4, 0));
++                                    }
++                                    state.reservationValid = false;
++                                } catch (IndexOutOfBoundsException _) {
++                                    fault = exceptionTrap(EXC_STORE_ACCESS_FAULT);
++                                    fval = addr;
++                                }
++                            }
++                            case PD_ADDI -> fval = regs[fRs1] + imm;
++                            case PD_SLTI -> fval = regs[fRs1] < imm ? 1 : 0;
++                            case PD_SLTIU -> fval = Integer.compareUnsigned(regs[fRs1], imm) < 0 ? 1 : 0;
++                            case PD_XORI -> fval = regs[fRs1] ^ imm;
++                            case PD_ORI -> fval = regs[fRs1] | imm;
++                            case PD_ANDI -> fval = regs[fRs1] & imm;
++                            case PD_SLLI -> fval = regs[fRs1] << imm;
++                            case PD_SRLI -> fval = regs[fRs1] >>> imm;
++                            case PD_SRAI -> fval = regs[fRs1] >> imm;
++                            case PD_ADD -> fval = regs[fRs1] + regs[fRs2];
++                            case PD_SUB -> fval = regs[fRs1] - regs[fRs2];
++                            case PD_SLL -> fval = regs[fRs1] << regs[fRs2];
++                            case PD_SLT -> fval = regs[fRs1] < regs[fRs2] ? 1 : 0;
++                            case PD_SLTU -> fval = Integer.compareUnsigned(regs[fRs1], regs[fRs2]) < 0 ? 1 : 0;
++                            case PD_XOR -> fval = regs[fRs1] ^ regs[fRs2];
++                            case PD_SRL -> fval = regs[fRs1] >>> regs[fRs2];
++                            case PD_SRA -> fval = regs[fRs1] >> regs[fRs2];
++                            case PD_OR -> fval = regs[fRs1] | regs[fRs2];
++                            case PD_AND -> fval = regs[fRs1] & regs[fRs2];
++                            default -> fval = regs[fRs1] * regs[fRs2]; // PD_MUL
++                        }
++                        if (fault != 0) {
++                            // Same state as the ordinary Load/Store arms' access-fault path.
++                            trap = fault;
++                            rval = fval;
++                            ir = wordCache[cacheSlot] | 0x3;
++                            if (postExec != null) postExec.onPostExec(pc, ir, trap);
++                            break;
++                        }
++                        if (fRd != 0) {
++                            regs[fRd] = fval;
++                        }
++                        if (postExec != null) postExec.onPostExec(pc, wordCache[cacheSlot] | 0x3, 0);
++                        pc = nextPc;
++                        continue;
++                    }
+                     int cached = wordCache != null ? wordCache[cacheSlot] : 0;
+                     if (cached != 0) {
+                         ir = cached | 0x3;
+@@ -1597,6 +1863,7 @@ public class RV32IMACore {
+                         }
+                         if (wordCache != null && (ir & 0x3) == 0x3) {
+                             wordCache[cacheSlot] = (ir & ~0x3) | (instrLen == 2 ? 1 : 2);
++                            predecodedOps[cacheSlot] = predecodeEntry(ir, instrLen);
+                         }
+                     }
+                     int rdid = (ir >> 7) & 0x1f;
+-- 
+2.56.0
+

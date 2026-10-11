@@ -1,0 +1,38 @@
+pd vs HEAD
+cell               coremark- coremark- fpkernels fpkernels    reg-ap   regc-ap copy6m-ap    mix-ap reg-ap-st
+jvm/bytearray         1.30x*    1.41x*    1.14x*    1.17x*    1.43x*    1.40x*    1.33x*    1.29x*    1.09x*
+jvm/router            1.50x*    1.47x*    1.23x*    1.24x*    1.65x*    1.58x*    1.53x*    1.41x*    1.17x*
+mono/bytearray        1.84x*    1.62x*    1.11x*    1.05x*    2.34x*    1.95x*    2.07x*    1.65x*    1.52x*
+mono/router           2.47x*    2.04x*    1.28x*    1.15x*    3.51x*    2.55x*    2.89x*    2.21x*    1.99x*
+poly/bytearray        2.19x*    1.83x*    1.20x*    1.11x*    3.00x*    2.30x*    2.56x*    1.97x*    1.82x*
+poly/router           2.51x*    2.08x*    1.29x*    1.17x*    3.65x*    2.71x*    2.94x*    2.22x*    2.14x*
+poly-o3/bytearray     1.97x*    1.66x*    1.12x*    1.06x*    2.48x*    2.03x*    2.31x*    1.82x*    1.53x*
+
+pd vs exp plain
+cell               coremark- coremark- fpkernels fpkernels    reg-ap   regc-ap copy6m-ap    mix-ap reg-ap-st
+jvm/bytearray         1.31x*    1.41x*    1.15x*    1.17x*    1.40x*    1.39x*    1.34x*    1.29x*    1.10x*
+jvm/router            1.57x*    1.58x*    1.24x*    1.24x*    1.73x*    1.73x*    1.59x*    1.51x*    1.19x*
+mono/bytearray        2.21x*    1.99x*    1.19x*    1.13x*    2.77x*    2.37x*    2.47x*    1.95x*    1.79x*
+mono/router           2.83x*    2.37x*    1.39x*    1.23x*    3.98x*    3.02x*    3.28x*    2.65x*    2.39x*
+poly/bytearray        2.55x*    2.18x*    1.29x*    1.19x*    3.42x*    2.74x*    2.90x*    2.25x*    2.04x*
+poly/router           2.85x*    2.42x*    1.37x*    1.24x*    4.14x*    3.14x*    3.31x*    2.52x*    2.37x*
+poly-o3/bytearray     2.34x*    2.10x*    1.21x*    1.15x*    3.01x*    2.48x*    2.72x*    2.10x*    1.84x*
+
+exp plain vs HEAD
+cell               coremark- coremark- fpkernels fpkernels    reg-ap   regc-ap copy6m-ap    mix-ap reg-ap-st
+jvm/bytearray         0.99x     1.00x     0.98x     1.00x     1.02x     1.01x     0.99x     1.00x     0.99x 
+jvm/router            0.96x     0.93x     0.99x     1.00x     0.95x     0.91x     0.96x!    0.94x!    0.98x 
+mono/bytearray        0.83x!    0.81x!    0.93x!    0.93x!    0.85x!    0.82x!    0.84x!    0.85x!    0.85x!
+mono/router           0.87x!    0.86x!    0.92x!    0.93x!    0.88x!    0.84x!    0.88x!    0.83x!    0.83x!
+poly/bytearray        0.86x!    0.84x!    0.93x!    0.94x!    0.88x!    0.84x!    0.88x!    0.87x!    0.89x!
+poly/router           0.88x!    0.86x!    0.94x!    0.94x!    0.88x!    0.86x!    0.89x!    0.88x!    0.90x!
+poly-o3/bytearray     0.84x!    0.79x!    0.93x!    0.93x!    0.82x!    0.82x!    0.85x!    0.87x!    0.83x!
+
+medians ms: HEAD / pd
+jvm/bytearray          13/10      13/9     22/19     22/19     24/17     23/17     52/39     18/14     39/36
+jvm/router              14/9      13/9     23/19     24/19     25/15     25/16     56/37     20/14     40/34
+mono/bytearray         20/11     18/11     51/46     49/47     42/18     35/18     94/45     34/20     61/40
+mono/router            32/13     27/13     62/49     56/49     65/18     47/19    156/54     57/26     84/42
+poly/bytearray         27/12     23/12     57/47     53/48     54/18     41/18    128/50     45/23     74/41
+poly/router            32/13     27/13     63/49     56/48     65/18     48/18    158/54     57/26     87/41
+poly-o3/bytearray      22/11     19/11     51/45     48/45     43/18     35/17    105/46     37/20     64/42

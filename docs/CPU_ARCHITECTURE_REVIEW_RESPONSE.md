@@ -23,7 +23,12 @@ below are inputs to V-32's own storage decision.
     72 B allocated per access
 - **Compressed code cost 17–30% throughput** relative to the same program built without C.
   After C4 the penalty is gone on HotSpot and about 11% natively; the remainder is the
-  halfword probe, which must stay.
+  halfword probe, which an uncached fetch must keep.
+- **Predecode is the one large core-side lever left.** An upper-bound experiment, with no
+  invalidation and not landed, made CoreMark 1.46–2.04× faster natively by caching fetched
+  words alone, and 1.84–2.51× with operand predecode, 1.30–1.50× on HotSpot. Native would then
+  overtake today's HotSpot. Whether to design it properly, with invalidation, is a separate
+  decision; it does not block V-32's next step.
 - **Recommended next step:** adopt `0.1.7-SNAPSHOT`, build native images with `-O3`, and
   rerun V-32's existing AP controls. Then make one accessor decision for native builds. Details
   are at the end.
@@ -106,22 +111,38 @@ moved only ~3.5%. Not implemented here; it awaits a separately scoped API decisi
 **3. Could a primitive/context-specialized interface or optional fetch path help?**
 
 - **Primitive context:** no. The cost is the call, not its argument (see C1).
-- **Optional executable fetch window:** the remaining structural lever for fetch. Its upper
-  bound is the fetch share of a non-inlined call, roughly 10–25% native and ≈0 on HotSpot. It
-  must preserve:
+- **Optional executable fetch window:** a cheaper form of the predecode result below. An
+  earlier estimate, 10–25% native from the bus-call share alone, was too low: caching
+  fetched words also removes the halfword probe and the expansion, and gained 46–104% native,
+  ≈3% on HotSpot. It must preserve:
   - store and remap invalidation, including other harts' stores
   - MPU windows
   - exact-instruction fault timing
   - MMIO fetch side effects
 
-  Not recommended ahead of the items below.
+  Predecode subsumes it, so it is not pursued separately.
 - **Emulated cache or prefetch buffer:** no evidence of bus contention, and a data cache would
   be a weaker form of direct RAM access with the same coherence obligations. Defer both.
 - **Predecode (decode once per address):** the one structural option that could close most of
   the remaining AOT gap uniformly, for integer, FP and compressed code alike. It carries the
   same invalidation obligations as a fetch window. A bounded upper-bound experiment on
   CoreMark-class code ([plan](PREDECODE_EXPERIMENT_PLAN.md)) decides whether it becomes a
-  separately scoped design. *Result pending.*
+  separately scoped design.
+
+  **Result: the plan's top band (≥ 1.4× native on CoreMark) is met,** so a real design is to be
+  scoped as a separate decision. On CoreMark's C build, versus `HEAD`:
+
+  | | Native mono / poly / poly `-O3` (`byte[]`) | HotSpot |
+  | --- | --- | --- |
+  | Tier 1: cached fetched words | 1.46× / 1.78× / 1.58× | 1.03× |
+  | Tier 2: plus pre-extracted operands | 1.84× / 2.19× / 1.97× | 1.30× |
+
+  The FP kernels gain only 1.05–1.34×; their helpers dominate. Compressed code no longer pays a
+  penalty. The disabled code slowed the uncached path by up to 21% natively, so a design must
+  leave that loop untouched. Its obligations are listed in the plan: opt-in, invalidation
+  for the core's own stores, other harts and the host, and remap or MPU changes, fault fidelity,
+  bounded memory, and lockstep differential testing. Details are in the
+  [evidence](performance/2026-10-10/README.md#predecode-upper-bound-experiment-not-landed-decision-rule-met).
 
 **4. Is the shared driver maintainable; could its modes cause native duplication?** Sharing
 one decoder between bulk and committed-attempt modes is the right source structure. C3 makes

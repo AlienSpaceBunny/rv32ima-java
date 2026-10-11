@@ -1,4 +1,4 @@
-# Predecode upper-bound experiment (draft; tier-1 code ready, not measured)
+# Predecode upper-bound experiment (complete)
 
 Drafted 2026-10-10. It answers one question before the V-32 handoff: **how much could
 decode-once execution gain over `HEAD`'s interpreter, at best?** That number decides whether
@@ -19,12 +19,13 @@ The 2026-10-10 evidence ([performance/2026-10-10](performance/2026-10-10/README.
 Predecode attacks all of these uniformly. It also subsumes a prefetch buffer or fetch window,
 since a hit needs no fetch at all, so those are not explored separately.
 
-**Status (2026-10-10, 02:30).** Tier 1 is implemented on branch `exp/predecode` at `04fdf54`.
-It is correctness-smoked at test scale on the `bytearray` and `router` buses, where all 14
-workloads verified, but it is not measured. Run it with the existing images: the cache is
-behind a runtime `--predecode` flag, and `run_matrix.py --predecode` adds `<label>-pd` cells.
-Compare it with a fresh `claude-review` `HEAD` reference, because the experiment branch
-carries one extra branch in the fetch path. Tier 2 is not started.
+**Status: complete (2026-10-10).** Both tiers were measured against fresh `HEAD` references
+and every workload check passed. The decision rule's top band is met: CoreMark's C build is
+1.46–2.04× faster natively with tier 1 and 1.84–2.51× with tier 2, so a real predecode design
+is to be scoped as a separate decision. The code lives only on the local branch
+`exp/predecode` (`04fdf54`, `077c90b`) and as patches beside the
+[evidence](performance/2026-10-10/README.md#predecode-upper-bound-experiment-not-landed-decision-rule-met).
+Each tier took well under its time budget.
 
 ## Design of the experiment
 

@@ -1,0 +1,343 @@
+{
+  "started": "2026-10-10T17:16:54-0700",
+  "git_rev": "ae5aba2f962cd9f92cbafb26e1cfc6ad33b383e7",
+  "git_dirty": false,
+  "jar": "bench/out/jars/pd-head.jar",
+  "jar_sha256": "0649e8ecb89a9da815093c76fc08ec193236d7bffc5c69e7b729938aef06514d",
+  "java": "openjdk version \"25.0.4.1\" 2026-08-18 LTS\nOpenJDK Runtime Environment Corretto-25.0.4.8.1 (build 25.0.4.1+8-LTS)\nOpenJDK 64-Bit Server VM Corretto-25.0.4.8.1 (build 25.0.4.1+8-LTS, mixed mode, sharing)",
+  "native_images": {
+    "bench/out/native-pd-head/poly": {
+      "sha256": "89348d274282e1ac3376d822351f63a4c109567de8c8d0b8bffcd917fd2631db",
+      "compiler": "Graal compiler: optimization level: 2, target machine: compatibility"
+    },
+    "bench/out/native-pd-head/mono-bytearray": {
+      "sha256": "e10be934e65e0306e50a719bea392f09e62a323129c806b23355c2e6041d0d30",
+      "compiler": "Graal compiler: optimization level: 2, target machine: compatibility"
+    },
+    "bench/out/native-pd-head/mono-router": {
+      "sha256": "28ef5101b0d92f2bf9e608474e11aac349ad75c2603b259857028868b7de20f8",
+      "compiler": "Graal compiler: optimization level: 2, target machine: compatibility"
+    },
+    "bench/out/native-pd-head/poly-o3": {
+      "sha256": "f0a4be20c0b884e7d8b2d6a9ed3fb5cfa5f243280877dec585015962adc3817a",
+      "compiler": "Graal compiler: optimization level: 3, target machine: compatibility"
+    }
+  },
+  "warmup_seconds": 10,
+  "samples_per_fork": 3,
+  "forks": 2,
+  "cpus": "2,3",
+  "processes": [
+    {
+      "name": "f1-jvm-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/pd-head.jar",
+        "--bus",
+        "bytearray",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--workloads",
+        "coremark-c,coremark-noc,fpkernels-c,fpkernels-noc,reg-ap,regc-ap,copy6m-ap,mix-ap,reg-ap-step1"
+      ],
+      "exit": 0,
+      "seconds": 11.1
+    },
+    {
+      "name": "f1-jvm-router",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/pd-head.jar",
+        "--bus",
+        "router",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--workloads",
+        "coremark-c,coremark-noc,fpkernels-c,fpkernels-noc,reg-ap,regc-ap,copy6m-ap,mix-ap,reg-ap-step1"
+      ],
+      "exit": 0,
+      "seconds": 11.1
+    },
+    {
+      "name": "f1-poly-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-pd-head/poly",
+        "--bus",
+        "bytearray",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--workloads",
+        "coremark-c,coremark-noc,fpkernels-c,fpkernels-noc,reg-ap,regc-ap,copy6m-ap,mix-ap,reg-ap-step1"
+      ],
+      "exit": 0,
+      "seconds": 12.3
+    },
+    {
+      "name": "f1-poly-router",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-pd-head/poly",
+        "--bus",
+        "router",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--workloads",
+        "coremark-c,coremark-noc,fpkernels-c,fpkernels-noc,reg-ap,regc-ap,copy6m-ap,mix-ap,reg-ap-step1"
+      ],
+      "exit": 0,
+      "seconds": 12.1
+    },
+    {
+      "name": "f1-mono-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-pd-head/mono-bytearray",
+        "--bus",
+        "bytearray",
+        "--label",
+        "mono",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--workloads",
+        "coremark-c,coremark-noc,fpkernels-c,fpkernels-noc,reg-ap,regc-ap,copy6m-ap,mix-ap,reg-ap-step1"
+      ],
+      "exit": 0,
+      "seconds": 11.6
+    },
+    {
+      "name": "f1-mono-router",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-pd-head/mono-router",
+        "--bus",
+        "router",
+        "--label",
+        "mono",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--workloads",
+        "coremark-c,coremark-noc,fpkernels-c,fpkernels-noc,reg-ap,regc-ap,copy6m-ap,mix-ap,reg-ap-step1"
+      ],
+      "exit": 0,
+      "seconds": 12.6
+    },
+    {
+      "name": "f1-poly-o3-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-pd-head/poly-o3",
+        "--bus",
+        "bytearray",
+        "--label",
+        "poly-o3",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--workloads",
+        "coremark-c,coremark-noc,fpkernels-c,fpkernels-noc,reg-ap,regc-ap,copy6m-ap,mix-ap,reg-ap-step1"
+      ],
+      "exit": 0,
+      "seconds": 11.8
+    },
+    {
+      "name": "f2-poly-o3-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-pd-head/poly-o3",
+        "--bus",
+        "bytearray",
+        "--label",
+        "poly-o3",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse",
+        "--workloads",
+        "coremark-c,coremark-noc,fpkernels-c,fpkernels-noc,reg-ap,regc-ap,copy6m-ap,mix-ap,reg-ap-step1"
+      ],
+      "exit": 0,
+      "seconds": 11.8
+    },
+    {
+      "name": "f2-mono-router",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-pd-head/mono-router",
+        "--bus",
+        "router",
+        "--label",
+        "mono",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse",
+        "--workloads",
+        "coremark-c,coremark-noc,fpkernels-c,fpkernels-noc,reg-ap,regc-ap,copy6m-ap,mix-ap,reg-ap-step1"
+      ],
+      "exit": 0,
+      "seconds": 12.6
+    },
+    {
+      "name": "f2-mono-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-pd-head/mono-bytearray",
+        "--bus",
+        "bytearray",
+        "--label",
+        "mono",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse",
+        "--workloads",
+        "coremark-c,coremark-noc,fpkernels-c,fpkernels-noc,reg-ap,regc-ap,copy6m-ap,mix-ap,reg-ap-step1"
+      ],
+      "exit": 0,
+      "seconds": 11.6
+    },
+    {
+      "name": "f2-poly-router",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-pd-head/poly",
+        "--bus",
+        "router",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse",
+        "--workloads",
+        "coremark-c,coremark-noc,fpkernels-c,fpkernels-noc,reg-ap,regc-ap,copy6m-ap,mix-ap,reg-ap-step1"
+      ],
+      "exit": 0,
+      "seconds": 12.2
+    },
+    {
+      "name": "f2-poly-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-pd-head/poly",
+        "--bus",
+        "bytearray",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse",
+        "--workloads",
+        "coremark-c,coremark-noc,fpkernels-c,fpkernels-noc,reg-ap,regc-ap,copy6m-ap,mix-ap,reg-ap-step1"
+      ],
+      "exit": 0,
+      "seconds": 11.9
+    },
+    {
+      "name": "f2-jvm-router",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/pd-head.jar",
+        "--bus",
+        "router",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse",
+        "--workloads",
+        "coremark-c,coremark-noc,fpkernels-c,fpkernels-noc,reg-ap,regc-ap,copy6m-ap,mix-ap,reg-ap-step1"
+      ],
+      "exit": 0,
+      "seconds": 11.0
+    },
+    {
+      "name": "f2-jvm-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/pd-head.jar",
+        "--bus",
+        "bytearray",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse",
+        "--workloads",
+        "coremark-c,coremark-noc,fpkernels-c,fpkernels-noc,reg-ap,regc-ap,copy6m-ap,mix-ap,reg-ap-step1"
+      ],
+      "exit": 0,
+      "seconds": 10.9
+    }
+  ],
+  "finished": "2026-10-10T17:19:39-0700",
+  "complete": true
+}

@@ -31,6 +31,9 @@ consumers.
   72 B per access by itself; a direct `ByteBuffer` view matches `byte[]`.
 - **Compiler flags:** `-O3` gives a free 12–25%. `-march` x86-64-v2/v3 make no measurable
   difference relative to `compatibility`.
+- **Predecode upper bound (not landed):** caching decoded instructions per address makes
+  CoreMark 1.46–2.04× faster natively (fetch only) and 1.84–2.51× with operand predecode,
+  overtaking `HEAD` on HotSpot. It needs an invalidation design first; see the last section.
 - **A consumer-style `final` router does not recover inlining.** A realistic bus with an
   MPU-style check is too large to inline into `step()` even when it is the image's only bus
   class.
@@ -311,3 +314,66 @@ replaced by an inline approximation plus residual-sign helpers, with identical a
 barely moved (46.1 → 45.9 B per instruction in `mono`). The record was already scalar-replaced
 because its helpers inline. The remaining FP allocation comes from elsewhere and has not been
 identified. Reverted.
+
+### Predecode upper-bound experiment. Not landed; decision rule met.
+
+**What it was.** Per [the plan](../../PREDECODE_EXPERIMENT_PLAN.md), two throwaway tiers on
+the local-only branch `exp/predecode`, behind an opt-in core flag that only the bench sets.
+Neither tier has invalidation; every invocation checks that the guest left its code bytes
+unchanged. Both patches are in [`predecode/patches/`](predecode/patches/).
+
+- **Tier 1 (`04fdf54`), decoded-word cache:** per halfword slot, the fetched word (the C
+  expansion for compressed code) and its length. A hit skips both bus fetch calls, the
+  halfword probe and the expansion.
+- **Tier 2 (`077c90b`), operand predecode:** tier 1 plus a handler index, `rd`/`rs1`/`rs2` and
+  the pre-extracted immediate. Hot base RV32I instructions and MUL run in a fast path; the rest
+  falls back to the ordinary switch.
+
+**Matrix.** The `jvm`, `mono`, `poly` and `poly-o3` images on the `bytearray` and `router`
+buses, nine workloads. Each tier ran against a fresh `HEAD` (`ae5aba2`) reference in the same
+session. The `-pd` cells are the same experiment binaries with the flag set; the plain cells
+show what the disabled code costs. The manifests' `git_rev` is the checkout the runner ran
+from, so identify the builds by jar hash: `HEAD` `0649e8ec…`, tier 1 `b65813d6…`, tier 2
+`ac2c3d57…`. The two `HEAD` runs agree within −1% to +7%. Full tables are in
+[`tier1-comparison.txt`](predecode/tier1-comparison.txt) and
+[`tier2-comparison.txt`](predecode/tier2-comparison.txt), produced by
+[`pdcompare.py`](predecode/pdcompare.py) from `predecode/{head,t1,head2,t2}/summary.csv`.
+
+**Result, speedup of `-pd` over `HEAD`** (every native range is entirely below its reference):
+
+| Cell | coremark-c T1 | coremark-c T2 | coremark-noc T2 | fpkernels-c T2 | reg-ap T2 | copy6m-ap T2 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| jvm/bytearray | 1.03× | 1.30× | 1.41× | 1.14× | 1.43× | 1.33× |
+| jvm/router | 1.02× | 1.50× | 1.47× | 1.23× | 1.65× | 1.53× |
+| mono/bytearray | 1.46× | 1.84× | 1.62× | 1.11× | 2.34× | 2.07× |
+| mono/router | 2.04× | 2.47× | 2.04× | 1.28× | 3.51× | 2.89× |
+| poly/bytearray | 1.78× | 2.19× | 1.83× | 1.20× | 3.00× | 2.56× |
+| poly/router | 2.04× | 2.51× | 2.08× | 1.29× | 3.65× | 2.94× |
+| poly-o3/bytearray | 1.58× | 1.97× | 1.66× | 1.12× | 2.48× | 2.31× |
+
+**Findings:**
+
+- **The decision rule's top band is met by tier 1 alone:** CoreMark (C build) is 1.46–2.04×
+  faster natively. Tier 2 reaches 1.84–2.51×. In MIPS on `bytearray`, tier 2 runs CoreMark-C
+  at 233 in native `mono` and 212 in `poly`, above `HEAD`'s HotSpot figure of 206. With
+  predecode, the AOT gap on integer code is closed.
+- **Fetch was far costlier natively than estimated.** The earlier bound for a fetch window,
+  10–25% native, came from the bus-call share alone. Tier 1 removes the probe, the second
+  call and the expansion as well, and gains 46–104%. On HotSpot it gains at most 6%.
+- **The compressed penalty is entirely fetch.** With tier 1, CoreMark's C and no-C builds run
+  at the same speed natively (for example `mono`: 13.97 vs 14.13 ms), against an 11% penalty
+  at `HEAD`.
+- **Tier 2 is what helps HotSpot** (1.30–1.50× on CoreMark-C). Natively it adds a further
+  18–26% over tier 1 on CoreMark.
+- **FP is bounded by its helpers.** FP kernels gain 1.06–1.34× from tier 1 and nothing further
+  natively from tier 2, which does not predecode F instructions.
+- **The disabled code is not free.** With the flag off, the experiment builds run at
+  0.89–0.98× (tier 1) and 0.79–0.94× (tier 2) of `HEAD`'s speed natively, and down to 0.91×
+  on HotSpot. A real
+  design must keep the uncached path's loop unchanged, for example with a separate loop or
+  entry point.
+- **Native `poly` allocates in the fast path:** 8.7 B per instruction on CoreMark, from
+  `AccessContext`s passed to non-inlined bus calls. `mono/bytearray` allocates nothing.
+- **Correctness:** every invocation verified instruction counts, CoreMark CRCs, the FP
+  reference model and the register/memory models. The core suite (535 tests) passes on both
+  experiment commits with the flag off; the flag was smoke-tested on five buses at test scale.

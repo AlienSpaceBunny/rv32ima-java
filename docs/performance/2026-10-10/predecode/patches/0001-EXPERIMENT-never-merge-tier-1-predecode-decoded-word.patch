@@ -1,0 +1,302 @@
+From 04fdf54dfd653c1a5934eb026e9ee0dfbe92a14a Mon Sep 17 00:00:00 2001
+From: Nate Edel <nate@natecodes.com>
+Date: Sat, 10 Oct 2026 02:11:32 -0700
+Subject: [PATCH 1/2] EXPERIMENT (never merge): tier-1 predecode decoded-word
+ cache
+
+Opt-in core flag caching each successfully fetched instruction word per
+halfword of the executable window, with no invalidation; the bench's
+--predecode flag enables it and checks after every invocation that guest
+code is unchanged. Upper-bound measurement only, per
+docs/PREDECODE_EXPERIMENT_PLAN.md. Correctness-smoked at test scale on
+bytearray and router (all 14 workloads verified); not yet measured.
+---
+ bench/run_matrix.py                           |   9 ++
+ .../com/alienspacebunny/bench/Harness.java    |   4 +-
+ .../com/alienspacebunny/bench/Workloads.java  |  31 ++++-
+ .../com/alienspacebunny/emu/RV32IMACore.java  | 118 ++++++++++++------
+ 4 files changed, 124 insertions(+), 38 deletions(-)
+
+diff --git a/bench/run_matrix.py b/bench/run_matrix.py
+index 3931c54..9d083df 100755
+--- a/bench/run_matrix.py
++++ b/bench/run_matrix.py
+@@ -54,6 +54,13 @@ def cells(args):
+         out += [("poly-o3", [str(nd / "poly-o3")], b) for b in FLAG_BUSES]
+         out += [("poly-v2", [str(nd / "poly-v2")], b) for b in FLAG_BUSES]
+         out += [("poly-v3", [str(nd / "poly-v3")], b) for b in FLAG_BUSES]
++    if args.predecode:
++        # EXPERIMENT (branch exp/predecode): the same binaries with the tier-1 cache enabled.
++        pd = []
++        for label, prefix, bus in out:
++            if label in ("jvm", "mono", "poly", "poly-o3"):
++                pd.append((label + "-pd", prefix + ["--predecode"], bus))
++        out += pd
+     if args.only:
+         labels = set(args.only.split(","))
+         out = [c for c in out if c[0] in labels]
+@@ -152,6 +159,8 @@ def main():
+     p.add_argument("--java", default=os.path.expanduser("~/.jdks/corretto-25.0.4.1/bin/java"))
+     p.add_argument("--jar")
+     p.add_argument("--graal-java", help="GraalVM JDK java; adds jvm-graaljit / jvm-graalc2 cells")
++    p.add_argument("--predecode", action="store_true",
++                   help="EXPERIMENT: add <label>-pd cells running with --predecode")
+     p.add_argument("--only", help="comma-separated image labels to run (e.g. jvm-graaljit,jvm-graalc2)")
+     p.add_argument("--warmup-seconds", type=float, default=10)
+     p.add_argument("--samples", type=int, default=3)
+diff --git a/bench/src/main/java/com/alienspacebunny/bench/Harness.java b/bench/src/main/java/com/alienspacebunny/bench/Harness.java
+index 8f43531..bdf5f53 100644
+--- a/bench/src/main/java/com/alienspacebunny/bench/Harness.java
++++ b/bench/src/main/java/com/alienspacebunny/bench/Harness.java
+@@ -49,6 +49,7 @@ final class Harness {
+         String label = "";
+         boolean reverse = false;
+         long skew = 0;
++        boolean predecode = false;
+         Workloads.Scale scale = Workloads.Scale.FULL;
+         for (int i = 0; i < args.length; i++) {
+             switch (args[i]) {
+@@ -60,6 +61,7 @@ final class Harness {
+                 case "--label" -> label = args[++i];
+                 case "--reverse" -> reverse = true;
+                 case "--skew" -> skew = Long.parseLong(args[++i]);
++                case "--predecode" -> predecode = true; // EXPERIMENT, branch exp/predecode only
+                 case "--scale" -> scale = Workloads.Scale.valueOf(args[++i].toUpperCase(Locale.ROOT));
+                 default -> throw new IllegalArgumentException("unknown argument " + args[i]);
+             }
+@@ -69,7 +71,7 @@ final class Harness {
+             throw new IllegalArgumentException("--bus must be one of " + buses.keySet());
+         }
+ 
+-        List<Workload> workloads = select(Workloads.all(scale, skew), selection);
++        List<Workload> workloads = select(Workloads.all(scale, skew, predecode), selection);
+         if (reverse) {
+             Collections.reverse(workloads);
+         }
+diff --git a/bench/src/main/java/com/alienspacebunny/bench/Workloads.java b/bench/src/main/java/com/alienspacebunny/bench/Workloads.java
+index ac7a23e..6f80819 100644
+--- a/bench/src/main/java/com/alienspacebunny/bench/Workloads.java
++++ b/bench/src/main/java/com/alienspacebunny/bench/Workloads.java
+@@ -57,6 +57,21 @@ final class Workloads {
+ 
+     private Workloads() {}
+ 
++    /** Set by {@link #all(Scale, long, boolean)} before any workload is constructed. */
++    private static boolean experimentalPredecode;
++
++    private static RV32IMACore newCore(IsaConfig isa) {
++        return new RV32IMACore(isa, experimentalPredecode);
++    }
++
++    static void checkCodeUnchanged(MemoryBus bus, byte[] program, String name) {
++        for (int i = 0; i < program.length; i++) {
++            if (bus.readByte(i) != program[i]) {
++                throw new IllegalStateException(name + ": guest modified its code at 0x" + Integer.toHexString(i));
++            }
++        }
++    }
++
+     /** Problem sizes: {@code full} for timing, {@code test} for fast unit checks. */
+     enum Scale {
+         FULL(1_000_000, 1_572_864, 1_536, 200_000),
+@@ -76,6 +91,16 @@ final class Workloads {
+     }
+ 
+     static List<Workload> all(Scale scale, long skew) {
++        return all(scale, skew, false);
++    }
++
++    /**
++     * EXPERIMENT (branch {@code exp/predecode}): with {@code predecode}, guest workloads run on a
++     * core with the tier-1 decoded-word cache, and every invocation checks that its code bytes
++     * are unchanged, since the cache is never invalidated.
++     */
++    static List<Workload> all(Scale scale, long skew, boolean predecode) {
++        experimentalPredecode = predecode;
+         int n = scale.regIterations;
+         return List.of(
+                 new RegLoop("reg-ima", IMA, false, n, 4096, skew),
+@@ -167,7 +192,7 @@ final class Workloads {
+ 
+         GuestWorkload(String name, IsaConfig isa, int chunk, Asm asm, long analyticalCount, long skew) {
+             super(name);
+-            this.core = new RV32IMACore(isa);
++            this.core = newCore(isa);
+             this.chunk = chunk;
+             this.program = asm.bytes();
+             this.expectedInstructions = analyticalCount + skew;
+@@ -205,6 +230,7 @@ final class Workloads {
+                     name + ": executed " + state.getCycle() + " instructions, expected " + expectedInstructions);
+             check(state.pc == program.length, name + ": stopped at pc " + Integer.toHexString(state.pc));
+             check(state.mcause == 0 && state.mepc == 0, name + ": unexpected trap, mcause " + state.mcause);
++            checkCodeUnchanged(bus, program, name);
+             checkResult(bus);
+         }
+ 
+@@ -503,7 +529,7 @@ final class Workloads {
+ 
+         ImageWorkload(String name, IsaConfig isa, long skew) {
+             super(name);
+-            this.core = new RV32IMACore(isa);
++            this.core = newCore(isa);
+             this.program = image(name);
+             this.expectedInstructions = expected(name + ".instructions") + skew;
+         }
+@@ -544,6 +570,7 @@ final class Workloads {
+             check(
+                     state.getCycle() == expectedInstructions,
+                     name + ": executed " + state.getCycle() + " instructions, expected " + expectedInstructions);
++            checkCodeUnchanged(bus, program, name);
+             checkResult(bus);
+         }
+ 
+diff --git a/core/src/main/java/com/alienspacebunny/emu/RV32IMACore.java b/core/src/main/java/com/alienspacebunny/emu/RV32IMACore.java
+index b334d93..12699e0 100644
+--- a/core/src/main/java/com/alienspacebunny/emu/RV32IMACore.java
++++ b/core/src/main/java/com/alienspacebunny/emu/RV32IMACore.java
+@@ -59,7 +59,42 @@ public class RV32IMACore {
+      * @throws NullPointerException if {@code isaConfig} is {@code null}.
+      */
+     public RV32IMACore(IsaConfig isaConfig) {
++        this(isaConfig, false);
++    }
++
++    /**
++     * EXPERIMENT ONLY (branch {@code exp/predecode}; never merged). With {@code
++     * experimentalPredecode}, successfully fetched instruction words are cached per halfword of
++     * the executable window and reused without a bus fetch. There is no invalidation: valid only
++     * for guest code that is never modified. See {@code docs/PREDECODE_EXPERIMENT_PLAN.md}.
++     *
++     * @param isaConfig the extension configuration.
++     * @param experimentalPredecode whether to cache fetched instruction words.
++     */
++    public RV32IMACore(IsaConfig isaConfig, boolean experimentalPredecode) {
+         this.isaConfig = Objects.requireNonNull(isaConfig, "isaConfig");
++        this.predecode = experimentalPredecode;
++    }
++
++    // ---- EXPERIMENT: tier-1 decoded-word cache ------------------------------------------------
++    //
++    // One int per halfword of [cacheOffset, cacheOffset + cacheSize). Every cached word is a
++    // standard 32-bit encoding (bits 1:0 == 0b11), so those bits carry a tag instead: 0 = empty,
++    // 1 = compressed (instrLen 2), 2 = 32-bit (instrLen 4); the word is entry | 3. Only
++    // successful fetches of encodings with bits 1:0 == 0b11 are cached, so faults and reserved
++    // compressed patterns always take the normal path.
++    private final boolean predecode;
++    private int[] decodedWords;
++    private int cacheOffset;
++    private int cacheSize;
++
++    private int[] decodedWordsFor(int ramOffset, int ramSize) {
++        if (decodedWords == null || cacheOffset != ramOffset || cacheSize != ramSize) {
++            decodedWords = new int[(int) ((Integer.toUnsignedLong(ramSize) + 1) >>> 1)];
++            cacheOffset = ramOffset;
++            cacheSize = ramSize;
++        }
++        return decodedWords;
+     }
+ 
+     private static final int MSTATUS_MIE = 0x08;
+@@ -1485,6 +1520,8 @@ public class RV32IMACore {
+             state.extraflags &= ~EXTRAFLAG_WFI;
+         }
+ 
++        int[] wordCache = predecode ? decodedWordsFor(ramOffset, ramSize) : null;
++
+         // Set by an instruction that can change interrupt deliverability (a write to mstatus,
+         // mie, or mip, or MRET); checked once that instruction has fully retired so a newly
+         // deliverable interrupt is taken before the next guest instruction in this batch runs.
+@@ -1512,44 +1549,55 @@ public class RV32IMACore {
+                     rval = pc;
+                     break;
+                 } else {
+-                    try {
+-                        if (hasC) {
+-                            // Probe the halfword at pc first: bits[1:0] == 0b11 means a normal
+-                            // 32-bit instruction (which may start at a non-word-aligned address
+-                            // here, since a preceding compressed instruction can leave pc at an
+-                            // odd multiple of 2 -- readInt supports that), anything else means a
+-                            // 16-bit compressed instruction, and no second read is needed.
+-                            AccessContext fetchCtx16 =
+-                                    new AccessContext(state.hartId, privilege, AccessKind.FETCH, 2, 0);
+-                            int lowHalf = mem.readShort(pc, fetchCtx16) & 0xffff;
+-                            if ((lowHalf & 0x3) == 0x3) {
+-                                AccessContext fetchCtx32 =
+-                                        new AccessContext(state.hartId, privilege, AccessKind.FETCH, 4, 0);
+-                                ir = mem.readInt(pc, fetchCtx32);
++                    int cacheSlot = ofsPc >>> 1;
++                    int cached = wordCache != null ? wordCache[cacheSlot] : 0;
++                    if (cached != 0) {
++                        ir = cached | 0x3;
++                        instrLen = (cached & 0x3) == 1 ? 2 : 4;
++                    } else {
++                        try {
++                            if (hasC) {
++                                // Probe the halfword at pc first: bits[1:0] == 0b11 means a normal
++                                // 32-bit instruction (which may start at a non-word-aligned address
++                                // here, since a preceding compressed instruction can leave pc at an
++                                // odd multiple of 2 -- readInt supports that), anything else means a
++                                // 16-bit compressed instruction, and no second read is needed.
++                                AccessContext fetchCtx16 =
++                                        new AccessContext(state.hartId, privilege, AccessKind.FETCH, 2, 0);
++                                int lowHalf = mem.readShort(pc, fetchCtx16) & 0xffff;
++                                if ((lowHalf & 0x3) == 0x3) {
++                                    AccessContext fetchCtx32 =
++                                            new AccessContext(state.hartId, privilege, AccessKind.FETCH, 4, 0);
++                                    ir = mem.readInt(pc, fetchCtx32);
++                                } else {
++                                    // The precomputed decodeCompressed expansion: an equivalent standard
++                                    // 32-bit RV32I/M word that the opcode switch below can execute
++                                    // unmodified, or an opcode with no case in that switch (its default
++                                    // branch already means illegal instruction) for any reserved 16-bit
++                                    // pattern.
++                                    ir = COMPRESSED_EXPANSION[lowHalf];
++                                    instrLen = 2;
++                                }
+                             } else {
+-                                // The precomputed decodeCompressed expansion: an equivalent standard
+-                                // 32-bit RV32I/M word that the opcode switch below can execute
+-                                // unmodified, or an opcode with no case in that switch (its default
+-                                // branch already means illegal instruction) for any reserved 16-bit
+-                                // pattern.
+-                                ir = COMPRESSED_EXPANSION[lowHalf];
+-                                instrLen = 2;
++                                AccessContext fetchCtx =
++                                        new AccessContext(state.hartId, privilege, AccessKind.FETCH, 4, 0);
++                                ir = mem.readInt(pc, fetchCtx);
+                             }
+-                        } else {
+-                            AccessContext fetchCtx = new AccessContext(state.hartId, privilege, AccessKind.FETCH, 4, 0);
+-                            ir = mem.readInt(pc, fetchCtx);
++                        } catch (IndexOutOfBoundsException _) {
++                            // The ramOffset/ramSize check above is only a coarse precheck; a bus can
++                            // still reject a fetch within that window (for example, fine-grained MPU
++                            // enforcement, or -- with hasC -- a 32-bit fetch that starts within the
++                            // window but whose last bytes fall past ramSize/the bus's own bounds).
++                            // Convert that rejection into the same instruction access-fault trap as the
++                            // coarse-window check, rather than letting the exception propagate to the
++                            // caller.
++                            trap = exceptionTrap(EXC_INSTRUCTION_ACCESS_FAULT);
++                            rval = pc;
++                            break;
++                        }
++                        if (wordCache != null && (ir & 0x3) == 0x3) {
++                            wordCache[cacheSlot] = (ir & ~0x3) | (instrLen == 2 ? 1 : 2);
+                         }
+-                    } catch (IndexOutOfBoundsException _) {
+-                        // The ramOffset/ramSize check above is only a coarse precheck; a bus can
+-                        // still reject a fetch within that window (for example, fine-grained MPU
+-                        // enforcement, or -- with hasC -- a 32-bit fetch that starts within the
+-                        // window but whose last bytes fall past ramSize/the bus's own bounds).
+-                        // Convert that rejection into the same instruction access-fault trap as the
+-                        // coarse-window check, rather than letting the exception propagate to the
+-                        // caller.
+-                        trap = exceptionTrap(EXC_INSTRUCTION_ACCESS_FAULT);
+-                        rval = pc;
+-                        break;
+                     }
+                     int rdid = (ir >> 7) & 0x1f;
+ 
+-- 
+2.56.0
+

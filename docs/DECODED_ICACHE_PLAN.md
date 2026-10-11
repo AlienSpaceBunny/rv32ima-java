@@ -3,8 +3,12 @@
 Drafted 2026-10-10. Status: **scoping only; nothing built or measured beyond the
 [predecode upper-bound experiment](PREDECODE_EXPERIMENT_PLAN.md).** Nate has asked V-32 to
 review this as an advisor before work proceeds. The questions for V-32 are at the
-[end](#questions-for-v-32). **V-32's initial review has arrived**
-([copy](DECODED_ICACHE_ADVISORY_REVIEW.md)) and is not yet folded into this draft.
+[end](#questions-for-v-32). **V-32's review and
+follow-up have arrived** ([review](DECODED_ICACHE_ADVISORY_REVIEW.md),
+[follow-up](CPU_ARCHITECTURE_REVIEW_FOLLOWUP.md)). The proposed coherence protocol is in
+[DECODED_ICACHE_PROTOCOL.md](DECODED_ICACHE_PROTOCOL.md) and the reply is in
+[CPU_REVIEW_FOLLOWUP_RESPONSE.md](CPU_REVIEW_FOLLOWUP_RESPONSE.md). Both supersede this
+draft where they differ. This draft is to be revised once all parties agree.
 
 ## Summary
 

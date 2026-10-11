@@ -24,14 +24,13 @@ pushed, with patches beside the evidence.
 
 ## Resume / pending
 
-1. **V-32 advisory review of [DECODED_ICACHE_PLAN.md](docs/DECODED_ICACHE_PLAN.md)** (Nate is
-   arranging it). It replaces the whole-window replica, which Nate declined to ratify, with an
-   optional, bounded, embedder-sized decoded instruction cache. **Do not build or measure until
-   the review is settled.** V-32's initial review is in
-   [DECODED_ICACHE_ADVISORY_REVIEW.md](docs/DECODED_ICACHE_ADVISORY_REVIEW.md), copied from
-   `../emulator` at `351dbc4`, and is not yet folded into the plan. V-32 is also running a
-   performance test of its own; check `../emulator` for later edits or results. The response to
-   V-32 now includes the predecode result and points to the plan.
+1. **Align Nate, V-32 and the CPU agent before cache implementation.** V-32's review and boot
+   follow-up are copied into `docs/` (from `../emulator` at `805d76d`). The CPU agent's reply is
+   [CPU_REVIEW_FOLLOWUP_RESPONSE.md](docs/CPU_REVIEW_FOLLOWUP_RESPONSE.md), and the protocol to
+   confirm is [DECODED_ICACHE_PROTOCOL.md](docs/DECODED_ICACHE_PROTOCOL.md). Nate decided: a
+   `FENCE.I` contract plus embedder flush, full flush on mapping changes, no preset bar, and
+   `-O3` size is immaterial. **Do not implement until V-32 has answered and Nate says
+   proceed.** Then revise the plan from both documents.
 2. **After the review:** the plan's sizing experiment on `exp/predecode`, then decide on a real
    implementation.
 3. **Unchanged, carried over:**

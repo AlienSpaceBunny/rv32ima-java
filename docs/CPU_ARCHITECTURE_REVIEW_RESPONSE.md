@@ -16,11 +16,16 @@ below are inputs to V-32's own storage decision.
   CoreMark and integer workloads. CoreMark's C build gains a further 10–16% from table-driven
   compressed expansion. There are no API or behaviour changes. FP workloads are unchanged
   natively; an allocation-free rounding attempt had no effect.
-- **V-32's production AP path is dominated by consumer-side costs, not the core:**
-  - per-attempt and per-access locking, about 77 ns per attempt on both runtimes against ~5 ns
-    for the core
+- **V-32's production AP path likely carries larger consumer-side costs than core costs.**
+  These are priorities to investigate, not established component accounting:
+  - per-attempt and per-access locking, estimated at about 77 ns per attempt on both runtimes
+    against ~5 ns of core entry cost
   - native-only, the `MemorySegment` accessor: 4–7× in the core, 14× in host loops, plus
     72 B allocated per access
+- **V-32's matched boot screen ([follow-up](CPU_ARCHITECTURE_REVIEW_FOLLOWUP.md)) found no
+  reproducible boot gain from the new core** on either runtime, while `-O3` lowered native
+  readiness time. The core's isolated gains are therefore not established as V-32 boot
+  gains.
 - **Compressed code cost 17–30% throughput** relative to the same program built without C.
   After C4 the penalty is gone on HotSpot and about 11% natively; the remainder is the
   halfword probe, which an uncached fetch must keep.
@@ -114,7 +119,9 @@ moved only ~3.5%. Not implemented here; it awaits a separately scoped API decisi
 
 **3. Could a primitive/context-specialized interface or optional fetch path help?**
 
-- **Primitive context:** no. The cost is the call, not its argument (see C1).
+- **Primitive context:** not supported by the evidence so far. C1's cached contexts removed
+  all allocation and were slower, so the cost appears to be the call, not its argument. That
+  rejects one design, not every primitive-context design.
 - **Optional executable fetch window:** a cheaper form of the predecode result below. An
   earlier estimate, 10–25% native from the bus-call share alone, was too low: caching
   fetched words also removes the halfword probe and the expansion, and gained 46–104% native,
@@ -162,8 +169,8 @@ attempt, so no outcome would change a decision. Redirect to the recommended next
 
 ## Ranked directions
 
-1. **Adopt `0.1.7-SNAPSHOT` and build with `-O3`.** Core-side, free: −18% to −39% native and
-   −28% to −34% HotSpot, a further 10–16% for C-heavy code, plus 12–25% from `-O3`. Keep `-march=compatibility` or `x86-64-v2`
+1. **Adopt `0.1.7-SNAPSHOT` and build with `-O3`.** In isolated core measurements: −18% to
+   −39% native and −28% to −34% HotSpot, a further 10–16% for C-heavy code, plus 12–25% from `-O3`. Keep `-march=compatibility` or `x86-64-v2`
    for portability; v3 gave nothing measurable.
 2. **V-32 accessor, native builds only.** Replace scalar `MemorySegment.get/set` in hot RAM
    paths with a `ByteBuffer` view (direct or heap) or a `byte[]`, keeping the same memory and
@@ -190,8 +197,11 @@ attempt, so no outcome would change a decision. Redirect to the recommended next
 - **Pass:** the V-32 gate passes; the native AP buffer cells improve versus 2026-10-07's
   387–2,042 ms; and the JVM AP cells do not regress.
 - **Budget:** one matrix, in the existing format.
-- **Stop condition:** if native AP with buffer access is still above 1.5× JVM, the remaining
-  cost is V-32's locking (direction 3), not the core. Scope that next instead of further core
-  work.
+- **Stop condition:** if native AP with buffer access is still above 1.5× JVM, investigate
+  V-32's locking (direction 3) next. The ratio alone does not prove locking is the cause.
+
+**Outcome (V-32, 2026-10-10):** a matched boot screen showed no reproducible boot change from
+the new core, and lower native readiness time with `-O3`. Nate considers `-O3`'s larger
+executable (85 MiB against 56 MiB) immaterial.
 
 The XIP/C plan can resume in parallel; nothing here blocks it.

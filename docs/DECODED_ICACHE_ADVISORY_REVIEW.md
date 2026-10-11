@@ -1,12 +1,15 @@
 # Decoded instruction cache: V-32 advisory review
 
-> Copied from V-32 (`../emulator`) `docs/DECODED_ICACHE_ADVISORY_REVIEW.md` at `351dbc4`
-> on 2026-10-10. Review text is unchanged; links to this repository are adjusted. V-32's
-> source paths below refer to the emulator repository. Recheck the original for later edits.
+> Copied from V-32 (`../emulator`) `docs/DECODED_ICACHE_ADVISORY_REVIEW.md` at `805d76d` on 2026-10-10. Text is
+> unchanged; links are adjusted for this repository, and links into V-32's evidence point at
+> the sibling checkout. Recheck the original for later edits.
 
 Reviewed 2026-10-10. Recommendation: **proceed with one bounded sizing experiment;
 revise the correctness contract before production implementation.** This is advice,
 not a selected V-32 capacity, coherence-policy change, or integration approval.
+
+Follow-up: [matched boot results and the author's filesystem/decompression
+clarification](CPU_ARCHITECTURE_REVIEW_FOLLOWUP.md).
 
 Sources: the live emulator checkpoint, the CPU
 [review response](CPU_ARCHITECTURE_REVIEW_RESPONSE.md),

@@ -140,6 +140,40 @@ Interrupt gating and injection:
   thread (for example, one hart signaling another) is the caller's
   responsibility to synchronize; `RV32IMAState` itself provides no locking.
 
+Decoded instruction cache (opt-in; the coherence rules are in
+`flushDecodedCache()`'s Javadoc and [DECODED_ICACHE_PROTOCOL.md](DECODED_ICACHE_PROTOCOL.md)):
+
+- `RV32IMACore(IsaConfig, DecodedCacheConfig)` gives the core a direct-mapped
+  cache of decoded instructions. `DecodedCacheConfig(slots, checkMode)` takes 0
+  (off, also `DecodedCacheConfig.OFF`) or a power of two. Each slot costs 16
+  bytes of host memory. Every other constructor leaves the cache off, and a
+  core without a cache behaves exactly as before.
+- Nothing is cached until `addDecodedCacheRange(base, size)` declares where
+  cacheable code lives. Only memory whose fetches have no side effects may be
+  declared. An instruction is cached only if four bytes from its PC lie in one
+  declared range and in `step`'s window. Other fetches reach the bus every
+  time. `clearDecodedCacheRanges()` removes them all. Both flush.
+- Coherence is `FENCE.I` plus an embedder flush. The core never watches
+  stores. A guest that writes code runs `FENCE.I` on the hart that will run
+  it, and with a cache `FENCE.I` flushes it. The embedder calls
+  `flushDecodedCache()` when code, its mapping or its permissions change
+  behind the guest's back, such as a payload load, reset, remap or debugger
+  patch. The core also flushes when `step`'s bus, state instance, `hartId`,
+  `ramOffset` or `ramSize` differ from the previous cached call. These
+  methods run on the core's thread between `step` calls.
+- A hit keeps every fetch check the core performs: the window and alignment
+  are checked on each instruction, and an entry filled in machine mode never
+  hits in user mode. Faulting fetches are never cached.
+- Results, traps, `mtval`, cycle counts and `postExec` events are identical to
+  the uncached core. On a miss, an instruction without a fast handler (CSR,
+  system, F, A, division, bit-manipulation and others) is fetched twice: once
+  to fill the cache and once by the interpreter that executes it.
+- With `checkMode`, every hit is refetched and compared, and a stale entry
+  throws `IllegalStateException` naming the PC. It is for finding missing
+  `FENCE.I`s and flushes in tests, not for timing.
+- `getDecodedCacheStats()` returns fill, bypass, delegation, flush and check
+  counters for instrumented runs.
+
 ## MemoryBus
 
 `MemoryBus` is the address-space abstraction for guest data access and

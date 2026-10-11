@@ -22,6 +22,8 @@ of traps, and an independent Java reference model of registers and memory.
 | `copy4k-ap`, `copy6m-ap` | Word copy + checksum, small and large working sets |
 | `mix-ap` | LB/LH/LW/SB/SH/SW, AMOADD.W and an LR.W/SC.W pair |
 | `fp-ap` | FLW/FSW, FMADD.S, FADD.S, FMUL.S (checked against Java float and `Math.fma`) |
+| `spread-ap` | Calls 256 mixed 16/32-bit functions spread over 64 KiB, in a seeded LCG order (synthetic decoded-cache stress) |
+| `collide-ap` | Calls eight functions 64 KiB apart round-robin, so they collide in any direct-mapped decoded cache (synthetic worst case) |
 | `coremark-c`, `coremark-noc` | EEMBC CoreMark (2K performance seeds, 10 iterations), with/without C; see [`guest/`](guest/README.md) |
 | `fpkernels-c`, `fpkernels-noc` | Single-precision sgemm, n-body (`sqrtf`, division), Horner (`fmaf`), with/without C |
 | `host-read6m`, `host-copy4k` | Host-only loops through the bus's context overloads, no core |
@@ -62,6 +64,12 @@ intervals. Don't build or run anything else while measuring. Processes are pinne
 with `taskset -c 2,3` by default, one P-core's two hyperthreads on the reference
 i9-13950HX. Unpinned runs mix P- and E-cores and give bimodal, roughly 2x ranges.
 Everything under `bench/out/` is git-ignored and survives `mvn clean`.
+
+`--decoded-cache N` gives every guest core a decoded instruction cache of N slots,
+covering its program and flushed whenever the program is reloaded; `--cache-stats`
+adds the cache counters as `cache-stats` CSV rows on stderr. `run_matrix.py
+--decoded-cache 256,1024` adds `<label>-dc<N>` cells for the `jvm`, `mono`, `poly`
+and `poly-o3` images.
 
 For one ad-hoc run, use `java -jar bench/target/rv32emu-bench-*.jar --bus bytearray`
 (see `Harness` for options). `--skew 1` must make every workload fail; that is the

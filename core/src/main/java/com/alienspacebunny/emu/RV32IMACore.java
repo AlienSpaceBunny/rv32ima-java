@@ -1444,6 +1444,11 @@ public class RV32IMACore {
      * access is converted into a load or store access-fault trap with {@code mtval} set to the
      * faulting address.
      *
+     * <p><b>Decoded cache.</b> A core constructed with an enabled {@link DecodedCacheConfig} may
+     * serve instructions in a declared cacheable range from its cache instead of fetching them;
+     * see {@link #flushDecodedCache()} for when that is coherent. Everything else above holds
+     * unchanged.
+     *
      * @param state the mutable processor state to execute.
      * @param mem the memory bus for instruction fetch and data access.
      * @param ramOffset base address of executable RAM (unsigned 32-bit guest address).

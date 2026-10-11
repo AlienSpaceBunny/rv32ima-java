@@ -166,7 +166,7 @@ Decoded instruction cache (opt-in; the coherence rules are in
   hits in user mode. Faulting fetches are never cached.
 - Results, traps, `mtval`, cycle counts and `postExec` events are identical to
   the uncached core. On a miss, an instruction without a fast handler (CSR,
-  system, F, A, division, bit-manipulation and others) is fetched twice: once
+  system, fences, division, bit-manipulation and others) is fetched twice: once
   to fill the cache and once by the interpreter that executes it.
 - With `checkMode`, every hit is refetched and compared, and a stale entry
   throws `IllegalStateException` naming the PC. It is for finding missing

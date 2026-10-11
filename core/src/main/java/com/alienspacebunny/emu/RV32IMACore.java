@@ -1472,74 +1472,48 @@ public class RV32IMACore {
             int count,
             PostExecHook postExec,
             CSRHook csrHook) {
-        long currentTimer = state.getTimer();
-        long newTimer = currentTimer + elapsedUs;
-        state.setTimer(newTimer);
+        // A delegated instruction from the decoded cache (see stepCached) skips these entry
+        // checks: they already ran at the start of the cached batch.
+        int trap = 0;
+        if (!dcDelegating) {
+            long currentTimer = state.getTimer();
+            long newTimer = currentTimer + elapsedUs;
+            state.setTimer(newTimer);
 
-        // Handle Timer interrupt.
-        long timerMatch = state.getTimerMatch();
-        if (timerMatch != 0 && Long.compareUnsigned(newTimer, timerMatch) >= 0) {
-            state.extraflags &= ~EXTRAFLAG_WFI;
-            state.mip |= MIP_MTIP;
-        } else {
-            state.mip &= ~MIP_MTIP;
-        }
-
-        // Check for a pending machine interrupt before starting the instruction loop. This core
-        // models only M-mode and U-mode, so mstatus.MIE gates interrupts only while executing in
-        // M-mode: per the privileged spec, a machine interrupt that is individually enabled in
-        // mie is always taken while running below M-mode (here, U-mode), regardless of
-        // mstatus.MIE. Priority when more than one bit is simultaneously pending and enabled:
-        // external > software > timer.
-        int trap = pendingInterruptTrap(state);
-
-        // If WFI, don't run processor -- unless an enabled interrupt is already pending, in which
-        // case the stall ends here and the interrupt is delivered below. This check deliberately
-        // comes after pendingInterruptTrap so a pending bit that was set before the WFI
-        // executed (or set directly on mip by an embedder, without injectInterrupt's WFI clear)
-        // cannot leave the hart stalled with a deliverable interrupt.
-        if ((state.extraflags & EXTRAFLAG_WFI) != 0) {
-            if (trap == 0) {
-                return 1;
+            // Handle Timer interrupt.
+            long timerMatch = state.getTimerMatch();
+            if (timerMatch != 0 && Long.compareUnsigned(newTimer, timerMatch) >= 0) {
+                state.extraflags &= ~EXTRAFLAG_WFI;
+                state.mip |= MIP_MTIP;
+            } else {
+                state.mip &= ~MIP_MTIP;
             }
-            state.extraflags &= ~EXTRAFLAG_WFI;
+
+            // Check for a pending machine interrupt before starting the instruction loop. This core
+            // models only M-mode and U-mode, so mstatus.MIE gates interrupts only while executing in
+            // M-mode: per the privileged spec, a machine interrupt that is individually enabled in
+            // mie is always taken while running below M-mode (here, U-mode), regardless of
+            // mstatus.MIE. Priority when more than one bit is simultaneously pending and enabled:
+            // external > software > timer.
+            trap = pendingInterruptTrap(state);
+
+            // If WFI, don't run processor -- unless an enabled interrupt is already pending, in which
+            // case the stall ends here and the interrupt is delivered below. This check deliberately
+            // comes after pendingInterruptTrap so a pending bit that was set before the WFI
+            // executed (or set directly on mip by an embedder, without injectInterrupt's WFI clear)
+            // cannot leave the hart stalled with a deliverable interrupt.
+            if ((state.extraflags & EXTRAFLAG_WFI) != 0) {
+                if (trap == 0) {
+                    return 1;
+                }
+                state.extraflags &= ~EXTRAFLAG_WFI;
+            }
+
+            if (trap == 0 && dcTags != null) {
+                return stepCached(state, mem, ramOffset, ramSize, count, postExec, csrHook);
+            }
         }
 
-        if (trap == 0 && dcTags != null) {
-            return stepCached(state, mem, ramOffset, ramSize, count, postExec, csrHook);
-        }
-        return runBatch(state, mem, ramOffset, ramSize, count, postExec, csrHook, trap) & BATCH_WFI;
-    }
-
-    /** {@link #runBatch} result: all {@code count} instructions ran without a trap. */
-    private static final int BATCH_CONTINUE = 0;
-
-    /** {@link #runBatch} result: the hart stalled in WFI; {@link #step} returns 1. */
-    private static final int BATCH_WFI = 1;
-
-    /**
-     * {@link #runBatch} result: the batch ended early on a trap, an interrupt, or a WFI that
-     * completed at once; {@link #step} returns 0.
-     */
-    private static final int BATCH_ENDED = 2;
-
-    /**
-     * The instruction loop and trap tail of {@link #step}, after its timer, interrupt and WFI entry
-     * checks. {@code trap} is the pending interrupt found by those checks, or 0. The decoded cache
-     * calls this with {@code count == 1} to execute any instruction it does not handle itself, so
-     * this loop is the only implementation of the ISA.
-     *
-     * @return {@link #BATCH_CONTINUE}, {@link #BATCH_WFI} or {@link #BATCH_ENDED}.
-     */
-    private int runBatch(
-            RV32IMAState state,
-            MemoryBus mem,
-            int ramOffset,
-            int ramSize,
-            int count,
-            PostExecHook postExec,
-            CSRHook csrHook,
-            int trap) {
         int rval = 0;
         int pc = state.pc;
         int ir = 0;
@@ -2002,10 +1976,11 @@ public class RV32IMACore {
                                                 // mstatus.MIE was masking until the line above set
                                                 // it). WFI completes immediately without stalling;
                                                 // the next step call delivers the interrupt.
-                                                return BATCH_ENDED;
+                                                dcBatchEnded = true;
+                                                return 0;
                                             }
                                             state.extraflags |= EXTRAFLAG_WFI;
-                                            return BATCH_WFI;
+                                            return 1;
                                         default:
                                             trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
                                             break;
@@ -2071,15 +2046,14 @@ public class RV32IMACore {
         }
 
         // Handle traps and interrupts.
-        int result = BATCH_CONTINUE;
         if (trap != 0) {
             pc = commitTrap(state, pc, trap, ir, rval, instrLen);
-            result = BATCH_ENDED;
+            dcBatchEnded = true;
         }
 
         state.setCycle(cycle);
         state.pc = pc;
-        return result;
+        return 0;
     }
 
     /**
@@ -2120,7 +2094,7 @@ public class RV32IMACore {
     //               (10:6), rs1 (15:11), rs2 (20:16) and the compressed flag (21). 0 = empty.
     //
     // stepCached executes the fast handlers itself. Everything else -- DC_GENERIC entries, and
-    // fetches that are not cached -- runs through runBatch one instruction at a time, so the
+    // fetches that are not cached -- runs through step()'s own loop one instruction at a time, so the
     // cache never becomes a second implementation of the ISA. Predecoding uses encoding fields
     // only, never conclusions that depend on privilege or CSR/FP state.
 
@@ -2163,6 +2137,7 @@ public class RV32IMACore {
     private static final int DC_OR = 37;
     private static final int DC_AND = 38;
     private static final int DC_MUL = 39;
+    private static final int DC_COLD = 40; // F and A: executeColdOpcode, shared with step()'s loop
     private static final int DC_HANDLER_MASK = 0x3f;
     private static final int DC_COMPRESSED = 1 << 21;
 
@@ -2178,6 +2153,11 @@ public class RV32IMACore {
 
     // Cacheable ranges as [start, end) pairs of unsigned addresses.
     private long[] dcRanges = new long[0];
+
+    // Set while stepCached runs one instruction through step()'s own loop, which then skips its
+    // entry checks; that loop sets dcBatchEnded when the instruction ends the batch.
+    private boolean dcDelegating;
+    private boolean dcBatchEnded;
 
     // The step() arguments the cache contents are valid for (Rule 3).
     private MemoryBus dcBus;
@@ -2287,7 +2267,7 @@ public class RV32IMACore {
      *     range's or the window's last bytes, misaligned or outside the window, or a reserved
      *     compressed encoding.
      * @param delegations instructions the cached path handed to the uncached interpreter: every
-     *     bypass, and every instruction without a fast handler (CSR, system, F, A, division,
+     *     bypass, and every instruction without a fast handler (CSR, system, fences, division,
      *     bit-manipulation and others), whether it hit or missed.
      * @param flushes flushes, by the embedder or by the core.
      * @param checks hits that check mode compared against memory.
@@ -2365,6 +2345,7 @@ public class RV32IMACore {
                     handler = DC_MUL;
                 }
             }
+            case 0x07, 0x27, 0x43, 0x47, 0x4B, 0x4F, 0x53, 0x2f -> handler = DC_COLD;
             default -> {}
         }
         if (handler == 0) {
@@ -2379,7 +2360,7 @@ public class RV32IMACore {
     }
 
     /**
-     * Fetches the instruction at {@code pc} through the bus exactly as {@link #runBatch} does.
+     * Fetches the instruction at {@code pc} through the bus exactly as {@link #step}'s loop does.
      *
      * @return the word the opcode switch would act on in the low 32 bits and the instruction
      *     length in the high 32 bits, or {@link #DC_FETCH_FAULT}.
@@ -2439,7 +2420,7 @@ public class RV32IMACore {
         }
         int ir = (int) fetched;
         if ((ir & 0x3) != 0x3) {
-            return 0; // a reserved compressed pattern; runBatch raises the illegal instruction
+            return 0; // a reserved compressed pattern; step()'s loop raises the illegal instruction
         }
         long op = dcPredecode(ir, (int) (fetched >>> 32));
         dcTags[slot] = tag;
@@ -2468,7 +2449,7 @@ public class RV32IMACore {
 
     /**
      * {@link #step}'s batch with the decoded cache, after the entry checks and with no pending
-     * interrupt. Semantics and batch boundaries are those of {@link #runBatch}.
+     * interrupt. Semantics and batch boundaries are those of {@link #step}'s loop.
      */
     private int stepCached(
             RV32IMAState state,
@@ -2505,7 +2486,7 @@ public class RV32IMACore {
             int ofsPc = pc - ramOffset;
             int slot = 0;
             long op = 0;
-            // A window or alignment failure leaves op == 0, and runBatch raises the trap.
+            // A window or alignment failure leaves op == 0, and step()'s loop raises the trap.
             if (Integer.compareUnsigned(ofsPc, ramSize) < 0 && (ofsPc & alignMask) == 0) {
                 int tag = ofsPc | (privilege & 1);
                 slot = (ofsPc >>> slotShift) & mask;
@@ -2513,7 +2494,7 @@ public class RV32IMACore {
                 if (tags[slot] != tag || op == 0) {
                     op = dcCacheable(pc, ofsPc, ramSize) ? dcFill(state, mem, pc, privilege, slot, tag) : 0;
                     if (op == DC_FETCH_FAULT) {
-                        // As runBatch's fetch fault: no hook call, mtval = pc.
+                        // As step()'s loop's fetch fault: no hook call, mtval = pc.
                         pc = commitTrap(state, pc, exceptionTrap(EXC_INSTRUCTION_ACCESS_FAULT), 0, pc, 4);
                         state.setCycle(cycle + 1);
                         state.pc = pc;
@@ -2533,9 +2514,16 @@ public class RV32IMACore {
                 dcDelegations++;
                 state.pc = pc;
                 state.setCycle(cycle);
-                int result = runBatch(state, mem, ramOffset, ramSize, 1, postExec, csrHook, 0);
-                if (result != BATCH_CONTINUE) {
-                    return result & BATCH_WFI;
+                dcBatchEnded = false;
+                dcDelegating = true;
+                int result;
+                try {
+                    result = step(state, mem, ramOffset, ramSize, 0, 1, postExec, csrHook);
+                } finally {
+                    dcDelegating = false;
+                }
+                if (result != 0 || dcBatchEnded) {
+                    return result; // WFI, a trap or an interrupt ends the batch, as in the loop
                 }
                 pc = state.pc;
                 cycle = state.getCycle();
@@ -2638,10 +2626,19 @@ public class RV32IMACore {
                 case DC_SRA -> rval = regs[rs1] >> regs[rs2];
                 case DC_OR -> rval = regs[rs1] | regs[rs2];
                 case DC_AND -> rval = regs[rs1] & regs[rs2];
-                default -> rval = regs[rs1] * regs[rs2]; // DC_MUL
+                case DC_MUL -> rval = regs[rs1] * regs[rs2];
+                default -> { // DC_COLD, unpacked as step()'s loop does
+                    int ir = dcWords[slot];
+                    long result = executeColdOpcode(state, mem, ir, ir & 0x7f, rd, privilege);
+                    rval = (int) result;
+                    trap = (int) ((result >>> 32) & COLD_TRAP_MASK);
+                    if ((result & COLD_WRITES_RD) == 0) {
+                        rd = 0;
+                    }
+                }
             }
             if (trap != 0) {
-                // As runBatch's load/store access fault: hook first, then the trap; rd unwritten.
+                // As step()'s loop's traps: hook first, then the trap; rd unwritten.
                 int ir = dcWords[slot];
                 if (postExec != null) postExec.onPostExec(pc, ir, trap);
                 pc = commitTrap(state, pc, trap, ir, rval, instrLen);
@@ -2652,7 +2649,7 @@ public class RV32IMACore {
             if (rd != 0) {
                 regs[rd] = rval;
             }
-            // runBatch redirects pc to "target - instrLen" before its hook call, so a taken jump
+            // step()'s loop redirects pc to "target - instrLen" before its hook call, so a taken jump
             // or branch reports that value rather than its own PC; match it exactly.
             if (postExec != null) postExec.onPostExec(nextPc - instrLen, dcWords[slot], 0);
             pc = nextPc;

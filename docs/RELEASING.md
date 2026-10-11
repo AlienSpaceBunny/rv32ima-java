@@ -9,9 +9,10 @@ started explicitly.
 
 ## Model
 
-`main` always carries a `-SNAPSHOT` version (currently `0.1.8-SNAPSHOT`; expect several more
-plain bumps before a real release — see [release readiness](../RELEASE_TODO.md)). The first
-real release will be `0.2.0`, whichever `-SNAPSHOT` `main` is on when it's eventually cut;
+`main` always carries a `-SNAPSHOT` version (currently `0.1.8-SNAPSHOT`). Local tagged releases
+started with `v0.1.8` (2026-10-11); expect more before a published one (see
+[release readiness](../RELEASE_TODO.md)). The first published release will be `0.2.0`,
+whichever `-SNAPSHOT` `main` is on when it's eventually cut;
 `0.1.0`/`0.1.1` are both skipped (`0.1.0` because that version number is already referenced
 by the downstream V-32 project; `0.1.1` was an earlier, now-superseded target from before the
 hold was extended past this repo's own staging plan). Cutting a release:

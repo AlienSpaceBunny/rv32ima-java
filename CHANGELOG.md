@@ -8,6 +8,11 @@ for how this file is updated as part of cutting a release.
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-10-11
+
+First local, git-tagged release (`v0.1.8`); not published. Covers all changes since
+`0.1.0`.
+
 ### Added
 - Opt-in decoded instruction cache: `new RV32IMACore(IsaConfig, DecodedCacheConfig)`, with
   `DecodedCacheConfig(slots, checkMode)` (0 or a power of two; off by default),

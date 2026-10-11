@@ -7,15 +7,16 @@
     including the baremetal run.
   - It is not published, and its CLI jar is in `target/checkout/`.
   - `main` is on **`0.1.9-SNAPSHOT`**.
-- **Push pending Nate's OK:** the changelog commit, both release-plugin commits, this checkpoint
-  and the `v0.1.8` tag exist only locally. Push with `git push origin main --follow-tags`.
+- **Tag push pending Nate's OK:** `main` is on `origin`, but the `v0.1.8` tag exists only
+  locally. Push it with `git push origin v0.1.8`.
 - **What the release contains:** the CPU architecture review work and the opt-in decoded
   instruction cache. See `CHANGELOG.md` `[0.1.8]`.
 - **API and publishing:** the public API is unfrozen and unstable. V-32 is its only consumer.
   Publishing stays on hold until `0.2.0`. Never start the GitHub release workflow without Nate's
   explicit request.
 - **Working with V-32:** Codex works on V-32 (`../emulator`); Claude works on this repo. Nate
-  relays between them.
+  relays between them. V-32's current calls into the core are not the target; the exchanges
+  define how V-32 should call it.
   - Exchanges are files in this repo's `docs/`. Each side appends dated sections, and either
     agent can read the other repo directly.
   - When a reply settles, replace absolute or `../../emulator` links with plain V-32 repository
@@ -23,23 +24,21 @@
 
 ## Resume / pending
 
-1. **Batched execution API: the draft is waiting for V-32's review.**
-   - The draft is [EXECUTION_API_DESIGN.md](docs/EXECUTION_API_DESIGN.md). Nate is to send it
-     to Codex, which answers its five questions by appending to the same file.
-   - **After V-32 answers:**
-     - Revise the design.
-     - Get Nate's go.
-     - Implement it on a branch.
-     - Port V-32's committed-attempt oracle: 36 cases with the cache off, on and in check mode.
-     - Run the bench `--attempts` mode.
-     - Cut a trial build for V-32 to time with its real callbacks.
-   - **Requirements:**
-     [V32_CACHE_MERGE_AND_EXECUTION_API_FEEDBACK.md](docs/V32_CACHE_MERGE_AND_EXECUTION_API_FEEDBACK.md)
-     (R1–R6), with background in [V32_AP_STEPPING_RESPONSE.md](docs/V32_AP_STEPPING_RESPONSE.md).
-   - **Proposed approach:**
-     - Keep the oracle's `stepAttempts`, `AttemptController` and `AttemptResult`.
-     - With the cache on, fuse the attempts into `runCached()`'s loop.
-     - With the cache off, use the reference wrapper, and leave `step()`'s loop untouched.
+1. **Execution API and timer/counter designs: both await V-32's review.**
+   - [EXECUTION_API_DESIGN.md](docs/EXECUTION_API_DESIGN.md) is at revision 2. V-32 answered the
+     five questions (its reply is kept in the file); the revision adopts them, fixes three draft
+     errors and asks two small questions.
+   - [TIMER_COUNTER_DESIGN.md](docs/TIMER_COUNTER_DESIGN.md) is a new draft answering V-32's
+     timer and Zicntr request: a shared `MachineTimeSource`, standard compare, a retirement
+     counter, `mcounteren`. It asks five questions.
+   - Nate relays both to Codex. V-32's reply is design only; it does not authorize
+     implementation.
+   - **After V-32 answers:** settle each design and get Nate's go. Then:
+     - Execution API: implement on a branch, port the oracle with V-32's frozen legacy
+       interpreter as the independent reference, run bench `--attempts`, and cut
+       `0.1.9-attempts-SNAPSHOT` for V-32 to time with its real callbacks.
+     - Timer/counters: implement behind source mode and an `IsaConfig` Zicntr flag, with
+       legacy mode unchanged.
    - **Native Image rule:** keep inner loops (array fills, flushes) out of interpreter loops;
      they stop loop unswitching. Verify with a symbolized build, as in
      [the cache evidence](docs/performance/2026-10-10/decoded-cache/README.md).
@@ -51,8 +50,8 @@
    or branch, the hook reports the target minus the instruction length, not the instruction's
    PC. It is not fixed, and the new API should not inherit it.
 4. **Housekeeping:**
-   - Branches that can be deleted: `feature/decoded-icache`, both local and on `origin`, and
-     local `claude-review`.
+   - Local branches that can be deleted: `feature/decoded-icache` (already gone from `origin`)
+     and `claude-review`.
    - `exp/predecode` stays local and is never pushed.
    - Archive [CPU_ARCHITECTURE_REVIEW_RESPONSE.md](docs/CPU_ARCHITECTURE_REVIEW_RESPONSE.md)
      once V-32 acknowledges it.

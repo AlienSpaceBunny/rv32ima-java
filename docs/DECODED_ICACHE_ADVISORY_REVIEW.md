@@ -1,6 +1,6 @@
 # Decoded instruction cache: V-32 advisory review
 
-> Copied from V-32 (`../emulator`) `docs/DECODED_ICACHE_ADVISORY_REVIEW.md` at `805d76d` on 2026-10-10. Text is
+> Copied from V-32 (`../emulator`) `docs/DECODED_ICACHE_ADVISORY_REVIEW.md` at `77b2e47` on 2026-10-10. Text is
 > unchanged; links are adjusted for this repository, and links into V-32's evidence point at
 > the sibling checkout. Recheck the original for later edits.
 
@@ -10,6 +10,8 @@ not a selected V-32 capacity, coherence-policy change, or integration approval.
 
 Follow-up: [matched boot results and the author's filesystem/decompression
 clarification](CPU_ARCHITECTURE_REVIEW_FOLLOWUP.md).
+The follow-up now records the selected `FENCE.I` plus host-flush protocol and
+supersedes this review's automatic-coherence and experiment-sequencing advice.
 
 Sources: the live emulator checkpoint, the CPU
 [review response](CPU_ARCHITECTURE_REVIEW_RESPONSE.md),

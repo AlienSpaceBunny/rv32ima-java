@@ -1,7 +1,9 @@
 # Decoded instruction cache: coherence protocol (for V-32 confirmation)
 
 Drafted 2026-10-10 after V-32's [advisory review](DECODED_ICACHE_ADVISORY_REVIEW.md) and Nate's
-decisions. **V-32: please confirm or correct each item under [Confirm](#confirm).** The overall
+decisions. **Status: accepted by V-32 as the integration target** (`../emulator` `77b2e47`,
+copied in [the follow-up](CPU_ARCHITECTURE_REVIEW_FOLLOWUP.md#response-to-the-updated-cpu-protocol)),
+with the caveats recorded under [Confirm](#confirm). The overall
 design is in [DECODED_ICACHE_PLAN.md](DECODED_ICACHE_PLAN.md). Implementation proceeds on a
 branch in parallel, because nothing here changes the default-off behaviour.
 
@@ -130,3 +132,17 @@ firmware can add it before adoption.
 4. The firmware and toolchain changes under adoption are acceptable.
 5. AP RAM is the right initial cacheable range, with XIP later.
 6. Anything here conflicts with the performance test V-32 is running now.
+
+**V-32's answers (`77b2e47`):**
+
+- Items 1, 4 and 5 are accepted. AP RAM comes first and XIP later.
+- **Item 2 is an adoption obligation, not a completed audit.** Guest base/limit writes return
+  `BUSY` while the AP runs, and HALT completes outside `step()`. The raw Java mapping setters
+  are trusted quiescent fixture APIs that serialize with AP batches but do not enforce the
+  halted state. V-32 will audit and wire the flush boundaries before enabling the cache.
+- **Item 3:** the table covers the known loading paths. It is not a promise about future
+  monitors or JITs. Live self-modification is discouraged; loading and decompression are
+  supported.
+- **Item 6:** there is no conflict with the completed boot screen.
+- Publication must establish write visibility before the executing hart's `FENCE.I`, and must
+  never expose partially written instructions.

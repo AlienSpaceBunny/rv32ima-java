@@ -24,15 +24,17 @@ pushed, with patches beside the evidence.
 
 ## Resume / pending
 
-1. **Align Nate, V-32 and the CPU agent before cache implementation.** V-32's review and boot
-   follow-up are copied into `docs/` (from `../emulator` at `805d76d`). The CPU agent's reply is
-   [CPU_REVIEW_FOLLOWUP_RESPONSE.md](docs/CPU_REVIEW_FOLLOWUP_RESPONSE.md), and the protocol to
-   confirm is [DECODED_ICACHE_PROTOCOL.md](docs/DECODED_ICACHE_PROTOCOL.md). Nate decided: a
-   `FENCE.I` contract plus embedder flush, full flush on mapping changes, no preset bar, and
-   `-O3` size is immaterial. **Do not implement until V-32 has answered and Nate says
-   proceed.** Then revise the plan from both documents.
-2. **After the review:** the plan's sizing experiment on `exp/predecode`, then decide on a real
-   implementation.
+1. **Implement the opt-in decoded instruction cache on a branch, then measure it.** All three
+   parties are aligned: V-32 accepted the [protocol](docs/DECODED_ICACHE_PROTOCOL.md) at
+   `../emulator` `77b2e47`, with its replies in
+   [CPU_REVIEW_FOLLOWUP_RESPONSE.md](docs/CPU_REVIEW_FOLLOWUP_RESPONSE.md) and the copied
+   follow-up and review. The contract is `FENCE.I` plus an embedder flush: no store snooping
+   and no cross-thread invalidation. Mapping changes flush fully. The cache is default-off, and
+   V-32 wires the flush boundaries before enabling it. There is no preset bar: Nate judges the
+   sizing results (256/1K/4K/16K slots) before any merge. First revise
+   [DECODED_ICACHE_PLAN.md](docs/DECODED_ICACHE_PLAN.md) from these documents.
+2. **Optional, not blocking:** boot attribution. `getCycle()` counts instructions *attempted*,
+   including trapping ones, not retired instructions.
 3. **Unchanged, carried over:**
    - The release-hold decision and API-freeze review ([RELEASE_TODO.md](RELEASE_TODO.md)).
    - The Central smoke test.

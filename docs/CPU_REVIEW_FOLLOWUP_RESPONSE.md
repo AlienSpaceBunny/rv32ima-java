@@ -13,9 +13,9 @@ the CPU agent before cache implementation proceeds.** The concrete protocol to c
 - **Decided by Nate, differing from the review's advice:** coherence is an explicit, opt-in
   `FENCE.I` contract plus an embedder flush, not coherent snooping. Results go to Nate without
   a preset bar. `-O3`'s executable size is immaterial.
-- **The boot result is the bigger concern.** The evidence suggests boot is not bound by core
-  execution. Before any cache result is read as a V-32 benefit, I propose one instrumented,
-  untimed boot run that measures the core's share of boot.
+- **The boot result is the bigger concern.** It is inconclusive about the bottleneck. The
+  evidence is consistent with boot not being bound by core execution, but does not establish
+  it. Attribution work is optional and does not block the cache branch.
 
 ## What we accept
 
@@ -68,8 +68,8 @@ inconclusive, is right. The numbers point at a cause:
   the core runs 28–34% faster on HotSpot in isolation. If AP execution dominated boot, that
   should have shown.
 - **The native gap is larger than the core's.** Native O2 boot takes 13.3 s against 3.9 s on
-  the JVM, 3.4×. The isolated core is 1.6–2.1× slower natively on CoreMark. The extra is outside
-  the core. The obvious candidate is the default segment RAM: the scalar `MemorySegment`
+  the JVM, 3.4×. The isolated core is 1.6–2.1× slower natively on CoreMark. Part of the extra
+  may lie outside the core. The obvious candidate is the default segment RAM: the scalar `MemorySegment`
   accessor measured 4–7× slower natively in the core and 14× in host loops. That is a
   hypothesis, not established accounting.
 - **`-O3` helped boot while the new core did not.** That fits non-core code dominating: `-O3`
@@ -77,13 +77,24 @@ inconclusive, is right. The numbers point at a cause:
 - **The noise is large relative to the effect.** Native ranges span 12.4–17.7 s within a block
   with unrestricted affinity, so a 10–20% core effect would not be detectable.
 
-**Proposed measurement, by V-32 and untimed:** one instrumented boot per runtime, recording each
-hart's retired instructions at `SYSTEM READY.` (`RV32IMAState.getCycle()`) and the wall time
-spent inside `step()`. This gives guest MIPS during boot and the core's share. If the share is
-small, neither the new core nor a cache can move boot, and the cache's value lies in
-compute-heavy guest workloads instead, which should then be named. Either answer is useful,
-and it costs much less than another timed matrix. Pinned affinity would also help any future
-boot timing.
+**Possible diagnostic (optional; not authorized or run):** an untimed instrumented boot. V-32's
+caveats apply:
+
+- time inside `step()` includes bus access, synchronization and callbacks, so it is not core
+  time
+- hart intervals overlap, so their sum is not a fraction of boot time
+
+`RV32IMAState.getCycle()` is not a retired-instruction count. `step()` increments it at the
+top of each loop iteration, before fetch, so it counts instructions *attempted*, including
+ones that trap: fetch faults, illegal instructions, `ECALL`/`EBREAK` and load/store faults. It
+does not count interrupt entry or WFI idle returns. Per-hart attempted instructions over boot,
+divided by elapsed time, give each hart's average guest rate. That rate is only an upper bound
+on what faster execution could save. Pinned affinity would also help any future boot timing.
+
+**Agreed outcome (V-32 `77b2e47`):** the protocol is accepted as the integration target. The
+work proceeds as a default-off branch with the declared sizing screen. There is no
+representative compute-heavy V-32 workload yet, so results are reported as synthetic and
+CoreMark.
 
 ## What we need from V-32
 

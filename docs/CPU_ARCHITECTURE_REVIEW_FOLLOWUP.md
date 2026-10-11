@@ -1,13 +1,14 @@
 # CPU review follow-up: boot evidence and code publication
 
-> Copied from V-32 (`../emulator`) `docs/CPU_ARCHITECTURE_REVIEW_FOLLOWUP.md` at `805d76d` on 2026-10-10. Text is
+> Copied from V-32 (`../emulator`) `docs/CPU_ARCHITECTURE_REVIEW_FOLLOWUP.md` at `77b2e47` on 2026-10-10. Text is
 > unchanged; links are adjusted for this repository, and links into V-32's evidence point at
 > the sibling checkout. Recheck the original for later edits.
 
 2026-10-10. **The improved core's boot-speed benefit is inconclusive at O2.
 O3 is promising but grows the executable by 52.7%. The bounded cache sizing
-experiment remains worthwhile; no cache implementation or production adoption
-decision follows from this boot screen.**
+experiment remains worthwhile. Proceed with a default-off implementation on a
+branch and measure before any merge or V-32 adoption. This recommendation follows
+the subsequent protocol discussion, not a demonstrated boot-speed benefit.**
 
 Read this alongside the [initial advisory review](DECODED_ICACHE_ADVISORY_REVIEW.md).
 The CPU agent has already copied that review into its own repository at `f1678af`.
@@ -38,6 +39,8 @@ O3 lowers both block medians, with overlap in one block. Its executable is
 file size, not measured runtime RAM. Qualify the recommendation to adopt O3:
 there is a substantial size tradeoff in the complete production graph. Do not
 describe it as free or infer locking from the residual native/JVM timing ratio.
+Nate subsequently confirmed that this executable size is acceptable; the concern
+would be a compressed distribution of a few hundred megabytes.
 
 No wider RAM matrix, profiling, retries or cache measurements were added.
 The screen ended at its planned 30 processes. It supports keeping the sizing
@@ -58,29 +61,62 @@ Distinguish three cases in the cache contract:
 2. **Load/decompress before execution:** keep the target hart quiescent, complete
    writes, invalidate affected instruction state, then publish the launch/resume.
    Initially cold entries are easy; relaunch and previously executed RAM still
-   require a flush. A bulk range invalidation at this boundary can avoid a
-   cross-thread notification per decompressed byte if the integration explicitly
-   guarantees quiescence and ordering.
+   require a flush. A full cache flush at this boundary is sufficient when the
+   integration guarantees quiescence and ordering.
 3. **Overwrite code while execution continues:** require a defined publication
-   handshake or coherent mechanism, covering aliases and writes racing a fill.
+   handshake that establishes write visibility, followed by `FENCE.I` on the
+   executing hart before it enters the newly published code.
    Invalidation alone does not make partially loaded/decompressed code safe to
    execute. A flag consumed only at the next bulk call is not a sufficient general
    visibility contract. Avoid callbacks acquiring CPU/syscon locks under RAM locks.
 
-The exact filesystem/loader API, whether live code replacement is permitted, and
-any guest `FENCE.I` obligations remain author decisions. Initial V-32 advice stays:
-preserve coherent behavior for existing guests, support an explicit quiescent
-load/flush/start path, and do not silently change the guest contract to
-`FENCE.I`-only. Modelled cache timing remains separate.
+Nate has now selected an explicit, opt-in `FENCE.I` plus embedder-flush contract
+and wants to discourage self-modifying code. Loading and decompression remain
+supported use cases. This supersedes the initial recommendation for automatic
+coherence; that mechanism is not required under the chosen publication contract.
+The cache stays off until firmware and host integration meet the contract.
+
+## Response to the updated CPU protocol
+
+The rules and ownership model in the CPU repository's
+`docs/DECODED_ICACHE_PROTOCOL.md` are acceptable as the integration target.
+AP RAM is the initial cacheable range; XIP comes later. Firmware fences and
+toolchain support are acceptable adoption requirements. No conflict with the
+completed boot screen is identified.
+
+Guest base/limit writes while the AP is running return `BUSY` without changing
+the mapping. HALT and AP execution share the syscon monitor, so HALT completes
+outside `core.step()`. Raw Java mapping setters intentionally remain trusted
+quiescent fixture APIs: they serialize with AP batches but do not enforce the
+halted state. Tests use this distinction, including reservation invalidation
+after a remap between batches. Leave these APIs unchanged for now; audit their
+use and enforce safe mapping/flush boundaries at cache adoption. Keep the guest
+`BUSY` ABI rather than adding a production IOP trap.
+
+Protocol confirmation item 2 is an adoption obligation, not a claim that every
+host load/reset/patch path has already been audited and wired. The case table
+covers the known intended loading paths; it is not a blanket promise about
+future monitors or JITs. Loading new code must not expose partially written
+instructions, and publication must establish visibility before `FENCE.I`.
+
+The boot screen does not establish that costs outside the core dominate boot.
+An instrumented diagnostic could help, but time inside `step()` includes bus
+access, synchronization and callbacks. Hart intervals may overlap, so their
+sum is not a fraction of boot elapsed time. Verify what `getCycle()` counts
+before labeling it retired instructions. No additional instrumentation run has
+been authorized or executed here; attribution work need not block the branch.
+No representative compute-heavy V-32 AP workload has been established by this
+review, so report synthetic and CoreMark results as such until one is selected.
 
 ## Advice to the CPU agent
 
-Proceed with the one declared sizing screen after folding in the initial review.
+Proceed with the default-off implementation branch and declared sizing screen.
 Keep 1K–4K decoded slots as V-32's advisory candidate band, with smaller/larger
-controls and real conflict coverage. Before production implementation, settle
-cache identity, explicit cacheability, mapping/permission invalidation, physical
-aliases, write coverage, and concurrent visibility. The no-invalidation sizing
-screen can establish capacity potential only.
+controls and real conflict coverage. Preserve cache identity, explicit
+cacheability, mapping/permission checks, semantic parity and stale-hit tests.
+Use the chosen `FENCE.I` and host-flush contract rather than store snooping or
+cross-thread invalidation. There is no preset performance acceptance threshold;
+Nate will judge the results before any merge or adoption.
 
 The boot result does not authorize larger caches, a general backend rewrite, or
 another synthetic entry-timing screen. Preserve the existing correctness evidence

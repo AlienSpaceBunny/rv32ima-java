@@ -2,14 +2,14 @@
 
 ## Current state
 
-- **`main` is on `0.1.9-SNAPSHOT`.** Since the local `v0.1.8` release (installed in `~/.m2`, not
-  published) its only code change is T1's hook fix; the rest is design documentation. The
+- **`main` is on `0.1.9-SNAPSHOT`.** Since the local `v0.1.8` release (installed in `~/.m2` and tagged
+  on `origin`, not published) its only code change is T1's hook fix; the rest is design documentation. The
   branch's T3 API break is not yet installed to `~/.m2` (the phase bump at T7 does that).
 - **Next work is approved:** implement the settled timer/counter design, then the execution API
   design, following [the implementation plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md).
   Both designs are at revision 6 and confirmed by V-32.
-- **Blocked and deferred items** are in [docs/BACKLOG.md](docs/BACKLOG.md), including the
-  unpushed `v0.1.8` tag and branch cleanup that wait on Nate.
+- **Blocked and deferred items** are in [docs/BACKLOG.md](docs/BACKLOG.md). The `v0.1.8` tag is
+  pushed; stale branches may stay.
 
 ## Resume here
 

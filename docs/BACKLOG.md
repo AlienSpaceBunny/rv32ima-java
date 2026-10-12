@@ -6,12 +6,9 @@ Remove an item when it is done, and note where its result went.
 
 ## Waiting on Nate
 
-- **Push the `v0.1.8` tag.** It exists only locally: `git push origin v0.1.8`.
-- **Branch cleanup:**
-  - Local `claude-review` and `feature/decoded-icache` can be deleted.
-  - `feature/decoded-icache` still exists on `origin` (at `cd5139b`); it was merged for `0.1.8`.
-  - Two Dependabot branches on `origin` propose Maven 3.10.0 and Maven Wrapper 3.3.4. Shared
-    tooling versions belong in `../alienspacebunny-build`, so decide there.
+- **Dependabot branches:** two on `origin` propose Maven 3.10.0 and Maven Wrapper 3.3.4. Shared
+  tooling versions belong in `../alienspacebunny-build`, so decide there. (Stale merged branches
+  may stay; Nate, 2026-10-12. The `v0.1.8` tag was pushed the same day.)
 - **API freeze and publishing:** see [RELEASE_TODO.md](../RELEASE_TODO.md). The timer/counter and
   execution API work changes the public API first.
 

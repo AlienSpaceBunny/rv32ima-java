@@ -9,7 +9,7 @@ started explicitly.
 
 ## Model
 
-`main` always carries a `-SNAPSHOT` version (currently `0.1.9-SNAPSHOT`). Local tagged releases
+`main` always carries a `-SNAPSHOT` version (currently `0.1.10-SNAPSHOT`). Local tagged releases
 started with `v0.1.8` (2026-10-11); expect more before a published one (see
 [release readiness](../RELEASE_TODO.md)). The first published release will be `0.2.0`,
 whichever `-SNAPSHOT` `main` is on when it's eventually cut;

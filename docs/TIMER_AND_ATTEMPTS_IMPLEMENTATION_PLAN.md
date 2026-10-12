@@ -20,7 +20,7 @@ commit in the status table, as in [FEATURE_REQUEST_PLAN.md](FEATURE_REQUEST_PLAN
 | T4 | Standard WFI, WARL `mie`/`mip` | Done | `525c925` |
 | T5 | Read-only CSR write traps | Done | `5abce6e` |
 | T6 | Zicntr counters and `time` reads | Done | `23bbc03` |
-| T7 | Timer phase close: docs, bench, release check, V-32 handoff | Not started | |
+| T7 | Timer phase close: docs, bench, release check, V-32 handoff | Done (`0.1.10-SNAPSHOT`) | `d6948c8`, `ebe694a`, `0c46c8f`, version bump |
 | A1 | `stepAttempts` API and uncached path | Not started | |
 | A2 | Fused cached path | Not started | |
 | A3 | Bench `--attempts` measurement | Not started | |

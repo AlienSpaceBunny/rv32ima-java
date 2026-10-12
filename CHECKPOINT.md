@@ -2,44 +2,32 @@
 
 ## Current state
 
-- **`main` is on `0.1.9-SNAPSHOT`** and carries T1–T6, including breaking API changes that are
-  not yet installed to `~/.m2` (T7's phase bump does that). `v0.1.8` is installed locally and
-  tagged on `origin`, not published.
+- **`main` is on `0.1.10-SNAPSHOT`, installed to `~/.m2`** (not tagged or published). It carries
+  the whole timer/counter phase (T1–T7). `v0.1.8` is installed locally and tagged on `origin`.
+- **V-32 trial:** [the handoff](docs/V32_TIMER_PHASE_HANDOFF.md) lists the breaking changes and
+  V-32's migration sites, for Nate to relay. Wait for V-32's test report before archiving it.
 - **Work directly on `main`** and push after each validated step, until API stabilization for
-  `0.2.0` (Nate, 2026-10-12). `feature/timer-counters` is merged and may stay.
-- **Next work is approved:** implement the settled timer/counter design, then the execution API
-  design, following [the implementation plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md).
-  Both designs are at revision 6 and confirmed by V-32.
-- **Blocked and deferred items** are in [docs/BACKLOG.md](docs/BACKLOG.md). The `v0.1.8` tag is
-  pushed; stale branches may stay.
+  `0.2.0` (Nate, 2026-10-12).
+- **Waiting on Nate:** the [T7 bench tradeoff](docs/performance/2026-10-12/timer-counters/README.md)
+  (`step(count=1)` about 1.12× slower natively, HotSpot uncached batched about 5% slower; batched
+  native unchanged). Other blocked and deferred items are in [docs/BACKLOG.md](docs/BACKLOG.md).
 
 ## Resume here
 
-**Step T7 of [the plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md): timer phase close**, on
-`main`. Not started: review the Javadoc, `docs/API.md` and the CHANGELOG as a whole; run the full
-bench matrix against `0.1.8` on JVM and native plus a symbolized native build checking that
-`step()`'s and `runCached()`'s loops are still unswitched; `./release.sh`; bump with
-`versions:set`, `./mvnw install`, push; then write the V-32 handoff note.
+**Step A1 of [the plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md): `stepAttempts` and the
+uncached path**, implementing [the execution API design](docs/EXECUTION_API_DESIGN.md)
+(revision 6). Not started. It includes the agreed `PostExecHook`/WFI rule (an executed WFI calls
+the hook once, stalling or not). If Nate wants a mitigation for the bench tradeoff first, do that
+before A1.
 
-Landed on `main`: T1 (hook jump-PC fix) at `3f4fdda`, T2 (reference core and differential) at
-`08d26db`, T3 (shared time source, standard compare) at `fdd68f0`, T4 (standard WFI,
-implemented-only `mie`/`mip`) at `525c925`, T5 (read-only CSR write traps) at `5abce6e`, and T6
-(Zicntr counters and `time` reads, tests in `CounterTest` and the differential's `counters` and
-`timeReads` cases) at `23bbc03`.
+T7 landed as `d6948c8` (Javadoc and API.md fixes), `ebe694a` (timer design archived and trimmed),
+`0c46c8f` (bench evidence) and the version-bump commit.
 
-**For T7's bench:** T6 keeps one more `long` local (`retiredBase`) live across `step()`'s loop
-and `runCached()`'s loop, used only on the CSR path and at exits; check it costs nothing
-measurable.
-
-T4's WFI/`PostExecHook` question is settled for A1 (V-32's recommendation, in the plan's A1
-step). V-32's [packets 001–003 review](docs/V32_PACKET_REVIEW_2026-10-12.md) needs nothing from
-the core; its core-side notes are appended.
-
-**Validation status:** `23bbc03` passed `./mvnw clean verify` (699 core tests in each of three
-cache configurations, plus CLI and bench) and a freshly built baremetal run. Four mutations of
-the core's counter code were each caught by the differential. No bench run yet; T7's full matrix
-covers T1 and later steps (T3 adds one source read and compare per `step` call; T4–T6 change only
-entry, CSR, WFI and exit paths).
+**Validation status:** the T7 tree passed `./mvnw clean verify` (699 core tests in each of three
+cache configurations, plus CLI and bench), `./release.sh` with a freshly built baremetal binary,
+and `./mvnw clean install` at `0.1.10-SNAPSHOT`. Symbolized native builds show `step()` and
+`runCached()` still unswitched. `release.sh` rewrites `baremetal/baremetal.elf` and its debug
+listing with debug-string noise only; restore them rather than committing.
 
 ## Rules for this work
 

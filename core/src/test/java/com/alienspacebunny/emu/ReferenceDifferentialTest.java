@@ -32,6 +32,12 @@ import org.junit.jupiter.params.provider.CsvSource;
  * LR/SC sequences, user mode, WFI and interrupts, faults, CSR-hook accesses and counters. The
  * time sources advance on every read, so a differing number of samples shows up as differing
  * time.
+ *
+ * <p>The same runs also drive {@code stepAttempts}, with random budgets and with random
+ * callbacks that record every boundary they see and edit the machine, or with none: against the
+ * reference's attempt driver, uncached, cached and in check mode, and against a second core's
+ * repeated {@code step(count=1)}, on a source that moves only between calls since each public
+ * step samples again.
  */
 public class ReferenceDifferentialTest {
     private static final int BASE = 0x80000000;
@@ -357,26 +363,46 @@ public class ReferenceDifferentialTest {
                 CSRHook csrHook);
     }
 
+    @FunctionalInterface
+    private interface Attempter {
+        AttemptResult stepAttempts(
+                RV32IMAState state,
+                MemoryBus mem,
+                int ramOffset,
+                int ramSize,
+                int budget,
+                CSRHook csrHook,
+                AttemptController controller);
+    }
+
     /** One core with its own state, bus, hook and observations. */
     private static final class Machine {
         final RV32IMAState state = new RV32IMAState();
         final RecordingBus bus;
         final RecordingCsrHook csrHook;
         final Stepper stepper;
+        final Attempter attempter;
+        final Runnable flush;
         final int window;
         final List<int[]> hookEvents = new ArrayList<>();
         final RV32IMACore.PostExecHook postExec;
 
-        Machine(RecordingBus bus, Stepper stepper, int window) {
+        Machine(RecordingBus bus, Stepper stepper, Attempter attempter, Runnable flush, int window) {
             this.bus = bus;
             this.window = window;
             this.csrHook = new RecordingCsrHook(bus);
             this.stepper = stepper;
+            this.attempter = attempter;
+            this.flush = flush;
             this.postExec = (pc, ir, trap) -> hookEvents.add(snapshot(state, pc, ir, trap));
         }
 
         int step(int count, boolean hooked) {
             return stepper.step(state, bus, BASE, window, count, hooked ? postExec : null, csrHook);
+        }
+
+        AttemptResult stepAttempts(int budget, AttemptController controller) {
+            return attempter.stepAttempts(state, bus, BASE, window, budget, csrHook, controller);
         }
 
         void clearObservations() {
@@ -480,13 +506,21 @@ public class ReferenceDifferentialTest {
         return snapshot(s, result, s.pc, s.cyclel, s.cycleh, (int) s.getInstret(), (int) (s.getInstret() >>> 32));
     }
 
-    /** A source that advances by one on every read, so the two cores must sample equally often. */
+    /**
+     * A source that advances by one on every read, so the two cores must sample equally often;
+     * or, if not {@code perRead}, only when the test advances it between calls.
+     */
     private static final class AdvancingSource implements MachineTimeSource {
+        private final boolean perRead;
         private long next;
+
+        AdvancingSource(boolean perRead) {
+            this.perRead = perRead;
+        }
 
         @Override
         public long nowMicros() {
-            return next++;
+            return perRead ? next++ : next;
         }
 
         void advance(long micros) {
@@ -510,12 +544,28 @@ public class ReferenceDifferentialTest {
         assertEquals(ref.csrHook.reads, core.csrHook.reads, where + ": CSR-hook reads");
     }
 
+    /** What runs on the two machines of a lockstep run. */
+    private enum Mode {
+        /** {@code step} on the reference and the core. */
+        STEP,
+        /** {@code stepAttempts} on the reference's attempt driver and the core. */
+        ATTEMPTS,
+        /**
+         * The core's {@code stepAttempts} against a second core's repeated {@code step(count=1)}
+         * with the same callbacks around each, on a source that is fixed during each call.
+         */
+        ATTEMPTS_VS_SINGLE_STEPS
+    }
+
     /**
      * Runs the reference and the core in lockstep on copies of {@code program}, applying the same
-     * random host events and batch sizes to both, and compares them after every call.
+     * random host events and batch sizes or budgets to both, and compares them after every call.
+     * With {@code checkMode}, the core has a decoded cache in check mode.
      */
     private static void runLockstep(
             String label,
+            Mode mode,
+            boolean checkMode,
             IsaConfig isa,
             RecordingBus program,
             int window,
@@ -524,13 +574,22 @@ public class ReferenceDifferentialTest {
             int iterations) {
         Random rnd = new Random(seed);
         // Separate sources, advanced together, so neither core can see the other's samples.
-        AdvancingSource refTime = new AdvancingSource();
-        AdvancingSource coreTime = new AdvancingSource();
-        RV32IMACore core = TestCores.create(isa, coreTime);
-        Machine ref = new Machine(program.copy(), new ReferenceCore(isa, refTime)::step, window);
-        Machine dut = new Machine(program.copy(), core::step, window);
+        AdvancingSource refTime = new AdvancingSource(mode != Mode.ATTEMPTS_VS_SINGLE_STEPS);
+        AdvancingSource coreTime = new AdvancingSource(mode != Mode.ATTEMPTS_VS_SINGLE_STEPS);
+        RV32IMACore core = checkMode ? checkModeCore(isa, coreTime) : TestCores.create(isa, coreTime);
+        Machine dut = new Machine(program.copy(), core::step, core::stepAttempts, core::flushDecodedCache, window);
+        Machine ref;
+        if (mode == Mode.ATTEMPTS_VS_SINGLE_STEPS) {
+            RV32IMACore single = TestCores.create(isa, refTime);
+            ref = new Machine(
+                    program.copy(), single::step, repeatedSingleSteps(single), single::flushDecodedCache, window);
+        } else {
+            ReferenceCore reference = new ReferenceCore(isa, refTime);
+            ref = new Machine(program.copy(), reference::step, reference::stepAttempts, () -> {}, window);
+        }
         setup.accept(ref.state);
         setup.accept(dut.state);
+        String coreName = checkMode ? "check mode" : "slots " + TestCores.SLOTS;
         long retiredHookEvents = 0;
         for (int iteration = 0; iteration < iterations; iteration++) {
             switch (rnd.nextInt(300)) {
@@ -612,16 +671,122 @@ public class ReferenceDifferentialTest {
             int elapsed = rnd.nextInt(3);
             refTime.advance(elapsed);
             coreTime.advance(elapsed);
-            boolean hooked = rnd.nextInt(4) != 0;
-            int refResult = ref.step(count, hooked);
-            int dutResult = dut.step(count, hooked);
-            String where = label + ", seed " + seed + ", slots " + TestCores.SLOTS + ", iteration " + iteration;
-            assertSameMachines(ref, dut, refResult, dutResult, where);
-            retiredHookEvents += ref.hookEvents.size();
+            String where = label + ", seed " + seed + ", " + coreName + ", iteration " + iteration;
+            if (mode == Mode.STEP) {
+                boolean hooked = rnd.nextInt(4) != 0;
+                int refResult = ref.step(count, hooked);
+                int dutResult = dut.step(count, hooked);
+                assertSameMachines(ref, dut, refResult, dutResult, where);
+                retiredHookEvents += ref.hookEvents.size();
+            } else {
+                // Now and then AP's comparison budget, which callbacks and stalls usually cut short.
+                int budget = rnd.nextInt(16) == 0 ? 1061 : count;
+                long controllerSeed = rnd.nextLong();
+                boolean controlled = rnd.nextInt(4) != 0;
+                RandomController refController = controlled ? new RandomController(ref, controllerSeed) : null;
+                RandomController dutController = controlled ? new RandomController(dut, controllerSeed) : null;
+                AttemptResult refResult = ref.stepAttempts(budget, refController);
+                AttemptResult dutResult = dut.stepAttempts(budget, dutController);
+                if (controlled) {
+                    assertEquals(refController.seen.size(), dutController.seen.size(), where + ": callback count");
+                    for (int i = 0; i < refController.seen.size(); i++) {
+                        assertSnapshot(
+                                refController.seen.get(i),
+                                dutController.seen.get(i),
+                                CALLBACK_PREFIX,
+                                where + ", callback " + i);
+                    }
+                }
+                assertEquals(refResult, dutResult, where + ": attempt result");
+                assertSameMachines(ref, dut, refResult.coreResult(), dutResult.coreResult(), where);
+                retiredHookEvents += refResult.attemptsConsumed();
+            }
             ref.clearObservations();
             dut.clearObservations();
         }
         assertTrue(retiredHookEvents > iterations, label + ": too little ran: " + retiredHookEvents);
+    }
+
+    /** A cached core in check mode, which throws on any stale entry it would execute. */
+    private static RV32IMACore checkModeCore(IsaConfig isa, MachineTimeSource time) {
+        RV32IMACore core = new RV32IMACore(isa, new DecodedCacheConfig(Math.max(TestCores.SLOTS, 64), true), time);
+        core.addDecodedCacheRange(0, 0xFFFFFFFF);
+        return core;
+    }
+
+    /** The attempt contract as repeated public {@code step(count=1)} calls with the callbacks around each. */
+    private static Attempter repeatedSingleSteps(RV32IMACore core) {
+        return (state, mem, ramOffset, ramSize, budget, csrHook, controller) -> {
+            for (int attempt = 1; ; attempt++) {
+                if (controller != null) {
+                    controller.beforeAttempt(state);
+                }
+                int result = core.step(state, mem, ramOffset, ramSize, 1, null, csrHook);
+                boolean stopped = controller != null && controller.afterAttempt(state, result);
+                if (stopped || result != 0 || attempt == budget) {
+                    return new AttemptResult(result, attempt, stopped);
+                }
+            }
+        };
+    }
+
+    private static final String[] CALLBACK_PREFIX = {"phase", "pc", "cyclel", "cycleh", "instret.lo", "instret.hi"};
+
+    /**
+     * Callbacks that record what they see and edit the machine as an embedder may: interrupt
+     * sources, registers, privilege, CSRs, the compare, counters, pc, a WFI stall, both
+     * reservation layers and the decoded cache. They stop now and then. Two controllers with the
+     * same seed make the same edits as long as they see the same calls.
+     */
+    private static final class RandomController implements AttemptController {
+        final Machine machine;
+        final Random rnd;
+        final List<int[]> seen = new ArrayList<>();
+
+        RandomController(Machine machine, long seed) {
+            this.machine = machine;
+            this.rnd = new Random(seed);
+        }
+
+        @Override
+        public void beforeAttempt(RV32IMAState state) {
+            seen.add(boundary(state, -1));
+            edit(state);
+        }
+
+        @Override
+        public boolean afterAttempt(RV32IMAState state, int coreResult) {
+            seen.add(boundary(state, coreResult));
+            edit(state);
+            return rnd.nextInt(24) == 0;
+        }
+
+        private void edit(RV32IMAState state) {
+            switch (rnd.nextInt(40)) {
+                case 0 -> state.mip |= rnd.nextBoolean() ? 1 << 3 : 1 << 11;
+                case 1 -> state.mip &= ~0x808;
+                case 2 -> state.mip |= 1 << 7; // a direct MTIP edit, which the next attempt overwrites
+                case 3 -> state.regs[1 + rnd.nextInt(31)] = rnd.nextInt();
+                case 4 -> state.extraflags ^= 3; // privilege: machine and user mode swap
+                case 5 -> state.mstatus ^= 8;
+                case 6 -> state.mie = new int[] {0, 0x8, 0x80, 0x800, 0x888}[rnd.nextInt(5)];
+                case 7 -> state.setTimerMatch(state.getTimer() + rnd.nextInt(4));
+                case 8 -> state.setMinstret(state.getMinstret() + rnd.nextInt(1000));
+                case 9 -> state.setMcycle(0xFFFF_FFF0L + rnd.nextInt(32));
+                case 10 -> state.mscratch = rnd.nextInt();
+                case 11 -> {
+                    int range = machine.window == CODE_SIZE ? CODE_SIZE - 0x100 : 0x80;
+                    state.pc = START + 4 * rnd.nextInt(range / 4);
+                }
+                case 12 -> state.extraflags &= ~4; // release a WFI stall
+                case 13 -> machine.bus.reservationHeld = false;
+                case 14 -> state.reservationValid = false;
+                case 15 -> machine.flush.run();
+                case 16 -> state.setCycle(state.getCycle() + rnd.nextInt(1000));
+                case 17 -> state.setInstret(state.getInstret() + rnd.nextInt(1000));
+                default -> {}
+            }
+        }
     }
 
     // ---- Seeded random programs ----
@@ -762,17 +927,53 @@ public class ReferenceDifferentialTest {
         "1, full", "2, full", "3, noC", "4, noC", "5, ap", "6, iop", "7, base", "8, full",
     })
     public void randomProgramsMatchReference(long seed, String configName) {
+        runRandom(Mode.STEP, false, seed, configName, 15_000);
+    }
+
+    /**
+     * {@code stepAttempts} against the reference's attempt driver, with random budgets and
+     * callbacks, on a source that advances on every read; half the seeds use a check-mode cache.
+     */
+    @ParameterizedTest(name = "seed {0}, {1}, check mode {2}")
+    @CsvSource({
+        "1, full, false",
+        "2, full, true",
+        "3, noC, false",
+        "4, noC, true",
+        "5, ap, false",
+        "6, iop, true",
+        "7, base, false",
+        "8, full, true",
+    })
+    public void randomAttemptsMatchReference(long seed, String configName, boolean checkMode) {
+        runRandom(Mode.ATTEMPTS, checkMode, seed, configName, 6_000);
+    }
+
+    /**
+     * The seeded lockstep differential for the fused path: {@code stepAttempts} against repeated
+     * {@code step(count=1)} on the same kind of core, with the same random callbacks. The source
+     * moves only between calls, since each public step samples again.
+     */
+    @ParameterizedTest(name = "seed {0}, {1}")
+    @CsvSource({"11, full", "12, noC", "13, ap", "14, iop", "15, base"})
+    public void randomAttemptsMatchRepeatedSingleSteps(long seed, String configName) {
+        runRandom(Mode.ATTEMPTS_VS_SINGLE_STEPS, false, seed, configName, 6_000);
+    }
+
+    private static void runRandom(Mode mode, boolean checkMode, long seed, String configName, int iterations) {
         IsaConfig isa = config(configName);
         RecordingBus program = randomProgram(new Random(seed), isa.hasC());
         // Only the write-protected code is executable, so no fetch can see a store without FENCE.I.
         runLockstep(
-                "random " + configName,
+                "random " + configName + " " + mode,
+                mode,
+                checkMode,
                 isa,
                 program,
                 CODE_SIZE,
                 randomState(new Random(seed + 1000)),
                 seed + 2000,
-                15_000);
+                iterations);
     }
 
     // ---- Directed programs ----
@@ -840,10 +1041,26 @@ public class ReferenceDifferentialTest {
         };
     }
 
+    /**
+     * Runs a directed program in each mode on three configurations, with attempts also on a
+     * check-mode cache.
+     */
     private static void runDirected(String label, RecordingBus program, Consumer<RV32IMAState> setup) {
         for (String configName : new String[] {"full", "noC", "base"}) {
-            runLockstep(
-                    label + " " + configName, config(configName), program, RAM_SIZE, setup, label.hashCode(), 3_000);
+            for (Mode mode : Mode.values()) {
+                for (boolean checkMode : mode == Mode.ATTEMPTS ? new boolean[] {false, true} : new boolean[] {false}) {
+                    runLockstep(
+                            label + " " + configName + " " + mode,
+                            mode,
+                            checkMode,
+                            config(configName),
+                            program,
+                            RAM_SIZE,
+                            setup,
+                            label.hashCode(),
+                            3_000);
+                }
+            }
         }
     }
 

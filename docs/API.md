@@ -194,9 +194,10 @@ authoritative):
   `flushDecodedCache()`, must not reenter execution on the same core, and
   must return normally; exceptions propagate without rollback. Take work
   deltas from `getCycle()` and `getInstret()`.
-- With the decoded cache on, each attempt currently runs a cached
-  single-instruction batch; a fused cached path is planned (step A2 of
-  [the plan](TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md)).
+- With the decoded cache on, the attempts run in a cached loop of their own,
+  which saves most of the per-call setup of repeated `step(count=1)` calls.
+  The semantics are the same on every path; whether it is faster for a given
+  embedder is measured, not assumed.
 
 Decoded instruction cache (opt-in; the coherence rules are in
 `flushDecodedCache()`'s Javadoc and [DECODED_ICACHE_PROTOCOL.md](DECODED_ICACHE_PROTOCOL.md)):

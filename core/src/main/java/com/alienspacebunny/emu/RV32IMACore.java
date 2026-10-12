@@ -2215,9 +2215,10 @@ public class RV32IMACore {
         return 0;
     }
 
-    // Set while stepAttempts runs one attempt through step(): step()'s entry then recomputes
-    // MTIP from the call's sample instead of sampling. Unlike DC_MODE_DELEGATING, every entry
-    // check still runs.
+    // Set while stepAttempts runs one attempt through step() on a core without a decoded cache
+    // (a cached core runs attempts in runCachedAttempts): step()'s entry then recomputes MTIP
+    // from the call's sample instead of sampling. Unlike DC_MODE_DELEGATING, every entry check
+    // still runs.
     private boolean attemptEntry;
 
     /**
@@ -2309,6 +2310,9 @@ public class RV32IMACore {
         if (budget <= 0) {
             throw new IllegalArgumentException("budget must be at least 1: " + budget);
         }
+        if (dcMode == DC_MODE_ON) {
+            return runAttemptsCached(state, mem, ramOffset, ramSize, budget, csrHook, controller);
+        }
         int attempts = 0;
         int result;
         boolean stopped;
@@ -2329,6 +2333,35 @@ public class RV32IMACore {
             stopped = controller != null && controller.afterAttempt(state, result);
         } while (!stopped && result == 0 && attempts < budget);
         return new AttemptResult(result, attempts, stopped);
+    }
+
+    /**
+     * {@link #stepAttempts} with the decoded cache: the attempts run inside {@link #runCachedAttempts}'s
+     * loop. As for a batch, a delegated {@code FENCE.I} leaves that loop and the flush runs here
+     * (see {@link #continueAfterFenceI}). It completes before that attempt's {@code afterAttempt},
+     * even when the callback stops the call. Resuming takes no new time sample and no second
+     * {@code beforeAttempt} for that attempt.
+     */
+    private AttemptResult runAttemptsCached(
+            RV32IMAState state,
+            MemoryBus mem,
+            int ramOffset,
+            int ramSize,
+            int budget,
+            CSRHook csrHook,
+            AttemptController controller) {
+        int result = runCachedAttempts(state, mem, ramOffset, ramSize, budget, csrHook, controller, 0);
+        while (dcFenceI) {
+            dcFenceI = false;
+            flushDecodedCache();
+            int attempts = attemptsConsumed;
+            boolean stopped = controller != null && controller.afterAttempt(state, 0);
+            if (stopped || attempts == budget) {
+                return new AttemptResult(0, attempts, stopped);
+            }
+            result = runCachedAttempts(state, mem, ramOffset, ramSize, budget, csrHook, controller, attempts);
+        }
+        return new AttemptResult(result, attemptsConsumed, attemptsStopped);
     }
 
     /**
@@ -2768,7 +2801,8 @@ public class RV32IMACore {
      * {@link #step}'s batch with the decoded cache, after the entry checks and with no pending
      * interrupt. Semantics and batch boundaries are those of {@link #step}'s loop. Returns {@link
      * #step}'s result, or minus the number of instructions run if it stopped early after a
-     * delegated {@code FENCE.I}, leaving {@code dcFenceI} set for the caller to flush.
+     * delegated {@code FENCE.I}, leaving {@code dcFenceI} set for the caller to flush. {@link
+     * #runCachedAttempts} copies its lookup, delegation and fast handlers; change both together.
      */
     private int runCached(
             RV32IMAState state,
@@ -2984,5 +3018,280 @@ public class RV32IMACore {
         state.setCycle(cycle);
         state.pc = pc;
         return 0;
+    }
+
+    /**
+     * {@link #stepAttempts}'s attempts with the decoded cache: {@link #runCached}'s loop with each
+     * iteration one attempt, with its own entry checks and callbacks. A trap continues into its
+     * handler. {@code count} is the budget, of which {@code attemptsDone} are already consumed.
+     * Returns the last attempt's result and leaves the attempts consumed and whether the
+     * controller stopped in {@link #attemptsConsumed} and {@link #attemptsStopped}. After a
+     * delegated {@code FENCE.I} it returns 0 with {@code dcFenceI} set and that attempt's {@code
+     * afterAttempt} not yet called; see {@link #runAttemptsCached}.
+     *
+     * <p>A separate loop, not a mode of {@link #runCached}: on Native Image a loop-invariant mode
+     * flag there was not unswitched, and batches ran 7-14% slower wherever {@code stepAttempts}
+     * was reachable (docs/performance/2026-10-12/attempts-a2/). The lookup, delegation and fast
+     * handlers below are therefore a copy of {@link #runCached}'s; keep the two identical. The
+     * differential tests run both against the reference.
+     */
+    private int runCachedAttempts(
+            RV32IMAState state,
+            MemoryBus mem,
+            int ramOffset,
+            int ramSize,
+            int count,
+            CSRHook csrHook,
+            AttemptController controller,
+            int attemptsDone) {
+        if (mem != dcBus
+                || state != dcState
+                || state.hartId != dcHartId
+                || ramOffset != dcRamOffset
+                || ramSize != dcRamSize) {
+            flushDecodedCache();
+            dcBus = mem;
+            dcState = state;
+            dcHartId = state.hartId;
+            dcRamOffset = ramOffset;
+            dcRamSize = ramSize;
+        }
+        int[] tags = dcTags;
+        long[] ops = dcOps;
+        int[] regs = state.regs;
+        int mask = tags.length - 1;
+        boolean hasC = isaConfig.hasC();
+        int slotShift = hasC ? 1 : 2;
+        int alignMask = hasC ? 1 : 3;
+        int pc = state.pc;
+        long cycle = state.getCycle();
+        long retiredBase = state.getInstret() - cycle; // as in step()'s loop
+
+        for (int icount = attemptsDone; icount < count; icount++) {
+            // Publish the boundary, finish the previous attempt with its afterAttempt (it
+            // returned 0, or the call would have ended), start this one, and reload what the
+            // callbacks may have changed. Everything else is read from state where it is used.
+            state.pc = pc;
+            state.setInstret(retiredBase + cycle);
+            state.setCycle(cycle);
+            if (controller != null) {
+                if (icount != attemptsDone && controller.afterAttempt(state, 0)) {
+                    attemptsConsumed = icount;
+                    attemptsStopped = true;
+                    return 0;
+                }
+                controller.beforeAttempt(state);
+            }
+            // step()'s entry checks, with the call's one sample on its first attempt.
+            if (icount == 0) {
+                sampleTime(state);
+            } else {
+                updateTimerPending(state);
+            }
+            int interrupt = pendingInterruptTrap(state);
+            if ((state.extraflags & EXTRAFLAG_WFI) != 0) {
+                if (wakeInterrupts(state) == 0) {
+                    return endAttempts(state, controller, icount + 1, 1);
+                }
+                state.extraflags &= ~EXTRAFLAG_WFI;
+            }
+            pc = state.pc;
+            cycle = state.getCycle();
+            retiredBase = state.getInstret() - cycle;
+            if (interrupt != 0) {
+                pc = commitTrap(state, pc - 4, interrupt, 0, 0, 4); // as step()'s entry dispatch
+                continue;
+            }
+            int privilege = state.extraflags & EXTRAFLAG_PRIV_MASK;
+            int ofsPc = pc - ramOffset;
+            int slot = 0;
+            long op = 0;
+            // A window or alignment failure leaves op == 0, and step()'s loop raises the trap.
+            if (Integer.compareUnsigned(ofsPc, ramSize) < 0 && (ofsPc & alignMask) == 0) {
+                int tag = ofsPc | (privilege & 1);
+                slot = (ofsPc >>> slotShift) & mask;
+                op = ops[slot];
+                if (tags[slot] != tag || op == 0) {
+                    op = dcCacheable(pc, ofsPc, ramSize) ? dcFill(state, mem, pc, privilege, slot, tag) : 0;
+                    if (op == DC_FETCH_FAULT) {
+                        // As step()'s loop's fetch fault: no hook call, mtval = pc; attempted,
+                        // not retired.
+                        pc = commitTrap(state, pc, exceptionTrap(EXC_INSTRUCTION_ACCESS_FAULT), 0, pc, 4);
+                        cycle++;
+                        retiredBase--;
+                        continue; // a trap ends the attempt, not the call
+                    }
+                } else if (dcCheckMode) {
+                    dcCheck(state, mem, pc, privilege, slot);
+                }
+            }
+            int meta = (int) (op >>> 32);
+            int handler = meta & DC_HANDLER_MASK;
+            if (handler <= DC_GENERIC) {
+                // Not cached, or no fast handler: run exactly this instruction uncached.
+                if (op == 0) {
+                    dcBypasses++;
+                }
+                dcDelegations++;
+                state.pc = pc;
+                state.setInstret(retiredBase + cycle);
+                state.setCycle(cycle);
+                dcBatchEnded = false;
+                dcMode = DC_MODE_DELEGATING;
+                int result;
+                try {
+                    result = step(state, mem, ramOffset, ramSize, 1, null, csrHook);
+                } finally {
+                    dcMode = DC_MODE_ON;
+                }
+                // A trap or interrupt ends only the attempt; the delegated step published it.
+                if (result != 0) {
+                    return endAttempts(state, controller, icount + 1, result);
+                }
+                if (dcFenceI) {
+                    attemptsConsumed = icount + 1; // runAttemptsCached flushes, then calls afterAttempt
+                    return 0;
+                }
+                pc = state.pc;
+                cycle = state.getCycle();
+                retiredBase = state.getInstret() - cycle;
+                continue;
+            }
+
+            cycle++;
+            int imm = (int) op;
+            int rd = (meta >>> 6) & 0x1f;
+            int rs1 = (meta >>> 11) & 0x1f;
+            int rs2 = (meta >>> 16) & 0x1f;
+            int instrLen = (meta & DC_COMPRESSED) != 0 ? 2 : 4;
+            int nextPc = pc + instrLen;
+            int rval = 0;
+            int trap = 0;
+            switch (handler) {
+                case DC_LUI -> rval = imm;
+                case DC_AUIPC -> rval = pc + imm;
+                case DC_JAL -> {
+                    rval = nextPc;
+                    nextPc = pc + imm;
+                }
+                case DC_JALR -> {
+                    rval = nextPc;
+                    nextPc = (regs[rs1] + imm) & ~1;
+                }
+                case DC_BEQ -> nextPc = regs[rs1] == regs[rs2] ? pc + imm : nextPc;
+                case DC_BNE -> nextPc = regs[rs1] != regs[rs2] ? pc + imm : nextPc;
+                case DC_BLT -> nextPc = regs[rs1] < regs[rs2] ? pc + imm : nextPc;
+                case DC_BGE -> nextPc = regs[rs1] >= regs[rs2] ? pc + imm : nextPc;
+                case DC_BLTU -> nextPc = Integer.compareUnsigned(regs[rs1], regs[rs2]) < 0 ? pc + imm : nextPc;
+                case DC_BGEU -> nextPc = Integer.compareUnsigned(regs[rs1], regs[rs2]) >= 0 ? pc + imm : nextPc;
+                case DC_LB, DC_LH, DC_LW, DC_LBU, DC_LHU -> {
+                    int addr = regs[rs1] + imm;
+                    try {
+                        rval = switch (handler) {
+                            case DC_LB ->
+                                mem.readByteSigned(
+                                        addr, new AccessContext(state.hartId, privilege, AccessKind.LOAD, 1, 0));
+                            case DC_LH ->
+                                mem.readShortSigned(
+                                        addr, new AccessContext(state.hartId, privilege, AccessKind.LOAD, 2, 0));
+                            case DC_LW ->
+                                mem.readInt(addr, new AccessContext(state.hartId, privilege, AccessKind.LOAD, 4, 0));
+                            case DC_LBU ->
+                                mem.readByte(addr, new AccessContext(state.hartId, privilege, AccessKind.LOAD, 1, 0))
+                                        & 0xFF;
+                            default ->
+                                mem.readShort(addr, new AccessContext(state.hartId, privilege, AccessKind.LOAD, 2, 0))
+                                        & 0xFFFF;
+                        };
+                    } catch (IndexOutOfBoundsException _) {
+                        trap = exceptionTrap(EXC_LOAD_ACCESS_FAULT);
+                        rval = addr;
+                    }
+                }
+                case DC_SB, DC_SH, DC_SW -> {
+                    int addr = regs[rs1] + imm;
+                    int value = regs[rs2];
+                    try {
+                        switch (handler) {
+                            case DC_SB ->
+                                mem.writeByte(
+                                        addr,
+                                        (byte) value,
+                                        new AccessContext(state.hartId, privilege, AccessKind.STORE, 1, 0));
+                            case DC_SH ->
+                                mem.writeShort(
+                                        addr,
+                                        (short) value,
+                                        new AccessContext(state.hartId, privilege, AccessKind.STORE, 2, 0));
+                            default ->
+                                mem.writeInt(
+                                        addr,
+                                        value,
+                                        new AccessContext(state.hartId, privilege, AccessKind.STORE, 4, 0));
+                        }
+                        state.reservationValid = false;
+                    } catch (IndexOutOfBoundsException _) {
+                        trap = exceptionTrap(EXC_STORE_ACCESS_FAULT);
+                        rval = addr;
+                    }
+                }
+                case DC_ADDI -> rval = regs[rs1] + imm;
+                case DC_SLTI -> rval = regs[rs1] < imm ? 1 : 0;
+                case DC_SLTIU -> rval = Integer.compareUnsigned(regs[rs1], imm) < 0 ? 1 : 0;
+                case DC_XORI -> rval = regs[rs1] ^ imm;
+                case DC_ORI -> rval = regs[rs1] | imm;
+                case DC_ANDI -> rval = regs[rs1] & imm;
+                case DC_SLLI -> rval = regs[rs1] << imm;
+                case DC_SRLI -> rval = regs[rs1] >>> imm;
+                case DC_SRAI -> rval = regs[rs1] >> imm;
+                case DC_ADD -> rval = regs[rs1] + regs[rs2];
+                case DC_SUB -> rval = regs[rs1] - regs[rs2];
+                case DC_SLL -> rval = regs[rs1] << regs[rs2];
+                case DC_SLT -> rval = regs[rs1] < regs[rs2] ? 1 : 0;
+                case DC_SLTU -> rval = Integer.compareUnsigned(regs[rs1], regs[rs2]) < 0 ? 1 : 0;
+                case DC_XOR -> rval = regs[rs1] ^ regs[rs2];
+                case DC_SRL -> rval = regs[rs1] >>> regs[rs2];
+                case DC_SRA -> rval = regs[rs1] >> regs[rs2];
+                case DC_OR -> rval = regs[rs1] | regs[rs2];
+                case DC_AND -> rval = regs[rs1] & regs[rs2];
+                case DC_MUL -> rval = regs[rs1] * regs[rs2];
+                default -> { // DC_COLD, unpacked as step()'s loop does
+                    int ir = dcWords[slot];
+                    long result = executeColdOpcode(state, mem, ir, ir & 0x7f, rd, privilege);
+                    rval = (int) result;
+                    trap = (int) ((result >>> 32) & COLD_TRAP_MASK);
+                    if ((result & COLD_WRITES_RD) == 0) {
+                        rd = 0;
+                    }
+                }
+            }
+            if (trap != 0) {
+                // As step()'s loop's traps: hook first, then the trap; rd unwritten.
+                int ir = dcWords[slot];
+                pc = commitTrap(state, pc, trap, ir, rval, instrLen);
+                retiredBase--; // attempted, not retired
+                continue; // a trap ends the attempt, not the call
+            }
+            if (rd != 0) {
+                regs[rd] = rval;
+            }
+            pc = nextPc;
+        }
+
+        state.setInstret(retiredBase + cycle);
+        state.setCycle(cycle);
+        state.pc = pc;
+        return endAttempts(state, controller, count, 0);
+    }
+
+    // runCachedAttempts' results besides the last attempt's result; see runCached.
+    private int attemptsConsumed;
+    private boolean attemptsStopped;
+
+    /** Ends runCached's attempts after a published attempt: its afterAttempt, then the results. */
+    private int endAttempts(RV32IMAState state, AttemptController controller, int attempts, int result) {
+        attemptsConsumed = attempts;
+        attemptsStopped = controller != null && controller.afterAttempt(state, result);
+        return result;
     }
 }

@@ -1,7 +1,7 @@
 # Shared machine time, timer compare and Zicntr: design
 
-Date: 2026-10-12. From the CPU agent. **Revision 5**, after V-32's review of revision 4 (kept
-below with its review of the first draft). Since revision 4 there is no legacy mode, on Nate's
+Date: 2026-10-12. From the CPU agent. **Revision 6**, after V-32's review of revision 5 (kept
+below with its earlier reviews), which left no open questions. Since revision 4 there is no legacy mode, on Nate's
 direction: the core follows what V-32 needs and, where that stays cheap to maintain, the RISC-V
 specification. It keeps no old shortcuts for their own sake. Nothing here is implemented, and
 implementation waits for Nate's go. The changes in each revision are listed at the end.
@@ -11,7 +11,7 @@ implementation waits for Nate's go. The changes in each revision are listed at t
   [EXECUTION_API_DESIGN.md](EXECUTION_API_DESIGN.md#timer-and-counter-extension-implementation-requests).
 - V-32's Packet 001 decision record, in its repository at
   `docs/decisions/001-clocks-timer-events.md` (C1 time source, C4 IOP timers, C5 lifecycle).
-- V-32's reviews of the first draft and of revision 4, below.
+- V-32's reviews of the first draft and of revisions 4 and 5, below.
 - The [Zicntr](https://docs.riscv.org/reference/isa/v20260120/unpriv/counters.html),
   [Zicsr](https://docs.riscv.org/reference/isa/v20260120/unpriv/zicsr.html) and
   [machine-level](https://docs.riscv.org/reference/isa/v20260120/priv/machine.html)
@@ -175,9 +175,11 @@ locally enabled, implemented interrupt:** `mip & mie & (MSIP | MTIP | MEIP)` is 
 - **`mie`** keeps MSIE, MTIE and MEIE on a guest write; the other bits read 0.
 - **`mip`'s three bits are read-only to the guest:** MTIP follows the compare, and MSIP and MEIP
   are driven by the embedder's devices (`injectInterrupt` or a host-side edit). A guest write to
-  `mip` is legal and changes nothing. Question 2 asks whether V-32 firmware writes `mip`.
-- Host-side edits of `state.mie` and `state.mip` are not masked, so the wake condition and
-  delivery check also mask with the implemented bits.
+  `mip` is legal and changes nothing. V-32's firmware and Java sources do not write `mip`; its
+  `MailboxHook` drives MEIP from the host.
+- Host-side edits of `state.mie` and `state.mip` are not masked, so guest reads of both CSRs, the
+  wake condition and the delivery check all mask with the implemented bits. A reserved bit a host
+  sets reads as 0 and neither wakes nor delivers.
 
 ## Compare semantics
 
@@ -193,24 +195,35 @@ locally enabled, implemented interrupt:** `mip & mie & (MSIP | MTIP | MEIP)` is 
 
 ## Gating timer delivery
 
-Packet 001's AP device mask must hold back delivery while keeping the request pending. As V-32
-pointed out, `mie.MTIE` belongs to the firmware: a `csrw mie` can restore it and take the
-interrupt in the same attempt, before a callback can reapply a host mask. So:
+Packet 001's AP device mask must hold back delivery while keeping the request pending. `mie.MTIE`
+belongs to the firmware: a `csrw mie` can restore it and take the interrupt in the same attempt,
+before a callback can reapply a host mask. V-32 therefore chose to mask in its interval-device
+adapter, through the compare; the core adds no gating facility.
 
-- **Recommended: mask at the device, through the compare.** While V-32's timer device is masked,
-  it presents `TIMER_COMPARE_NEVER` to the core and keeps the real deadline, pending expiration
-  and cadence in its own state. On unmask it writes the real compare back, and a due deadline
-  raises MTIP at the next attempt. This matches hardware, where a masked timer device does not
-  assert MTIP. The firmware cannot undo it, standard WFI does not wake on it, and the core needs
-  no new facility.
-- **A host-owned `mie.MTIE`** works only with a trusted firmware convention that reserves the bit
-  to the host.
-- **Clearing MTIP in `beforeAttempt` does not work:** the attempt's recomputation restores it.
-- **`mstatus.MIE` does not work:** it does not gate machine interrupts while the hart runs in
-  U-mode.
+**The mechanism.** This is V-32's adapter, not a standard RISC-V timer mask. The core keeps
+comparing time against its `mtimecmp`, which here is the *effective* delivery deadline:
+- **While masked,** the effective compare is `TIMER_COMPARE_NEVER`, a distant deadline rather than
+  an absolute disable. The device keeps its own *retained* deadline, pending expiration and cadence.
+- **The AP-readable pending bit follows the retained deadline,** not the core's MTIP, which stays
+  clear while masked.
+- **Masking neither acknowledges an expiration nor advances its cadence.** Only rearming or
+  cancellation clears the device's pending state.
+- **Unmasking writes the retained deadline back as the effective compare.**
 
-The choice is V-32's integration decision (Question 1). The core adds no gating facility unless
-that decision asks for one.
+**Unmasking needs a fresh sample.** Restoring the compare does not by itself deliver an
+expiration that is already due, because the call still uses its entry sample. Example: the call
+samples 100 µs, the retained deadline is 110 µs, and an MMIO store unmasks at a real time of
+120 µs. The next attempt still compares 100 against 110. To serve a pending expiration at the next
+boundary, as Packet 001 requires, V-32 ends the call after the unmasking store (a controller stop
+from `afterAttempt`) and starts another before the next instruction. It keeps its own reason for
+that stop, so the scheduling return is not mistaken for a terminal halt with reservation cleanup.
+The core adds no per-attempt sampling and no API for this.
+
+**Mechanisms that do not work:**
+- **A host-owned `mie.MTIE`** works only under a trusted firmware convention reserving the bit to
+  the host.
+- **Clearing MTIP in `beforeAttempt`:** the attempt's recomputation restores it.
+- **`mstatus.MIE`:** it does not gate machine interrupts while the hart runs in U-mode.
 
 ## Counters (Zicntr)
 
@@ -297,9 +310,12 @@ The core owns no epoch, reset policy or device. In V-32's terms:
   source must not decrease within a call.
 - **AP RESET** cancels the AP timer: the compare becomes `TIMER_COMPARE_NEVER`. Shared time
   continues.
-- **HALT, RESUME, WFI and successful LAUNCH** leave the compare alone, so an IOP-configured request
-  and its cadence survive. Today's LAUNCH reset of the timer and compare is V-32 code; the timer
-  reset goes away with `setTimer`, and the compare must be left alone.
+- **HALT, RESUME and WFI** keep the device's request, cadence and mask state, and so the effective
+  compare.
+- **Successful LAUNCH** keeps the device's retained request, deadline and cadence but sets the AP
+  delivery mask, so the effective compare becomes `TIMER_COMPARE_NEVER`. Today's LAUNCH reset of
+  the timer and compare is V-32 code that this replaces; the timer reset goes away with
+  `setTimer`.
 - **Who writes the compare:**
   - The compare is hart-owner state.
   - A cross-thread change, such as the IOP programming the AP's interval, is published by the
@@ -307,8 +323,11 @@ The core owns no epoch, reset policy or device. In V-32's terms:
     wake it; publishing alone can strand an earlier deadline.
   - While a hart is halted it makes no calls, so its visible device state has to live outside the
     core and be reconciled before RESUME or LAUNCH.
-  - An AP MMIO acknowledgement runs on the AP thread inside the store, and can write the compare
-    directly. The next MTIP recomputation sees it, including the one at MRET.
+  - An AP MMIO acknowledgement runs on the AP thread inside the store. Unmasked, it writes the new
+    effective compare directly, and the next MTIP recomputation sees it, including the one at
+    MRET. Masked, it updates only the retained deadline, and the effective compare stays masked.
+  - Mask, acknowledgement and queued-command changes follow one device ownership and generation
+    protocol (V-32's).
 - **IOP dual timers:** the interval device drives MEIP through the embedder's aggregation, and
   the register compare drives MTIP. The core recomputes only MTIP, so neither clears the other.
 - **V-32's own races:** device generation and ownership for AP acknowledgements and IOP commands,
@@ -342,11 +361,19 @@ The core owns no epoch, reset policy or device. In V-32's terms:
     with and without a controller, across `time` reads, delegated steps and the `FENCE.I` resume;
   - a `time` read that makes a timer interrupt deliverable, taken in the same attempt;
   - compare zero, `TIMER_COMPARE_NEVER` and equality at all ones, the threshold and re-arming;
-  - WFI with MSIP, MTIP and MEIP separately: executed with the interrupt already pending and
-    enabled (retires without sleeping), and a stall ended by it, in M-mode with `mstatus.MIE` set
-    (delivered) and clear (continues after WFI) and in U-mode (delivered); a masked, due compare
-    that does not wake; and a reserved `mie`/`mip` bit that neither wakes nor delivers;
-  - guest writes to `mie` and `mip`, which keep only the implemented, writable bits;
+  - WFI with MSIP, MTIP and MEIP separately, remembering that an interrupt already deliverable at
+    call entry is taken before WFI executes:
+    - WFI retiring without sleeping, with the source pending and locally enabled: M-mode with
+      `mstatus.MIE` clear;
+    - an already-deliverable source in U-mode, or in M-mode with `mstatus.MIE` set: an entry trap,
+      not WFI;
+    - a stall ended by a source injected after WFI stalled: in M-mode with `mstatus.MIE` set
+      (delivered) and clear (continues after WFI), and in U-mode (delivered);
+    - a masked, due compare that does not wake;
+  - guest writes to `mie` and `mip`, which keep only the implemented, writable bits; and a reserved
+    bit set by the host, which reads back as 0 and neither wakes nor delivers;
+  - a delegated `time` read that crosses a deadline, followed by a compare edit, on both sides of a
+    `FENCE.I` resume: every later attempt uses the read's sample, not an older one;
   - a compare changed in a callback and via MMIO before MRET, with no stale re-entry;
   - a hook-stored `mcountinhibit` that inhibits nothing.
 - **Existing tests** that depend on `elapsedUs`, zero-disables compare, WFI setting MIE or the
@@ -357,15 +384,14 @@ The core owns no epoch, reset policy or device. In V-32's terms:
   as a tradeoff decision; it is not a reason to keep a known shortcut. This version becomes the
   baseline for the execution API's attempt-fusion cost.
 
-V-32's device and integration tests (interval MMIO, masking, LAUNCH and reset races) stay in its
-repository.
+V-32's device and integration tests stay in its repository: interval MMIO, masked pending reads,
+an acknowledgement while masked, LAUNCH with an overdue retained request, the advancing-clock
+unmask example above, and reset races.
 
-## Questions for V-32 (revision 5)
+## Status
 
-1. **Delivery gating.** Does masking at the device, by presenting `TIMER_COMPARE_NEVER` while
-   masked, suit Packet 001's AP mask? If not, which ownership model should the core support?
-2. **`mip` writes.** Does any V-32 firmware write `mip` (for example `csrc mip` to clear MEIP)?
-   Under this design such a write changes nothing, and the device clears the line instead.
+V-32's review of revision 5 answered both remaining questions and asked for no further design
+change. Revision 6 records its integration details. The design waits for Nate's go.
 
 ## V-32 review: answers and remaining design corrections
 
@@ -682,3 +708,18 @@ Add V-32 integration cases for masked pending reads, ACK while masked,
 LAUNCH with an overdue retained request, and the advancing-clock unmask
 example. Core tests cover CSR readback and WFI ordering. These are validation
 requirements for implementation, not tests run by this review.
+
+## CPU-agent revision 6: what changed
+
+2026-10-12. The design above now records V-32's review of revision 5:
+
+- **Answers recorded:** V-32 masks at its interval device through the compare, and no V-32 code
+  writes `mip`.
+- **Correction:** revision 5 said that restoring the compare on unmask raises MTIP at the next
+  attempt. With a stale sample it does not; V-32 ends the call after the unmasking store.
+- **Masking described accurately:** effective versus retained deadlines, the AP-readable pending
+  bit following the retained deadline, and masking that neither acknowledges nor advances cadence.
+- **Lifecycle:** successful LAUNCH masks AP delivery, so the effective compare becomes
+  `TIMER_COMPARE_NEVER`; a masked acknowledgement updates only the retained deadline.
+- **Core:** guest reads of `mie` and `mip` are masked too. The WFI tests account for entry traps
+  preceding WFI. A test covers a delegated `time` read's sample surviving the `FENCE.I` resume.

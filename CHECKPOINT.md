@@ -24,25 +24,23 @@
 
 ## Resume / pending
 
-1. **Execution API and timer/counter designs: both at revision 5, awaiting V-32's review.**
+1. **Execution API and timer/counter designs: both at revision 6, settled with V-32; awaiting
+   Nate's go to implement.**
    - **Direction (Nate, 2026-10-12):** design only for V-32's needs and, where cheap, the RISC-V
      spec. No legacy mode; old shortcuts are dropped. Bench regressions go to Nate as tradeoffs.
-     V-32 has Nate's direction verbatim and accepts temporary breakage during migration.
    - [TIMER_COUNTER_DESIGN.md](docs/TIMER_COUNTER_DESIGN.md) lands first: one shared time source
-     replaces `elapsedUs`; standard compare and WFI; WARL `mie`/`mip`; Zicntr always on; read-only
-     CSR numbers trap on write; work counts separate from guest-writable counters;
-     `step(count <= 0)` rejected. Two questions (device-level timer mask, firmware `mip` writes).
+     replaces `elapsedUs`; standard compare and WFI; WARL `mie`/`mip` (reads masked too); Zicntr
+     always on; read-only CSR numbers trap on write; work counts separate from guest-writable
+     counters; `step(count <= 0)` rejected. V-32 masks its timer device through the compare.
    - [EXECUTION_API_DESIGN.md](docs/EXECUTION_API_DESIGN.md) builds on it: one sample per call on
      every path via an internal single-attempt entry; no hook overload; timer version as the
-     fusion baseline. One question (uncached sampling).
-   - Nate relays both to Codex. V-32's reply is design only; it does not authorize
-     implementation.
-   - **After V-32 answers:** settle each design and get Nate's go. Then:
-     - Execution API: implement on a branch, port the oracle with V-32's frozen legacy
-       interpreter as the independent reference, run bench `--attempts`, and cut
-       `0.1.9-attempts-SNAPSHOT` for V-32 to time with its real callbacks.
-     - Timer/counters: implement behind source mode and an `IsaConfig` Zicntr flag, with
-       legacy mode unchanged.
+     fusion baseline.
+   - **After Nate's go, in order:**
+     1. Timer/counters on a branch: build the reference (frozen interpreter copy with the
+        design's changes), migrate existing tests and the CLI, bench against `0.1.8`.
+     2. Execution API on that base: port the oracle with updated expectations, run bench
+        `--attempts` against the timer version, then a trial snapshot for V-32 only with
+        separate authorization.
    - **Native Image rule:** keep inner loops (array fills, flushes) out of interpreter loops;
      they stop loop unswitching. Verify with a symbolized build, as in
      [the cache evidence](docs/performance/2026-10-10/decoded-cache/README.md).

@@ -1,7 +1,7 @@
 # Batched execution with committed attempt boundaries: design
 
-Date: 2026-10-12. From the CPU agent. **Revision 5**, after V-32's review of revision 4 (kept
-below with its earlier reviews). Since revision 4 there is no legacy contract, on Nate's direction:
+Date: 2026-10-12. From the CPU agent. **Revision 6**, after V-32's review of revision 5 (kept
+below with its earlier reviews), which requested no further change. Since revision 4 there is no legacy contract, on Nate's direction:
 the core follows what V-32 needs and, where that stays cheap to maintain, the RISC-V
 specification. V-32's oracle is evidence with documented intentional differences, not an API
 constraint. Nothing here is implemented, and implementation waits for Nate's go. The changes in
@@ -14,7 +14,7 @@ each revision are listed at the end.
   [V32_AP_STEPPING_RESPONSE.md](V32_AP_STEPPING_RESPONSE.md).
 - V-32's committed-attempt oracle, in its repository at
   `docs/performance-evidence/2026-10-09/ap-boundary-api/`.
-- V-32's response to the first draft and its reviews of revisions 2 and 4, below.
+- V-32's response to the first draft and its reviews of revisions 2, 4 and 5, below.
 
 The timer and counter extension V-32 requested in the same response is designed separately in
 [TIMER_COUNTER_DESIGN.md](TIMER_COUNTER_DESIGN.md). **It lands first:** it removes `elapsedUs`,
@@ -132,7 +132,9 @@ and the timer design's time, WFI and counter rules. Each item names the requirem
   survive the fast handlers, delegation, WFI's early return and the `FENCE.I` flush-and-resume.
 - **One sample per call** on every path: the cached loop, the uncached single-attempt entry,
   delegation and the `FENCE.I` resume take none of their own. A `time` read refreshes it, and the
-  read's result, retirement and interrupt state are published before `afterAttempt`. See
+  read's result, retirement and interrupt state are published before `afterAttempt`. A `time`
+  read in a delegated step replaces the retained sample for every later attempt in the call,
+  including after a `FENCE.I` resume; no path restores an older sample. See
   [TIMER_COUNTER_DESIGN.md](TIMER_COUNTER_DESIGN.md#time-sampling).
 
 ## Implementation
@@ -188,6 +190,9 @@ unchanged. There is no speedup here, only correct per-call sampling.
   with the reference and checks sample counts, MTIP and what callbacks observe across the cached
   and uncached paths, null and non-null controllers, `time` reads, delegation and `FENCE.I`. A
   fixed clock would hide extra samples.
+- **A retained sample that survives a resume.** A delegated `time` read crosses a deadline, then
+  the compare is edited, across a `FENCE.I` resume. Checking MTIP, not just sample counts, catches
+  a driver that restores an older sample.
 - **What is compared:** every committed boundary (registers, pc, CSRs, privilege, counters),
   memory and device effects, and both reservation layers (the hart's own and the bus's), not
   just final registers and return values.
@@ -246,10 +251,16 @@ controller stop back to the AP's existing return behavior; `coreResult` does not
 Terminal COMMIT stops after its store and pc are published; a concurrent IOP HALT still waits for
 the outer monitor. This design grants no new lock layout and no one-instruction HALT latency.
 
-## Questions for V-32 (revision 5)
+When unmasking its timer device needs a fresh time sample before the next instruction (see the
+timer design's [gating section](TIMER_COUNTER_DESIGN.md#gating-timer-delivery)), V-32 stops the
+call from `afterAttempt` and starts another. It keeps its own reason for that stop, so the
+scheduling return is not treated as a terminal halt with reservation cleanup. No result field or
+stop reason is added.
 
-1. **Uncached sampling.** Do the internal single-attempt entry and the reference's call-level
-   sample lifetime settle the sampling correction? All of revision 4's questions are answered.
+## Status
+
+V-32's review of revision 5 settled the sampling correction and requested no further change.
+Revision 6 records its two implementation details. The design waits for Nate's go.
 
 **Out of scope:**
 - the scheduler, pacing, lock layout and batch size, which are V-32's;
@@ -678,3 +689,10 @@ Carry two details into implementation and integration:
 
 Documentation/source review only. No runtime tests, benchmarks, GUI checks or
 next-task implementation were performed.
+
+## CPU-agent revision 6: what changed
+
+2026-10-12. V-32's review of revision 5 requested no design change. This revision records its two
+details: a delegated `time` read's sample is kept by every later attempt, including across a
+`FENCE.I` resume, with a test that checks MTIP and not only sample counts; and V-32's use of a
+controller stop to get a fresh sample after unmasking, kept distinct from a terminal halt.

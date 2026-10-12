@@ -3,7 +3,8 @@
 ## Current state
 
 - **`main` is on `0.1.9-SNAPSHOT`.** Since the local `v0.1.8` release (installed in `~/.m2`, not
-  published) its only code change is T1's hook fix; the rest is design documentation.
+  published) its only code change is T1's hook fix; the rest is design documentation. The
+  branch's T3 API break is not yet installed to `~/.m2` (the phase bump at T7 does that).
 - **Next work is approved:** implement the settled timer/counter design, then the execution API
   design, following [the implementation plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md).
   Both designs are at revision 6 and confirmed by V-32.
@@ -12,19 +13,20 @@
 
 ## Resume here
 
-**Step T3 of [the plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md): the shared time source
-and standard compare**, on `feature/timer-counters` (pushed). Not started. Apply each behavior
-change to `ReferenceCore` in the same commit and list it in its class Javadoc. The core and
-reference agree at `08d26db`. Directed differential cases live in `ReferenceDifferentialTest`;
-it compares state after each call, hook-time state and an ordered bus/CSR-hook log.
+**Step T4 of [the plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md): standard WFI and WARL
+`mie`/`mip`**, on `feature/timer-counters` (pushed). Not started. Apply each behavior change to
+`ReferenceCore` in the same commit and list it under "Changes from the baseline" in its class
+Javadoc. T4 removes the entry-time WFI wake on a due compare that T3 kept (`step()`'s
+`updateTimerPending` result) and the class Javadoc's remaining WFI deviation. New timer tests
+live in `TimerTest`; directed differential cases in `ReferenceDifferentialTest`.
 
-T1 (hook jump-PC fix, MRET included) is on `main` at `3f4fdda`. T2 (the reference core and
-differential) is on the branch at `08d26db`. Update the plan's status table and this section as
-steps land.
+Landed: T1 (hook jump-PC fix) on `main` at `3f4fdda`; T2 (reference core and differential) at
+`08d26db` and T3 (shared time source, standard compare, `count < 1` rejected, stale-MTIP fix) at
+`fdd68f0`, both on the branch. Update the plan's status table and this section as steps land.
 
-**Validation status:** `feature/timer-counters` at `08d26db` passed `./mvnw clean verify` (607
+**Validation status:** `feature/timer-counters` at `fdd68f0` passed `./mvnw clean verify` (620
 core tests in each of three cache configurations, plus CLI and bench). No bench run yet; T7's
-full matrix covers T1 and later steps. The `v0.1.8` tag passed `release:perform` (570 core
+full matrix covers T1 and later steps (T3 adds one source read and compare per `step` call). The `v0.1.8` tag passed `release:perform` (570 core
 tests in each of three cache configurations, plus CLI and bench) and `release.sh`.
 
 ## Rules for this work

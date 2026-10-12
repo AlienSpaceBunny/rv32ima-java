@@ -16,7 +16,7 @@ commit in the status table, as in [FEATURE_REQUEST_PLAN.md](FEATURE_REQUEST_PLAN
 | --- | --- | --- | --- |
 | T1 | `PostExecHook` jump-PC fix (MRET included) | Done, on `main` | `3f4fdda` |
 | T2 | Independent reference core and differential harness | Done, on `feature/timer-counters` | `08d26db` |
-| T3 | Shared time source, standard compare, `elapsedUs` removal | Not started | |
+| T3 | Shared time source, standard compare, `elapsedUs` removal | Done, on `feature/timer-counters` | `fdd68f0` |
 | T4 | Standard WFI, WARL `mie`/`mip` | Not started | |
 | T5 | Read-only CSR write traps | Not started | |
 | T6 | Zicntr counters and `time` reads | Not started | |

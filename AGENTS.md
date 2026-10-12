@@ -61,7 +61,11 @@ report that instead.
 - **Standing instruction:** fix outdated documentation (active docs, Javadoc,
   `AGENTS.md` itself) as you encounter it, without asking first, and mention the
   fix in your report. Commit it separately from unrelated code changes. Leave
-  `docs/archive/` and received exchange sections as historical records.
+  `docs/archive/` alone as a historical record.
+- **Exchange documents:** while an exchange is ongoing, never rewrite sections
+  another party wrote. Once it completes, archive the version containing them in
+  `docs/archive/` and trim the working document to its current content, linking
+  the archived copy.
 
 ## Tools and file access
 

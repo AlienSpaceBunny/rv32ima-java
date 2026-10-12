@@ -22,9 +22,22 @@
 closed, A3's results, and the test guests and code V-32 may borrow. Nothing is requested of
 V-32; archive the handoff once relayed.
 
-**Next work needs Nate's pick.** Candidates from [docs/BACKLOG.md](docs/BACKLOG.md): the
-remaining-old-shortcuts audit (scheduled for after phase A), or the API-freeze review toward
-`0.2.0` ([RELEASE_TODO.md](RELEASE_TODO.md)).
+**Next (Nate, 2026-10-12): two audits, then a proposal to Nate before any implementation.**
+
+1. **Remaining old shortcuts.** The items in [docs/BACKLOG.md](docs/BACKLOG.md#deferred): the
+   non-standard `misa` bit 22 with `hasU = false` and its compatibility constructors, `mvendorid`
+   `0xff0ff0ff`, and CSRs (`mstatus` and others) that accept any value instead of their WARL
+   fields, such as MRET into an unmodeled privilege. Find any others in the code too. Check each
+   for a V-32 dependency (`../emulator`) first. Under the no-legacy direction, propose fixing,
+   not preserving.
+2. **Extensions discussed but deferred.** Read the active docs, `docs/archive/` and the V-32
+   exchanges (including V-32's `docs/`) for extensions or features that were raised as possible
+   work and then deferred. List each with where it came up, why it was deferred, and whether
+   V-32 needs it. **D and RV64 stay deferred** ([RV64 notes](docs/RV64_FEASIBILITY_NOTES.md)); do
+   not reopen them.
+
+Report both as one short findings document for Nate to pick from. The API-freeze review toward
+`0.2.0` ([RELEASE_TODO.md](RELEASE_TODO.md)) follows.
 
 **Validation status:** the `0.1.11-SNAPSHOT` tree passed `./release.sh` (`./mvnw clean verify`:
 801 core tests in each of three cache configurations, CLI, bench; then a fresh baremetal build

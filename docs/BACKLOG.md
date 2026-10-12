@@ -31,7 +31,9 @@ Remove an item when it is done, and note where its result went.
     effect, seen in T2's differential: MRET with `mstatus.MPP` = 1 or 2 runs the hart at that
     unmodeled privilege instead of a legal one.
 
-  Check each for a V-32 dependency first. Start after the execution API phase.
+  Check each for a V-32 dependency first. **Next work** (see [CHECKPOINT.md](../CHECKPOINT.md)).
 - **D extension:** only the `misa` flag exists; no decode.
+- **RV64:** speculative only ([RV64_FEASIBILITY_NOTES.md](RV64_FEASIBILITY_NOTES.md)); stays
+  deferred with D (Nate, 2026-10-12).
 - **Linux compatibility (after the V-32 project):** reassess whether to support booting a Linux
   image, as upstream mini-rv32ima does. This repository has never had one (Nate, 2026-10-12).

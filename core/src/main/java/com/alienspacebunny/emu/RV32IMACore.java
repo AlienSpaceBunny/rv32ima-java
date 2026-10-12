@@ -11,11 +11,9 @@ import java.util.Objects;
  * RV32A atomic extension (LR/SC and ten AMO operations), and machine-mode CSR instructions
  * (Zicsr). The {@link #RV32IMACore(MachineTimeSource)} constructor configures exactly this base
  * ISA; the {@link #RV32IMACore(IsaConfig, DecodedCacheConfig, MachineTimeSource)} constructor
- * accepts an {@link IsaConfig} for the additional optional extensions being layered on for the
- * V-32 AP/IOP multi-hart feature work. As of the Phase 3 work,
- * {@code Zba}, {@code Zbb}, and {@code Zabha} (byte/halfword AMOs) are decoded when enabled; {@code
- * C} and {@code F} are not decoded yet and only affect the {@code misa} CSR value the guest reads
- * back.
+ * accepts an {@link IsaConfig} for the optional extensions: {@code C}, {@code F}, {@code Zba},
+ * {@code Zbb} and {@code Zabha} (byte/halfword AMOs) are decoded when enabled, and {@code D} only
+ * sets its {@code misa} bit. The built-in counters (Zicntr) are always present.
  *
  * <p><b>Time.</b> Every core is built with a {@link MachineTimeSource}, shared by all harts on
  * the machine. The core samples it once per {@link #step} call and on every legal {@code time} or
@@ -49,8 +47,8 @@ import java.util.Objects;
  * zero. {@link RV32IMAState#TIMER_COMPARE_NEVER} is a practically distant deadline. {@code MTIP}
  * is recomputed at each sample and, from the latest sample, whenever a {@code mstatus}, {@code
  * mie} or {@code mip} write or an {@code MRET} reevaluates interrupts, so a compare the guest
- * moved through MMIO before {@code MRET} is seen there. {@code MSIP} (software) and {@code MEIP} (external) are pending/enable bits an
- * embedder sets directly on {@code mip}/{@code mie}, typically via {@link #injectInterrupt}. All
+ * moved through MMIO before {@code MRET} is seen there. {@code MSIP} (software) and {@code MEIP}
+ * (external) are pending/enable bits an embedder sets directly on {@code mip}/{@code mie}, typically via {@link #injectInterrupt}. All
  * three are gated identically: individually enabled in {@code mie}, and either the hart is
  * running in user mode or {@code mstatus.MIE} is set (machine-mode interrupts are not maskable by
  * {@code mstatus.MIE} while executing below machine mode). When more than one is simultaneously
@@ -1554,8 +1552,9 @@ public class RV32IMACore {
      * mtvec}. Fewer than {@code count} instructions may be executed when a trap fires.
      *
      * <p><b>Instruction fetch.</b> Instructions are fetched from the window defined by {@code
-     * ramOffset} and {@code ramSize}; a PC outside that range, or not 4-byte aligned, causes an
-     * instruction access-fault or misaligned-fetch trap without calling {@code mem}. Within that
+     * ramOffset} and {@code ramSize}; a PC outside that range, or not 4-byte aligned (2-byte with
+     * {@link IsaConfig#hasC}), causes an instruction access-fault or misaligned-fetch trap without
+     * calling {@code mem}. Within that
      * window, an {@link IndexOutOfBoundsException} thrown by {@code mem} itself (for example, a
      * bus enforcing finer-grained access control than the coarse window) is likewise converted
      * into an instruction access-fault trap, with {@code mtval} set to the faulting PC. Data

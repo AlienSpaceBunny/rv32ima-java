@@ -87,8 +87,9 @@ change.
   throw `IndexOutOfBoundsException`, which the core converts into guest load or
   store access-fault traps.
 - Return value `0` means normal execution or trap handling completed.
-- Return value `1` means the CPU is waiting for interrupt and no instruction was
-  executed.
+- Return value `1` means the hart is stalled in `WFI`: either it was already
+  stalled at entry and executed nothing, or the call executed a `WFI` that
+  stalled (see "Time, timer and WFI" below).
 - `postExec`, when provided, is called once per instruction cycle: after a
   non-trapping instruction commits its result but before the PC advances (by 2
   or 4 bytes, depending on whether the instruction was compressed), or before a
@@ -409,8 +410,10 @@ RAM, VRAM, and hooks. Keep `MMIOBus` for simple range-routed devices.
 
 `RV32IMAState` is mutable execution state.
 
-- Integer registers, PC, key machine CSRs, cycle counter, and timer registers
-  are public fields for simple embedding and checkpointing.
+- Integer registers, PC, key machine CSRs, the cycle counter, the latest time
+  sample and the timer compare are public fields for simple embedding and
+  checkpointing. The retired count and the `mcycle`/`minstret` offsets are
+  reached only through accessors.
 - `hartId` identifies this hart among others sharing a `MemoryBus`. Defaults to
   `0`. The core reads it for access metadata and bus-side SC coordination, and
   does not modify it. Embedders with more than one concurrently participating

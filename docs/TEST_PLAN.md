@@ -1,6 +1,7 @@
 # Test Coverage and Remaining Candidates
 
-Reviewed against the test sources on **2026-10-07**. The original instruction
+Reviewed against the test sources on **2026-10-07**; the timer and counter suites were added
+on 2026-10-12. The original instruction
 expansion (Layer 1) and compliance-style vector suite (Layer 2) are complete.
 Later ISA and integration fixes added substantial coverage beyond that plan.
 The [original plan](archive/TEST_PLAN_PRE_CLEANUP_2026-10-07.md) is archived.
@@ -13,6 +14,11 @@ Core tests live in
 | Suite | Coverage |
 |---|---|
 | `CoreTest` | Integer execution, CSR access and privilege checks, trap state, timer boundaries, interrupt priority, WFI wakeups, LR/SC, invalid encodings, and in-batch interrupt reevaluation. |
+| `TimerTest` | Time sampling per call, the unsigned compare, MTIP reevaluation, WFI stalls and wakes per source, implemented `mie`/`mip` bits, and `count` validation. |
+| `CounterTest` / `CsrTest` | Zicntr reads, writes, rollover and `mcounteren` gating, `time` reads crossing a deadline; read-only CSR write traps and hook read/write suppression. |
+| `PostExecHookTest` | The hook's PC for taken and untaken jumps, branches and `MRET`, compressed forms included. |
+| `ReferenceDifferentialTest` | Seeded and directed lockstep comparison against `ReferenceCore`, an independent copy of the pre-optimization core with its intentional differences listed. |
+| `DecodedCacheTest` | Cached/uncached lockstep differential and a stale-entry case per flush rule. The whole core suite also runs cached at 4 and 4096 slots (`TestCores`). |
 | `RV32IComplianceTest` | Parameterized integer and multiplication/division vectors, plus Zba and Zbb instruction tests. |
 | `CompressedInstructionTest` | Compressed/32-bit differential execution, mixed streams, extension gating, alignment, and fetch-window edges; includes compressed F loads/stores. |
 | `FExtensionTest` / `FExtensionRoundingTest` | FP register/CSR behavior, special values, rounding modes and flags; independent arithmetic differential checks. |
@@ -35,7 +41,7 @@ Related tests do not necessarily exercise the complete proposed guest flow.
 | Proposed scenario | Current coverage | Remaining value |
 |---|---|---|
 | Timer interrupt → handler → MRET | Entry and MRET have separate state tests; pending interrupts after MRET are covered. | One complete guest round trip that acknowledges/rearms the timer and resumes without immediate retrapping. |
-| WFI → elapsed-time timer wake | Timer wake is tested from a manually stalled state; other tests execute WFI with pending interrupts. | Execute WFI, observe a stalled call, advance `elapsedUs` across the match, and verify wake/trap state. |
+| WFI → timer wake | Covered: `TimerTest.stallEndsWhenAnEnabledSourceArrives` executes WFI, observes a stalled call, raises each source (MTIP by advancing time) and checks the wake or trap state. | None. |
 | User-mode ECALL | Machine-mode ECALL and U-mode CSR/MRET restrictions are tested. | A direct U-mode ECALL test asserting cause 8, saved PC/status and entry into M-mode. |
 | CLINT register access | Baremetal smoke tests include CLINT; no dedicated register assertions. | Verify the supported low/high timer-word reads and compare-word writes through `MMIOBus`. |
 | PC outside the fetch window | Bus-rejected fetches and a compressed word overrun are covered. | Direct precheck tests below the window and at its end, including proof that no bus access or post-exec callback occurs. |
@@ -47,8 +53,8 @@ These concern existing behavior and need no additional ISA work. They are
 proposals, not scheduled implementation:
 
 1. **User-mode ECALL** — small, directly relevant to the public privilege contract.
-2. **WFI with elapsed-time timer wake** and **timer-handler/MRET round trip** —
-   exercise transitions currently tested mostly in isolation.
+2. **Timer-handler/MRET round trip** — exercises transitions currently tested
+   mostly in isolation.
 3. **CLINT register contract** — put this in `cli`, where `CLINTHook` lives, so
    `core` remains independent of the runner. The current hook recognizes exact
    word-register addresses; the old plan's blanket promise of byte-accurate

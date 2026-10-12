@@ -15,10 +15,12 @@ package com.alienspacebunny.emu;
  *       #reservationValid}, {@link #fregs}, {@link #fcsr}, {@link #mcounteren}.
  *   <li><em>CLINT layout fields</em> — {@link #cyclel}, {@link #cycleh}, {@link #timerl}, {@link
  *       #timerh}, {@link #timermatchl}, {@link #timermatchh}. These are the raw 32-bit halves of
- *       the 64-bit cycle counter, machine timer ({@code mtime}), and timer-compare value ({@code
+ *       the 64-bit cycle counter, the latest time sample, and the timer-compare value ({@code
  *       mtimecmp}). They are public so that a CLINT MMIO hook can implement byte-accurate register
- *       access. Prefer the accessor methods ({@link #getCycle()}, {@link #getTimer()}, {@link
- *       #getTimerMatch()}, and the setters) for all other use.
+ *       access. The time halves are not a writable {@code mtime}: the core overwrites them at
+ *       every sample, and the time itself comes from the core's {@link MachineTimeSource}. Prefer
+ *       the accessor methods ({@link #getCycle()}, {@link #getTimer()}, {@link #getTimerMatch()},
+ *       and the setters) for all other use.
  * </ul>
  */
 public class RV32IMAState {
@@ -42,12 +44,10 @@ public class RV32IMAState {
     /**
      * Identifies this hart among others sharing a {@link MemoryBus}. Defaults to {@code 0}.
      *
-     * <p>{@link RV32IMACore} does not read or write this field itself as of the Phase 1
-     * foundation work — it exists so an embedder can assign a stable identity per hart before
-     * first use. A multi-hart-aware {@code MemoryBus} implementation is expected to key
-     * per-hart state (for example, LR/SC reservation ownership) by this value once bus access
-     * metadata is threaded through (see {@code docs/FEATURE_REQUEST_PLAN.md} §2–§3). Embedders
-     * with more than one concurrently participating hart must assign distinct, stable IDs.
+     * <p>{@link RV32IMACore} reads it for each access's {@link AccessContext} and for {@link
+     * MemoryBus#tryScAndStore}, and never writes it. A multi-hart-aware {@code MemoryBus} keys
+     * per-hart state, such as LR/SC reservation ownership, by this value. Embedders with more than
+     * one concurrently participating hart must assign distinct, stable IDs.
      */
     public int hartId;
 

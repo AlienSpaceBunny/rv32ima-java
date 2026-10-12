@@ -24,10 +24,9 @@ differential) at `08d26db`, T3 (shared time source, standard compare) at `fdd68f
 (standard WFI, implemented-only `mie`/`mip`, `injectInterrupt` no longer clears the stall flag)
 at `525c925`. Update the plan's status table and this section as steps land.
 
-**Open question for Nate (from T4, not blocking):** a `WFI` that stalls still returns before
-calling `PostExecHook`, while one that finds the wake condition true now retires through the
-normal path and reports to the hook. Unchanged from before T4 for the stall path; settle it with
-the execution API's hook rules (A1) or earlier if V-32 needs it.
+T4's WFI/`PostExecHook` question is settled for A1 (V-32's recommendation, in the plan's A1
+step). V-32's [packets 001–003 review](docs/V32_PACKET_REVIEW_2026-10-12.md) needs nothing from
+the core; its core-side notes are appended.
 
 **Validation status:** `feature/timer-counters` at `525c925` passed `./mvnw clean verify` (642
 core tests in each of three cache configurations, plus CLI and bench) and `./release.sh`. No

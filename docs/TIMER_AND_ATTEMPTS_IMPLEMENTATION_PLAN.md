@@ -178,6 +178,13 @@ Starts from `main` after T7.
   V-32's oracle.
 - **Reference:** an attempt driver over the reference core with its own call-level sample
   lifetime.
+- **`PostExecHook` and WFI** (V-32's recommendation, 2026-10-12; Nate had no objection): an
+  executed WFI retires, so it calls the hook once whether it stalls or continues. Today a
+  stalling WFI returns without the call; T4 made a continuing one call it. A check of an existing
+  stall executes no instruction and does not call the hook. `AttemptController.afterAttempt`
+  stays independent and covers stalled attempts too. Document the change in the `PostExecHook`
+  Javadoc, `docs/API.md` and the CHANGELOG, and test it uncached and cached. V-32 does not depend
+  on it: the AP supplies no hook, and the IOP refreshes mailbox interrupts before every call.
 - **Tests:** V-32's oracle ported from its evidence (`candidate/AttemptBoundaryTest.java`): 36
   cases and 330 budget comparisons, with changed expectations listed. The oracle's hook
   observations move to `step()`'s hook tests. Add the design's new cases, including callback

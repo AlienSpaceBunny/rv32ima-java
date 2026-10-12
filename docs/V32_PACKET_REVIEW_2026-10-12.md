@@ -168,3 +168,23 @@ Resume **002/D1**, one question at a time, using this review as context. Revisit
 001 only if a clarification above requires an author policy answer. Resolve
 002/003 before scoping their runtime integration; do not restart CPU performance
 screens or treat confirmed CPU designs as adoption authorization.
+
+## Core-side notes (2026-10-12)
+
+Checked against the CPU repository's designs and branch; no conflict found. Nothing here needs
+a policy answer.
+
+- **Status has moved on.** Nate approved implementation the same day. On
+  `feature/timer-counters` (not merged, released or installed), T1–T4 have landed: shared time
+  source, standard compare, standard WFI and implemented-only `mie`/`mip`. Counters are T6.
+- **One T4 detail for V-32's migration:** `injectInterrupt` no longer clears the WFI stall flag
+  (`extraflags` bit 2). A stalled hart wakes at its next `step` entry if the source is enabled in
+  `mie`, so tests that inject and then read the flag before stepping see it still set.
+- **R1, core facts only:** `mcounteren` starts at 0 in a new `RV32IMAState` and is a public
+  field, so the host can grant counters at LAUNCH without a guest machine-CSR write, as it already
+  sets `mie`. Work counts (`setCycle`, `setInstret`) and architectural offsets (`setMcycle`,
+  `setMinstret`) have separate setters; which ones LAUNCH or reset touches is V-32's choice. Time
+  has no per-hart state to reset.
+- **PostExecHook and WFI (V-32's recommendation, adopted for A1):** an executed WFI calls the
+  hook once whether it stalls or continues; an existing-stall check executes nothing and does not
+  call it. `afterAttempt` stays independent. Recorded in the CPU implementation plan's A1 step.

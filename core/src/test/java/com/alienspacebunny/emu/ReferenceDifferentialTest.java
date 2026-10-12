@@ -797,7 +797,7 @@ public class ReferenceDifferentialTest {
     }
 
     @ParameterizedTest(name = "{0}")
-    @CsvSource({"lrsc", "userMode", "interrupts", "wfi", "faults", "csrHook"})
+    @CsvSource({"lrsc", "userMode", "interrupts", "wfi", "faults", "csrHook", "readOnlyCsr"})
     public void directedProgramsMatchReference(String name) {
         switch (name) {
             case "lrsc" ->
@@ -948,6 +948,24 @@ public class ReferenceDifferentialTest {
                                 csr(6, 5, 31, 0x001), // fflags
                                 csr(2, 5, 0, 0x301), // misa
                                 csr(1, 5, 7, 0x301)),
+                        directedState(0, 0));
+            case "readOnlyCsr" ->
+                runDirected(
+                        name,
+                        directedProgram(
+                                csr(1, 5, 7, 0xC00), // csrrw x5, cycle, x7: traps
+                                csr(1, 0, 7, 0xC00), // csrrw x0: traps without a read
+                                csr(2, 5, 12, 0xC00), // csrrs, rs1 = x12 holding 0: traps
+                                csr(3, 5, 12, 0xF11), // csrrc, rs1 = x12 holding 0: traps
+                                csr(5, 5, 0, 0xC03), // csrrwi, zero immediate: traps
+                                csr(5, 0, 3, 0xC03), // csrrwi x0: traps
+                                csr(6, 5, 1, 0xC83), // csrrsi: traps
+                                csr(7, 5, 1, 0xF14), // csrrci: traps
+                                csr(2, 5, 0, 0xC03), // csrrs, rs1 = x0: a hook read
+                                csr(3, 5, 0, 0xF14), // csrrc, rs1 = x0: a hook read
+                                csr(6, 5, 0, 0xFC0), // csrrsi, zero immediate: a hook read
+                                csr(7, 5, 0, 0xF11), // csrrci, zero immediate: mvendorid
+                                csr(2, 5, 0, 0xC00)), // csrr cycle
                         directedState(0, 0));
             default -> throw new IllegalArgumentException(name);
         }

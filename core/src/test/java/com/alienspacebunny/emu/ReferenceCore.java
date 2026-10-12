@@ -29,6 +29,10 @@ import java.util.Objects;
  *       {@code injectInterrupt} no longer clears the stall flag. Guest writes keep only MSIE,
  *       MTIE and MEIE in {@code mie} and change nothing in {@code mip}; guest reads and delivery
  *       mask both with the implemented bits.
+ *   <li>Read-only CSR write traps (step T5, {@code docs/TIMER_COUNTER_DESIGN.md}, "Counters"):
+ *       after the privilege check, write intent on a CSR number with bits 11–10 = {@code 11}
+ *       raises an illegal-instruction exception before any read, hook call or write, even with
+ *       {@code rd = x0}.
  * </ul>
  *
  * <p><b>Intentional differences from {@link RV32IMACore}.</b> None yet. Each later behavior
@@ -1729,6 +1733,12 @@ final class ReferenceCore {
                                 boolean isWrite = microop == 1 || microop == 5;
                                 boolean shouldRead = !(isWrite && rdid == 0);
                                 boolean shouldWrite = isWrite || rs1Index != 0;
+
+                                // Step T5: write intent on a read-only number (bits 11-10 = 11).
+                                if (shouldWrite && (csrno >>> 10) == 3) {
+                                    trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
+                                    break;
+                                }
 
                                 rval = shouldRead ? readCsr(state, csrHook, csrno, cycle) : 0;
                                 int writeValue = rs1;

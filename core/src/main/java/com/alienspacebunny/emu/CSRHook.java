@@ -42,6 +42,14 @@ package com.alienspacebunny.emu;
  * not by design) — a custom CSR intended to be callable from user-mode guest code must use an
  * address whose bits 9–8 are {@code 0b00}.
  *
+ * <p><b>Read-only numbers.</b> After the privilege check, an access with write intent to a CSR
+ * number whose bits 11–10 are {@code 0b11} (the standard read-only space, which includes {@code
+ * cycle} and {@code mvendorid}) raises an illegal-instruction trap, and this hook is never called.
+ * Write intent comes from the encoding: {@code CSRRW} and {@code CSRRWI} always write, even with
+ * {@code rd = x0}; {@code CSRRS} and {@code CSRRC} write unless {@code rs1} is {@code x0}, even if
+ * the register holds zero; {@code CSRRSI} and {@code CSRRCI} write unless the immediate is zero.
+ * Reads of read-only numbers the core does not implement still reach {@link #handleRead}.
+ *
  * <p><b>Unrecognised CSR numbers.</b> {@link #handleRead} should return {@code 0} for any CSR
  * number the hook does not implement. {@link #handleWrite} should silently ignore writes to
  * unrecognised CSR numbers.

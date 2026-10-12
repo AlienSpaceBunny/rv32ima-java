@@ -36,6 +36,10 @@ for how this file is updated as part of cutting a release.
 - **Breaking:** `mie` and `mip` implement only MSIP/MSIE, MTIP/MTIE and MEIP/MEIE. A guest write
   to `mie` keeps only those enables, a guest write to `mip` changes nothing, and guest reads,
   the WFI wake condition and delivery ignore any other bit a host edit sets.
+- **Breaking:** a CSR instruction with write intent on a read-only CSR number (bits 11–10 =
+  `11`, such as `cycle` or `mvendorid`) raises an illegal-instruction exception before any read,
+  hook call or write, even with `rd` = x0. Such writes were previously discarded or passed to the
+  `CSRHook`.
 - The CLI derives time from a host-clock source, or from the cycle count with `-l`, as before.
 
 ### Fixed

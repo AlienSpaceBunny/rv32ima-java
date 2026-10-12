@@ -129,6 +129,12 @@ public class RV32IMACore {
     /** Mask for the 2-bit field extracted via {@link #CSR_PRIVILEGE_SHIFT}. */
     private static final int CSR_PRIVILEGE_FIELD_MASK = 0x3;
 
+    /**
+     * Bits 11–10 of a CSR address: {@code 11} marks a read-only CSR, and write intent on one is an
+     * illegal instruction.
+     */
+    private static final int CSR_READ_ONLY_FIELD = 0xC00;
+
     /*
      * Trap dispatch uses a "+1" internal encoding on the local {@code trap} variable so that
      * {@code trap == 0} unambiguously means "no trap". A synchronous exception is held as
@@ -1921,11 +1927,17 @@ public class RV32IMACore {
                                 }
 
                                 int rs1Index = (ir >> 15) & 0x1f;
-                                int rs1 = state.regs[rs1Index];
                                 boolean isWrite = microop == 1 || microop == 5;
-                                boolean shouldRead = !(isWrite && rdid == 0);
                                 boolean shouldWrite = isWrite || rs1Index != 0;
+                                if (shouldWrite && (csrno & CSR_READ_ONLY_FIELD) == CSR_READ_ONLY_FIELD) {
+                                    // Write intent on a read-only number traps before any read,
+                                    // hook call or write, even with rd = x0.
+                                    trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
+                                    break;
+                                }
 
+                                int rs1 = state.regs[rs1Index];
+                                boolean shouldRead = !(isWrite && rdid == 0);
                                 rval = shouldRead ? readCsr(state, csrHook, csrno, cycle) : 0;
                                 int writeValue = rs1;
 

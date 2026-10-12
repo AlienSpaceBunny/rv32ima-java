@@ -392,6 +392,12 @@ RAM, VRAM, and hooks. Keep `MMIOBus` for simple range-routed devices.
   ones that don't follow the convention on purpose: a custom CSR meant to be
   reachable from user-mode guest code needs an address whose bits 9–8 are
   `0b00`.
+- **Read-only numbers**: after the privilege check, write intent on a CSR
+  number whose bits 11–10 are `0b11` (such as `cycle` or `mvendorid`) raises
+  an illegal-instruction trap without reading the CSR or calling the hook.
+  Write intent comes from the encoding: `CSRRW`/`CSRRWI` always write, even
+  with `rd` = x0; `CSRRS`/`CSRRC` write unless `rs1` is x0, even when the
+  register holds zero; `CSRRSI`/`CSRRCI` write unless the immediate is zero.
 
 ## RV32IMAState
 

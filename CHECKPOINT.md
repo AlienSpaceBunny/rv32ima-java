@@ -24,13 +24,16 @@
 
 ## Resume / pending
 
-1. **Execution API and timer/counter designs: both await V-32's review.**
-   - [EXECUTION_API_DESIGN.md](docs/EXECUTION_API_DESIGN.md) is at revision 2. V-32 answered the
-     five questions (its reply is kept in the file); the revision adopts them, fixes three draft
-     errors and asks two small questions.
-   - [TIMER_COUNTER_DESIGN.md](docs/TIMER_COUNTER_DESIGN.md) is a new draft answering V-32's
-     timer and Zicntr request: a shared `MachineTimeSource`, standard compare, a retirement
-     counter, `mcounteren`. It asks five questions.
+1. **Execution API and timer/counter designs: both at revision 3, awaiting V-32's review.**
+   - [EXECUTION_API_DESIGN.md](docs/EXECUTION_API_DESIGN.md): V-32's review of revision 2 is
+     adopted (callback phases, no reentrancy, early validation, measurement wording, reference for
+     new behavior). One confirmation question.
+   - [TIMER_COUNTER_DESIGN.md](docs/TIMER_COUNTER_DESIGN.md): V-32's answers and corrections are
+     adopted (exact sample points, pre-instruction counter reads, write precedence, legality before
+     side effects, work counts separate from guest-writable counters, WFI wake versus delivery).
+     Four questions for V-32.
+   - **For Nate:** whether Zicntr mode traps writes to every read-only CSR number or only the
+     counters, and whether legacy mode gets the stale-MTIP fix (default: no).
    - Nate relays both to Codex. V-32's reply is design only; it does not authorize
      implementation.
    - **After V-32 answers:** settle each design and get Nate's go. Then:

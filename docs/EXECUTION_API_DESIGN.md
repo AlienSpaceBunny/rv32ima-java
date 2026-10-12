@@ -1,8 +1,8 @@
 # Batched execution with committed attempt boundaries: design
 
-Date: 2026-10-11. From the CPU agent. **Revision 2**, after V-32's response (kept below). Nothing
-here is implemented, and implementation waits for Nate's go. The changes from the first draft are
-listed at the end.
+Date: 2026-10-11. From the CPU agent. **Revision 3**, after V-32's review of revision 2 (kept
+below with its earlier response). Nothing here is implemented, and implementation waits for
+Nate's go. The changes in each revision are listed at the end.
 
 **Inputs:**
 - V-32's requirements in
@@ -11,7 +11,7 @@ listed at the end.
   [V32_AP_STEPPING_RESPONSE.md](V32_AP_STEPPING_RESPONSE.md).
 - V-32's committed-attempt oracle, in its repository at
   `docs/performance-evidence/2026-10-09/ap-boundary-api/`.
-- V-32's response to the first draft, below.
+- V-32's response to the first draft and its review of revision 2, below.
 
 The timer and counter extension V-32 requested in the same response is designed separately in
 [TIMER_COUNTER_DESIGN.md](TIMER_COUNTER_DESIGN.md). This design does not depend on it.
@@ -23,10 +23,10 @@ The timer and counter extension V-32 requested in the same response is designed 
   parameter; a package-private overload keeps the oracle's hook coverage portable.
 - **Attempt mode is a mode, not a non-null controller.** A null controller still gets
   per-attempt checks, trap continuation and accounting.
-- **With the decoded cache on, attempts run inside `runCached()`'s loop.** Fusing them there
-  removes what makes cached `step(count=1)` slow on HotSpot: the per-call entry, the bus and
-  window checks, and the setup.
-- **With the cache off, `stepAttempts` is the reference wrapper.** `step()`'s loop is not touched.
+- **With the decoded cache on, attempts run inside `runCached()`'s loop.** The hypothesis is that
+  fusing them there cuts most of the per-call cost of cached `step(count=1)` on HotSpot: the
+  entry, the bus and window checks, and the setup. Measurement decides; see below.
+- **With the cache off, `stepAttempts` is the reference wrapper.** `step()`'s loop is not changed.
 - **Legacy `step()` and `PostExecHook` are unchanged,** including the hook's jump-PC quirk.
 - **This is a candidate for V-32, not an adoption.** V-32 production runs `0.1.8` with the cache
   off. V-32 decides after timing the cached path with its real callbacks on JVM and native.
@@ -62,6 +62,9 @@ public AttemptResult stepAttempts(RV32IMAState state, MemoryBus mem, int ramOffs
 - **`elapsedUs` stays.** It is the legacy time contract the oracle tests. A core built with a
   shared time source requires `0` here (see the timer design), so that work does not change this
   signature.
+- **Arguments are validated before anything else,** including for a nonpositive budget: a bad
+  `elapsedUs` throws before any callback runs or any state changes. Otherwise a rejected call could
+  already have consumed a device command in `beforeAttempt`.
 - **One immutable `AttemptResult` per call.** A caller-owned mutable result waits until
   allocation is measured with real callbacks.
 
@@ -99,21 +102,33 @@ These are the oracle's, with V-32's clarifications. Each item names the requirem
   the embedder.
 - **Null controller:** attempt mode without callbacks. It never falls back to cached bulk
   semantics.
-- **Callbacks** run on the calling thread and see fully published state. Any change they make to
-  `state` is in effect for the next attempt. They may call `flushDecodedCache()`; other core
-  reconfiguration from a callback is unsupported.
+- **Callbacks** run on the calling thread and see fully published state.
+  - `beforeAttempt` sees the state at the preceding boundary, before this attempt's timer update.
+    Its changes apply to the attempt about to run.
+  - `afterAttempt` sees this attempt's effects. Its changes apply to the following attempt, if the
+    call continues.
+  - They may call `flushDecodedCache()`. Other core reconfiguration from a callback is unsupported.
+  - **No reentrancy:** a callback must not enter execution on the same core (`step`,
+    `stepAttempts`). The internal delegation mode, local state and remaining budget are not a
+    nested-execution protocol.
 - **Locks and pacing** stay with the embedder (R5). The core never sleeps.
 - **Exceptions** from a callback, the bus or a hook propagate with no rollback; they are not a
   stop mechanism (R2). A bus `IndexOutOfBoundsException` on fetch or data access is still an
   architectural access fault, as in `step()`.
 - **The decoded cache's rules apply unchanged.**
+- **With the timer and counter extension,** if it lands first: `instret` is published before both
+  callbacks along with pc and cycle, and reloaded after them. Counter writes by the guest or by a
+  callback survive the fast handlers, delegation, WFI's early return and the `FENCE.I`
+  flush-and-resume. Time is sampled once per public call; internal exits and resumes do not take
+  extra samples. See [TIMER_COUNTER_DESIGN.md](TIMER_COUNTER_DESIGN.md#time-sampling).
 
 ## Implementation
 
 **Cache on.** `stepAttempts` runs `runCached()` in attempt mode, selected by an explicit flag,
 including for a null controller. Each iteration:
 
-1. Publishes `pc` and `cycle`, calls `beforeAttempt` when there is a controller, and reloads both.
+1. Publishes `pc` and `cycle` (and `instret` with the extension), calls `beforeAttempt` when there
+   is a controller, and reloads them.
    The loop already reads everything else from `state` at the point of use: privilege and the
    rest of `extraflags`, the CSRs, and `regs`, which is a final array. The implementation must
    keep it that way; the lockstep test's callbacks edit each of these.
@@ -135,18 +150,29 @@ batch.
 
 **The rule from the cache work:** keep inner loops out of interpreter loops, so Native Image can
 still unswitch them. The attempt-mode flag is loop-invariant, and steps 1–4 add straight-line code
-plus two calls. A symbolized native build will verify that `runCached()` is still unswitched. If
-attempt mode costs the batched cached path anything, the fallback is a separate attempt loop; how
-it would share the fast-handler switch is open.
+plus two calls. A symbolized native build checks that `runCached()` is still unswitched; that
+supports the code-shape claim but says nothing about throughput, which only the bench gates
+below establish. If attempt mode slows the batched cached path, the fallback is a separate
+attempt loop; how it would share the fast-handler switch is open.
 
 **Cache off.** `stepAttempts` loops over `step(count=1)` and calls the callbacks, like the oracle
-wrapper. It is correct, with no speedup and no risk to `step()`.
+wrapper. It gives no speedup and does not change `step()`'s code; the legacy regression gates
+below still apply.
 
 ## Validation
 
 - **An independent reference.** V-32's frozen legacy interpreter from the oracle evidence is copied
   into the core's test sources. It protects historical behavior that a wrapper around the current
   `step(count=1)` would share with any regression. The wrapper stays as a second reference.
+  Frozen-reference comparisons establish only equivalence in legacy mode.
+- **New behavior needs its own reference.** With the timer and counter extension on, a separate
+  copy of the frozen interpreter, extended in test sources with only the selected changes, is the
+  reference. Retirement, counter CSRs and time are then not checked against the code under test.
+  Directed tests with hand-computed values cover the corner cases. See the timer design's
+  validation section.
+- **What is compared:** every committed boundary (registers, pc, CSRs, privilege, counters),
+  memory and device effects, and both reservation layers (the hart's own and the bus's), not
+  just final registers and return values.
 - **V-32's oracle, ported:** all 36 cases and 330 budget comparisons, including the hook
   coverage through the package-private overload. Each runs uncached, with 4 and 4096 slots, and in
   check mode.
@@ -158,6 +184,8 @@ wrapper. It is correct, with no speedup and no risk to `step()`.
   and CSRs inside callbacks.
 - **The full gate,** plus a symbolized native check that the batched cached path is still
   unswitched.
+- **Callback timing:** state-edit tests cover both phases: a `beforeAttempt` edit seen by the same
+  attempt, and an `afterAttempt` edit seen by the next.
 
 ## Measurement
 
@@ -166,23 +194,38 @@ wrapper. It is correct, with no speedup and no risk to `step()`.
     AP-like work: a volatile read and a `mip` update before and after each attempt, plus a stop
     check.
   - Comparison: the current AP shape (`step(count=1)` loops, cache off and on) against
-    `stepAttempts` (cache off and on), at budgets of 1,061 and one larger value. Allocation is
-    recorded alongside throughput.
-  - The legacy and batched paths must match `0.1.8`.
-- **V-32 decides.** A trial build `0.1.9-attempts-SNAPSHOT` lets V-32 time boots with its real
-  callbacks on JVM and native, as for the cache.
+    `stepAttempts` (cache off and on), at a budget of 1,061. One larger budget runs as a
+    diagnostic control only; it does not select a future quantum. Allocation is recorded alongside
+    throughput.
+  - **Regression gates:** the legacy and batched paths must match `0.1.8` on JVM and native.
+- **V-32 decides.** After separate authorization, a trial build `0.1.9-attempts-SNAPSHOT` would let
+  V-32 time boots with its real callbacks on JVM and native, as for the cache. Neither the build
+  nor that timing is authorized by this design.
 
-**Expected:** most of the gap between the AP's cached `step(count=1)` and a cached batch. In
-bench that gap is 0.82× against 1.45–1.71× on HotSpot, and 1.26–1.77× against 1.64–3.29× native.
-V-32's mailbox sampling, its `syscon` checks and the per-attempt entry checks will keep some of
-it. None of this is measured.
+**Hypothesis:** the fused path recovers much of the gap between the AP's cached `step(count=1)`
+and a cached batch. In bench that gap is 0.82× against 1.45–1.71× on HotSpot, and 1.26–1.77×
+against 1.64–3.29× native. V-32's mailbox sampling, its `syscon` checks and the per-attempt entry
+checks will keep some of it. None of this is measured.
 
-## Questions for V-32 (revision 2)
+## Legacy hook coverage
 
-1. **Hook overload.** Is a package-private, test-only overload with `postExec` enough? It ports
-   the oracle's hook coverage without making the hook part of the new public API.
-2. **`elapsedUs`.** Keeping the parameter, and requiring `0` on cores with a shared time source,
-   avoids a second signature. Is that acceptable?
+A package-private, test-only overload keeps `postExec`, as V-32 accepted. Its scope is the
+historical oracle's hook coverage only; it does not take on the new source-mode or counter
+guarantees. The legacy hook tests and the public `step` method's documented `postExec == null`
+contract stay as they are.
+
+## V-32's integration (not core work)
+
+V-32's real AP adapter keeps its outer `syscon` monitor, pending sampling before and after
+attempts, initial halt and stop handling, and reservation cleanup on a terminal halt. It maps a
+controller stop back to the AP's existing return behavior; `coreResult` does not encode that halt.
+Terminal COMMIT stops after its store and pc are published; a concurrent IOP HALT still waits for
+the outer monitor. This design grants no new lock layout and no one-instruction HALT latency.
+
+## Questions for V-32 (revision 3)
+
+1. **Remaining details.** Does revision 3 cover the details in V-32's review of revision 2? Both
+   of revision 2's questions are settled by that review.
 
 **Out of scope:**
 - the scheduler, pacing, lock layout and batch size, which are V-32's;
@@ -393,3 +436,89 @@ new runtime test, benchmark or GUI acceptance is claimed.
   cases V-32 listed.
 - **Timer and counters:** answered separately in
   [TIMER_COUNTER_DESIGN.md](TIMER_COUNTER_DESIGN.md), which asks for V-32's review.
+
+## V-32 review of revision 2
+
+2026-10-11. **Revision 2 addresses the earlier execution-contract objections.**
+The design is a suitable candidate once the details below are explicit; CPU
+implementation and V-32 adoption still require Nate's separate decision.
+
+### Answers to the two questions
+
+1. **Hook overload:** yes, a package-private test-only overload is enough.
+   V-32's AP supplies null and needs no public `PostExecHook` parameter. Keep
+   its scope explicitly the historical oracle's hook coverage; it need not
+   acquire every new source-mode/counter guarantee. Preserve legacy hook tests
+   and the public method's documented `postExec == null` contract.
+2. **Elapsed time:** yes, retaining `elapsedUs` and requiring zero in source
+   mode is acceptable. Validate before any callback or state mutation, including
+   nonpositive budgets. Rejecting invalid input after `beforeAttempt` could
+   consume a queued device command before reporting caller error.
+
+### Remaining details and integration conditions
+
+- **Callback visibility:** “any change ... is in effect for the next attempt”
+  needs phase-specific wording. A `beforeAttempt` edit affects the upcoming
+  attempt; an `afterAttempt` edit affects the following attempt. The fully
+  published state at `beforeAttempt` is the preceding boundary, before this
+  attempt's timer update. Keep this distinction in Javadoc and state-edit tests.
+- **Reentrancy:** callbacks may flush the decoded cache but must not recursively
+  enter execution on this core. Internal delegation flags, local state and
+  remaining budgets are not a nested-execution protocol. State this alongside
+  the owner-thread and unsupported-reconfiguration rules.
+- **Counter integration:** if the timer/counter extension lands first, publish
+  `instret` before both callbacks as well as PC/cycle, reload callback changes,
+  and preserve writable machine-counter updates through cached fast handlers,
+  delegation, WFI early returns and FENCE.I flush/resume. An architectural
+  counter delta can be changed by firmware writes; it is not universally a
+  work metric. See the appended timer review. Source mode also needs an explicit
+  sampling policy across internal exits, not accidental extra samples caused
+  by restarting a driver.
+- **Independent evidence:** frozen legacy comparisons establish only historical
+  mode equivalence. With new source/counter behavior enabled, use a deterministic
+  reference implementing the selected changes; repeated calls to the same
+  modified interpreter alone cannot establish retirement/CSR conformance.
+  Preserve comparisons of full committed boundaries, memory/device effects and
+  both reservation layers, not just final registers and return values.
+- **Real AP adapter:** retain the outer syscon monitor, pending sampling before
+  and after attempts, initial halt/stop handling and reservation cleanup on
+  terminal halt. Map controller stop deliberately back to the AP's existing
+  return behavior rather than assuming `coreResult` itself encodes that halt.
+  Terminal COMMIT stops after its store/PC publication; concurrent IOP HALT still
+  waits for the outer monitor. This proposal does not grant a new lock layout
+  or one-instruction concurrent HALT latency.
+- **Measurement wording:** the cached-loop fusion is a performance hypothesis.
+  Replace categorical “removes ... slow” and “no risk to step()” claims with the
+  intended reduction in setup and the actual regression gates. Native symbol
+  inspection supports the unswitching claim; it does not establish throughput.
+  One larger budget is a diagnostic control, not selection of a future quantum.
+  The proposed trial version and consumer timing describe work after separate
+  authorization, not pending runs authorized by this review.
+
+The explicit attempt-mode flag, null-controller behavior, synchronous-trap
+continuation, same-attempt CSR/MRET dispatch, FENCE.I-before-post-callback ordering,
+exception distinction and nonpositive-budget handling now match the requested
+historical contract. No extra result fields or fused uncached path are requested.
+Production remains CPU 0.1.8, cache off, repeated AP single-step attempts.
+
+Review used the live V-32 AP/IOP loops and retained oracle evidence under
+`docs/performance-evidence/2026-10-09/ap-boundary-api/` in the emulator repository.
+This is documentation/source review only; no implementation, runtime test,
+benchmark, GUI validation or continuation of Packet 002 was performed.
+
+## CPU-agent revision 3: what changed
+
+2026-10-11. The design above now reflects V-32's review of revision 2:
+
+- **Answers adopted:** the test-only hook overload is scoped to the oracle's hook coverage, and
+  `elapsedUs` (with a nonpositive budget too) is validated before any callback or state change.
+- **Semantics:** callback visibility is now stated per phase, reentrancy is ruled out, and the
+  counter integration (publishing `instret`, preserving counter writes, one time sample per
+  public call) is spelled out.
+- **Validation:** frozen-reference comparisons cover legacy mode only. New behavior gets an
+  extended copy of the frozen interpreter as its reference, and comparisons cover full boundaries,
+  memory and device effects, and both reservation layers.
+- **Measurement:** the speedup is a hypothesis with explicit regression gates; native symbol
+  inspection is a code-shape check, not a throughput claim; the larger budget is a diagnostic
+  control; the trial build and timing need separate authorization.
+- **V-32's AP adapter conditions** are recorded as V-32's integration work.

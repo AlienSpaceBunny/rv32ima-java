@@ -16,8 +16,9 @@ import java.util.Objects;
  * sets its {@code misa} bit. The built-in counters (Zicntr) are always present.
  *
  * <p><b>Time.</b> Every core is built with a {@link MachineTimeSource}, shared by all harts on
- * the machine. The core samples it once per {@link #step} call and on every legal {@code time} or
- * {@code timeh} read, and never accumulates time; see {@link #step} for the sampling points.
+ * the machine. The core samples it once per {@link #step} or {@link #stepAttempts} call and on
+ * every legal {@code time} or {@code timeh} read, and never accumulates time; see {@link #step}
+ * and {@link #stepAttempts} for the sampling points.
  *
  * <p><b>Counters (Zicntr).</b> Built in, ahead of any {@link CSRHook}:
  *
@@ -1600,8 +1601,14 @@ public class RV32IMACore {
             if (count <= 0) {
                 throw new IllegalArgumentException("count must be at least 1: " + count);
             }
-            // The call's one time sample.
-            sampleTime(state);
+            if (attemptEntry) {
+                // One attempt of stepAttempts: every entry check, but the call's sample is
+                // reused, so only MTIP is recomputed from it.
+                updateTimerPending(state);
+            } else {
+                // The call's one time sample.
+                sampleTime(state);
+            }
 
             // Check for a pending machine interrupt before starting the instruction loop. This core
             // models only M-mode and U-mode, so mstatus.MIE gates interrupts only while executing in
@@ -2206,6 +2213,122 @@ public class RV32IMACore {
         state.setCycle(cycle);
         state.pc = pc;
         return 0;
+    }
+
+    // Set while stepAttempts runs one attempt through step(): step()'s entry then recomputes
+    // MTIP from the call's sample instead of sampling. Unlike DC_MODE_DELEGATING, every entry
+    // check still runs.
+    private boolean attemptEntry;
+
+    /**
+     * Runs up to {@code budget} committed attempts on the given hart, with optional callbacks at
+     * each boundary.
+     *
+     * <p><b>An attempt</b> recomputes {@code MTIP} from the compare and the call's latest time
+     * sample, runs the interrupt and {@code WFI} checks, then does one of the following:
+     *
+     * <ul>
+     *   <li>enters a deliverable interrupt without executing an instruction; the cycle count does
+     *       not advance;
+     *   <li>finds the hart stalled in {@code WFI} with no wake: result {@code 1}, with pc and cycle
+     *       unchanged;
+     *   <li>executes one instruction, which may trap. An executed {@code WFI} is an instruction:
+     *       pc and cycle advance, and the result is {@code 1} if it stalls. If the instruction
+     *       writes {@code mstatus}, {@code mie} or {@code mip}, reads {@code time} or {@code timeh},
+     *       or is {@code MRET}, an interrupt it makes deliverable is entered in the same attempt;
+     *   <li>fails to fetch, which traps and advances the cycle count although nothing executes.
+     * </ul>
+     *
+     * <p>That is a {@link #step} with {@code count} 1, no {@link PostExecHook} and no time sample
+     * of its own. The interrupt, {@code WFI}, counter, trap and decoded-cache rules of {@link
+     * #step} apply unchanged.
+     *
+     * <p><b>Order.</b> Each attempt runs {@link AttemptController#beforeAttempt}, the attempt,
+     * full publication (pc, the work counts, CSRs, any trap's entry, reservations and a {@code
+     * FENCE.I}'s cache flush), then {@link AttemptController#afterAttempt}. The call stops at the
+     * first of: {@code afterAttempt} returns {@code true}, an attempt returns {@code 1}, or the
+     * budget runs out. A trap returns 0, so the call continues into its handler. A {@code null}
+     * controller runs the same attempts without callbacks.
+     *
+     * <p><b>Time.</b> The call samples the core's {@link MachineTimeSource} once, after the first
+     * {@code beforeAttempt}, and again only on a legal {@code time} or {@code timeh} read, whose
+     * sample every later attempt in the call keeps. Each attempt recomputes {@code MTIP} from the
+     * latest sample, so a callback's compare change takes effect at the next attempt and a
+     * callback's direct {@code MTIP} edit is overwritten.
+     *
+     * <p><b>Accounting.</b> {@link AttemptResult#attemptsConsumed()} counts every attempt. The
+     * delta of {@link RV32IMAState#getCycle()} counts instructions attempted, including trapping
+     * ones and fetch faults and excluding interrupt-only entries and {@code WFI} stalls; that of
+     * {@link RV32IMAState#getInstret()} counts instructions retired.
+     *
+     * <p><b>Left to the embedder:</b> host halt and stop checks before the call, reservation
+     * cleanup after a terminal stop, locking and pacing. The core never sleeps. Callback rules are
+     * in {@link AttemptController}.
+     *
+     * <p><b>Differences from V-32's attempt oracle</b> (V-32 repository: {@code
+     * docs/performance-evidence/2026-10-09/ap-boundary-api/}), which looped over the then {@code
+     * step(count=1)}:
+     *
+     * <ul>
+     *   <li>There is no {@code PostExecHook} parameter; the oracle's hook coverage is {@link
+     *       #step}'s.
+     *   <li>There is no {@code elapsedUs}: time is the shared source, sampled as above, with the
+     *       standard unsigned compare, under which a compare of zero is due.
+     *   <li>{@code WFI} follows the privileged specification, as in {@link #step}: it never sets
+     *       {@code mstatus.MIE}, and wakes on a pending, locally enabled interrupt.
+     *   <li>The Zicntr counters, including {@link RV32IMAState#getInstret()}, are published before
+     *       both callbacks.
+     *   <li>A nonpositive budget throws instead of running one {@code beforeAttempt} and a step
+     *       with that budget.
+     *   <li>{@link AttemptResult#exitReason()} is new.
+     * </ul>
+     *
+     * @param state the mutable processor state to execute.
+     * @param mem the memory bus for instruction fetch and data access.
+     * @param ramOffset base address of executable RAM (unsigned 32-bit guest address).
+     * @param ramSize size of executable RAM in bytes.
+     * @param budget the maximum number of attempts, at least 1.
+     * @param csrHook optional hook for custom CSR accesses, as for {@link #step}; may be {@code
+     *     null}.
+     * @param controller optional callbacks at each boundary; may be {@code null}.
+     * @return the last attempt's result, the attempts consumed and whether the controller stopped.
+     * @throws IllegalArgumentException if {@code budget} is less than 1, before any callback, time
+     *     sample or state change.
+     * @throws NullPointerException if {@code state} or {@code mem} is {@code null}.
+     */
+    public AttemptResult stepAttempts(
+            RV32IMAState state,
+            MemoryBus mem,
+            int ramOffset,
+            int ramSize,
+            int budget,
+            CSRHook csrHook,
+            AttemptController controller) {
+        Objects.requireNonNull(state, "state");
+        Objects.requireNonNull(mem, "mem");
+        if (budget <= 0) {
+            throw new IllegalArgumentException("budget must be at least 1: " + budget);
+        }
+        int attempts = 0;
+        int result;
+        boolean stopped;
+        do {
+            if (controller != null) {
+                controller.beforeAttempt(state);
+            }
+            if (attempts == 0) {
+                sampleTime(state); // the call's one sample
+            }
+            attempts++;
+            attemptEntry = true;
+            try {
+                result = step(state, mem, ramOffset, ramSize, 1, null, csrHook);
+            } finally {
+                attemptEntry = false;
+            }
+            stopped = controller != null && controller.afterAttempt(state, result);
+        } while (!stopped && result == 0 && attempts < budget);
+        return new AttemptResult(result, attempts, stopped);
     }
 
     /**

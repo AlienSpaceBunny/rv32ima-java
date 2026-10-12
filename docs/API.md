@@ -169,6 +169,35 @@ Interrupt gating and injection:
   thread (for example, one hart signaling another) is the caller's
   responsibility to synchronize; `RV32IMAState` itself provides no locking.
 
+Committed attempts (the `stepAttempts` and `AttemptController` Javadoc are
+authoritative):
+
+- `stepAttempts(state, mem, ramOffset, ramSize, budget, csrHook, controller)`
+  runs up to `budget` attempts and returns an `AttemptResult(coreResult,
+  attemptsConsumed, controllerStopped)`. An attempt is a `step` with `count` 1,
+  no `PostExecHook` and no time sample of its own: an interrupt-only entry, a
+  `WFI` stall check, one instruction (which may trap, and may dispatch an
+  interrupt it makes deliverable in the same attempt), or a fetch fault.
+- Each attempt runs `beforeAttempt`, the attempt, full publication (pc, the
+  work counts, CSRs, any trap, reservations and a `FENCE.I` flush), then
+  `afterAttempt`. A `beforeAttempt` edit applies to that attempt; an
+  `afterAttempt` edit to the next. The call stops when `afterAttempt` returns
+  true, an attempt returns 1, or the budget runs out; a trap continues into
+  its handler. `exitReason()` gives the reason, a controller stop first. A
+  `null` controller runs the same attempts without callbacks.
+- The call samples time once, after the first `beforeAttempt`, and then only
+  on `time`/`timeh` reads, whose sample later attempts keep. Every attempt
+  recomputes `MTIP` from the latest sample, so callback compare edits take
+  effect and a direct `MTIP` edit is overwritten.
+- `budget < 1` throws `IllegalArgumentException` before any callback, sample
+  or state change. Callbacks run on the calling thread, may call
+  `flushDecodedCache()`, must not reenter execution on the same core, and
+  must return normally; exceptions propagate without rollback. Take work
+  deltas from `getCycle()` and `getInstret()`.
+- With the decoded cache on, each attempt currently runs a cached
+  single-instruction batch; a fused cached path is planned (step A2 of
+  [the plan](TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md)).
+
 Decoded instruction cache (opt-in; the coherence rules are in
 `flushDecodedCache()`'s Javadoc and [DECODED_ICACHE_PROTOCOL.md](DECODED_ICACHE_PROTOCOL.md)):
 

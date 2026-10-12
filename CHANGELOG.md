@@ -23,6 +23,10 @@ for how this file is updated as part of cutting a release.
   Guest writes change only a per-hart offset behind each architectural counter, so `getCycle()`
   and `getInstret()` stay guest-proof work counts; use their deltas for host accounting.
 - `RV32IMAState.mcounteren`.
+- `RV32IMACore.stepAttempts`, `AttemptController` and `AttemptResult`: up to a budget of
+  committed single-instruction attempts, with optional callbacks before and after each one and
+  one time sample per call. `AttemptResult.exitReason()` reports a controller stop, a `WFI` stall
+  or the budget. A nonpositive budget throws before any callback.
 
 ### Changed
 - **Breaking:** every `RV32IMACore` is built with a `MachineTimeSource`:

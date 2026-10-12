@@ -47,6 +47,9 @@ import java.util.Objects;
  *   <li>{@code PostExecHook} on a stalling {@code WFI} (step A1, {@code
  *       docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md}): an executed {@code WFI} that stalls calls
  *       the hook once, as one that continues already did.
+ *   <li>The attempt driver (step A1, {@code docs/EXECUTION_API_DESIGN.md}): {@code stepAttempts}
+ *       runs single-instruction attempts with {@link AttemptController} callbacks, sampling once
+ *       per call; {@code step}'s body after its sample moves into {@code execute} for it.
  * </ul>
  *
  * <p><b>Intentional differences from {@link RV32IMACore}.</b> None yet. Each later behavior
@@ -1152,10 +1155,51 @@ final class ReferenceCore {
         long newTimer = time.nowMicros();
         state.timerl = (int) newTimer;
         state.timerh = (int) (newTimer >>> 32);
+        return execute(state, mem, ramOffset, ramSize, count, postExec, csrHook);
+    }
 
+    /**
+     * Step A1: the reference attempt driver, with its own call-level sample lifetime. The first
+     * attempt is a public {@link #step} call, which takes the call's sample; later attempts enter
+     * {@link #execute} directly and keep the latest sample.
+     */
+    AttemptResult stepAttempts(
+            RV32IMAState state,
+            MemoryBus mem,
+            int ramOffset,
+            int ramSize,
+            int budget,
+            CSRHook csrHook,
+            AttemptController controller) {
+        if (budget < 1) {
+            throw new IllegalArgumentException("budget < 1: " + budget);
+        }
+        for (int attempt = 1; ; attempt++) {
+            if (controller != null) {
+                controller.beforeAttempt(state);
+            }
+            int result = attempt == 1
+                    ? step(state, mem, ramOffset, ramSize, 1, null, csrHook)
+                    : execute(state, mem, ramOffset, ramSize, 1, null, csrHook);
+            boolean stopped = controller != null && controller.afterAttempt(state, result);
+            if (stopped || result != 0 || attempt == budget) {
+                return new AttemptResult(result, attempt, stopped);
+            }
+        }
+    }
+
+    /** {@link #step} after its sample (step A1). */
+    private int execute(
+            RV32IMAState state,
+            MemoryBus mem,
+            int ramOffset,
+            int ramSize,
+            int count,
+            RV32IMACore.PostExecHook postExec,
+            CSRHook csrHook) {
         // Handle Timer interrupt.
         long timerMatch = state.getTimerMatch();
-        if (Long.compareUnsigned(newTimer, timerMatch) >= 0) {
+        if (Long.compareUnsigned(state.getTimer(), timerMatch) >= 0) {
             state.mip |= MIP_MTIP;
         } else {
             state.mip &= ~MIP_MTIP;

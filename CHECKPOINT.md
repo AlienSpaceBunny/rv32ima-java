@@ -6,8 +6,8 @@
   the timer/counter phase (T1–T7) and, not yet installed, steps A1 and A2. `v0.1.8` is installed
   locally and tagged on `origin`. The version bump for phase A waits for A4.
 - **V-32 adopted the trial** `0.1.10-attempts-SNAPSHOT` (V-32 `70237cf`): the AP's single
-  mechanism is `stepAttempts` with a 4096-slot cache at up to 1,061 attempts per call; the
-  separate cached attempt loop is ratified; no core API blocker
+  mechanism is `stepAttempts` with a 4096-slot cache; the separate cached attempt loop is
+  ratified; no core API blocker
   ([exchange, archived](docs/archive/V32_ATTEMPTS_RATIFICATION.md)).
 - **Work directly on `main`** and push after each validated step, until API stabilization for
   `0.2.0` (Nate, 2026-10-12).
@@ -20,8 +20,9 @@
 ## Resume here
 
 **Next: step A3 of [the plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md)**, the full
-`--attempts` measurement on JVM and native. V-32's path (cached, 4096 slots, budget 1,061) is the
-headline cell. `run_matrix.py` does not pass `--attempts` yet. Keep both cached loops'
+`--attempts` measurement on JVM and native. V-32's path (cached, 4096 slots) is the headline. Its
+budget of 1,061 attempts per call is a legacy value V-32 will likely retune, so A3 also runs
+smaller and larger diagnostic budgets; nothing in the core should depend on 1,061. `run_matrix.py` does not pass `--attempts` yet. Keep both cached loops'
 independent-reference differential and mutation coverage (V-32's ratification condition).
 
 **Trial build:** `0.1.10-attempts-SNAPSHOT` is installed in `~/.m2` from local tag

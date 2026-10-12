@@ -211,7 +211,7 @@ Starts after T7.
   `--attempts` mode, planned for A3, landed with it.
 - **Ratification (2026-10-12):** Nate was agnostic and preferred one opinionated mechanism, so
   V-32's choice decided. V-32 answered: the AP's single mechanism is `stepAttempts` with a
-  4096-slot decoded cache, on JVM and native, at up to 1,061 attempts per call; the IOP keeps
+  4096-slot decoded cache, on JVM and native; the IOP keeps
   uncached `step` batches of 1,024 with its `PostExecHook`. It ratified the separate loop, asking
   that both loops keep their independent-reference differential and mutation coverage. It found
   no core API blocker while migrating to the trial build `0.1.10-attempts-SNAPSHOT`
@@ -220,11 +220,13 @@ Starts after T7.
 ### A3. Measurement
 
 A bench `--attempts N` mode with an AP-like controller. It compares `step(count=1)` loops against
-`stepAttempts`, cache off and on, at a budget of 1,061 plus one diagnostic larger budget, with
+`stepAttempts`, cache off and on, at V-32's current budget of 1,061 plus diagnostic smaller and
+larger budgets, with
 allocation recorded. The baseline is the timer version, with `0.1.8` as a historical comparison;
 JVM and native. Record under `docs/performance/<date>/attempts/`. A regression goes to Nate.
-V-32's chosen path, cached `stepAttempts` at 4096 slots and a budget of 1,061, is the headline
-cell; the step(count=1) loop is V-32's former AP shape.
+V-32's chosen path, cached `stepAttempts` at 4096 slots, is the headline; the `step(count=1)`
+loop is V-32's former AP shape. The 1,061 budget is a legacy value, likely to be retuned
+(Nate, 2026-10-12), so no result or core choice should depend on it.
 
 ### A4. Execution phase close
 

@@ -66,7 +66,7 @@ differential suites for B, each uncached and cached at 4 and 4096 slots.
 - New in `ReferenceDifferentialTest`:
   - `stepAttempts` against the reference's attempt driver. Random programs (eight seeds, five ISA
     configurations, half in check mode) and the nine directed programs run with random budgets,
-    including V-32's 1,061. The source advances on every read.
+    including 1,061, V-32's current (legacy) budget. The source advances on every read.
   - The seeded lockstep against repeated `step(count=1)` on a second core, with a source fixed
     during each call.
   - Random controllers record every boundary and edit the machine. Edits include `mip` injection

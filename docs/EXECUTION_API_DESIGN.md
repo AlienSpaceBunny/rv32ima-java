@@ -221,8 +221,9 @@ unchanged. There is no speedup here, only correct per-call sampling.
     AP-like work: a volatile read and a `mip` update before and after each attempt, plus a stop
     check.
   - Comparison: the current AP shape (`step(count=1)` loops, cache off and on) against
-    `stepAttempts` (cache off and on), at a budget of 1,061. One larger budget runs as a
-    diagnostic control only; it does not select a future quantum. Allocation is recorded alongside
+    `stepAttempts` (cache off and on), at V-32's current budget of 1,061, a legacy value likely
+    to be retuned. Other budgets run as diagnostic controls only; they do not select a future
+    quantum. Allocation is recorded alongside
     throughput.
   - **Baselines:** the implemented timer and counter version is the baseline for attempt fusion's
     cost, so a regression is not mistaken for batching cost when it comes from new semantics.

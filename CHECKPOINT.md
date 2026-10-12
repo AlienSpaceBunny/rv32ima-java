@@ -2,7 +2,7 @@
 
 ## Current state
 
-- **`main` is on `0.1.9-SNAPSHOT`** and carries T1–T4, including breaking API changes that are
+- **`main` is on `0.1.9-SNAPSHOT`** and carries T1–T6, including breaking API changes that are
   not yet installed to `~/.m2` (T7's phase bump does that). `v0.1.8` is installed locally and
   tagged on `origin`, not published.
 - **Work directly on `main`** and push after each validated step, until API stabilization for
@@ -15,27 +15,32 @@
 
 ## Resume here
 
-**Step T6 of [the plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md): Zicntr counters and
-`time` reads**, on `main`. Not started. Apply each behavior change to `ReferenceCore` in the same
-commit and list it under "Changes from the baseline" in its class Javadoc. T6 changes what a
-`cycle` read returns (the value before the reading instruction), so `CoreTest`'s
-`userModeCanReadUserAccessibleCsr` (expects 43 after `setCycle(42)`) changes with it. Retirement
-accounting must add no per-instruction work to `step()`'s loop or `runCached()`.
+**Step T7 of [the plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md): timer phase close**, on
+`main`. Not started: review the Javadoc, `docs/API.md` and the CHANGELOG as a whole; run the full
+bench matrix against `0.1.8` on JVM and native plus a symbolized native build checking that
+`step()`'s and `runCached()`'s loops are still unswitched; `./release.sh`; bump with
+`versions:set`, `./mvnw install`, push; then write the V-32 handoff note.
 
 Landed on `main`: T1 (hook jump-PC fix) at `3f4fdda`, T2 (reference core and differential) at
 `08d26db`, T3 (shared time source, standard compare) at `fdd68f0`, T4 (standard WFI,
-implemented-only `mie`/`mip`) at `525c925`, and T5 (read-only CSR write traps, tests in
-`CsrTest` and the differential's `readOnlyCsr` case) at `5abce6e`. Update the plan's status table
-and this section as steps land.
+implemented-only `mie`/`mip`) at `525c925`, T5 (read-only CSR write traps) at `5abce6e`, and T6
+(Zicntr counters and `time` reads, tests in `CounterTest` and the differential's `counters` and
+`timeReads` cases) at `23bbc03`.
+
+**For T7's bench:** T6 keeps one more `long` local (`retiredBase`) live across `step()`'s loop
+and `runCached()`'s loop, used only on the CSR path and at exits; check it costs nothing
+measurable. No Linux image is available locally, so only the baremetal image covers the "images
+still run" check.
 
 T4's WFI/`PostExecHook` question is settled for A1 (V-32's recommendation, in the plan's A1
 step). V-32's [packets 001–003 review](docs/V32_PACKET_REVIEW_2026-10-12.md) needs nothing from
 the core; its core-side notes are appended.
 
-**Validation status:** `5abce6e` passed `./mvnw clean verify` (674 core tests in each of three
-cache configurations, plus CLI and bench) and `./release.sh`. No bench run yet; T7's full matrix
-covers T1 and later steps (T3 adds one source read and compare per `step` call; T4 and T5 change
-only entry, CSR and WFI paths). The `v0.1.8` tag passed `release:perform` and `release.sh`.
+**Validation status:** `23bbc03` passed `./mvnw clean verify` (699 core tests in each of three
+cache configurations, plus CLI and bench) and a freshly built baremetal run. Four mutations of
+the core's counter code were each caught by the differential. No bench run yet; T7's full matrix
+covers T1 and later steps (T3 adds one source read and compare per `step` call; T4–T6 change only
+entry, CSR, WFI and exit paths).
 
 ## Rules for this work
 

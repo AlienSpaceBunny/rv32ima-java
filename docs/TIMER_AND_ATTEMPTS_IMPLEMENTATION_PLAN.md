@@ -15,7 +15,7 @@ commit in the status table, as in [FEATURE_REQUEST_PLAN.md](FEATURE_REQUEST_PLAN
 | Step | Scope | Status | Landing commit |
 | --- | --- | --- | --- |
 | T1 | `PostExecHook` jump-PC fix (MRET included) | Done, on `main` | `3f4fdda` |
-| T2 | Independent reference core and differential harness | Not started | |
+| T2 | Independent reference core and differential harness | Done, on `feature/timer-counters` | `08d26db` |
 | T3 | Shared time source, standard compare, `elapsedUs` removal | Not started | |
 | T4 | Standard WFI, WARL `mie`/`mip` | Not started | |
 | T5 | Read-only CSR write traps | Not started | |

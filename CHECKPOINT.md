@@ -12,15 +12,20 @@
 
 ## Resume here
 
-**Step T2 of [the plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md): the independent
-reference core and differential harness**, on a new `feature/timer-counters` branch from `main`.
-Not started. T1 (the `PostExecHook` jump-PC fix) landed on `main` in `3f4fdda`; it also fixes
-MRET, which had the same quirk, so the T2 reference carries that too. Update the plan's status
-table and this section as steps land.
+**Step T3 of [the plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md): the shared time source
+and standard compare**, on `feature/timer-counters` (pushed). Not started. Apply each behavior
+change to `ReferenceCore` in the same commit and list it in its class Javadoc. The core and
+reference agree at `08d26db`. Directed differential cases live in `ReferenceDifferentialTest`;
+it compares state after each call, hook-time state and an ordered bus/CSR-hook log.
 
-**Validation status:** `main` at `3f4fdda` passed `./mvnw clean verify` (594 core tests in each
-of three cache configurations, plus CLI and bench). No bench run for T1; T7's full matrix covers
-it. The `v0.1.8` tag passed `release:perform` (570 core tests in each of three cache configurations, plus CLI and bench) and `release.sh`.
+T1 (hook jump-PC fix, MRET included) is on `main` at `3f4fdda`. T2 (the reference core and
+differential) is on the branch at `08d26db`. Update the plan's status table and this section as
+steps land.
+
+**Validation status:** `feature/timer-counters` at `08d26db` passed `./mvnw clean verify` (607
+core tests in each of three cache configurations, plus CLI and bench). No bench run yet; T7's
+full matrix covers T1 and later steps. The `v0.1.8` tag passed `release:perform` (570 core
+tests in each of three cache configurations, plus CLI and bench) and `release.sh`.
 
 ## Rules for this work
 

@@ -723,3 +723,17 @@ requirements for implementation, not tests run by this review.
   `TIMER_COMPARE_NEVER`; a masked acknowledgement updates only the retained deadline.
 - **Core:** guest reads of `mie` and `mip` are masked too. The WFI tests account for entry traps
   preceding WFI. A test covers a delegated `time` read's sample surviving the `FENCE.I` resume.
+
+## V-32 confirmation of revision 6
+
+2026-10-12. **Confirmed: this design is settled from V-32's side.** Revision 6
+addresses the remaining review findings: retained versus effective deadlines,
+fresh sampling after unmasking, LAUNCH and masked-ACK behavior, CSR readback
+masking, WFI test ordering and preservation of refreshed samples across resume.
+No further design changes or answers are requested before implementation.
+
+The documented V-32 adapter work and validation cases remain implementation
+obligations. Timer/counters land before the execution API. Temporary consumer
+breakage is acceptable under Nate's stated direction; no legacy mode is needed.
+This confirmation is a design review, not implementation authorization or a
+claim of passing runtime tests. Implementation awaits Nate's go.

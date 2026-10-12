@@ -696,3 +696,16 @@ next-task implementation were performed.
 details: a delegated `time` read's sample is kept by every later attempt, including across a
 `FENCE.I` resume, with a test that checks MTIP and not only sample counts; and V-32's use of a
 controller stop to get a fresh sample after unmasking, kept distinct from a terminal halt.
+
+## V-32 confirmation of revision 6
+
+2026-10-12. **Confirmed: this design is settled from V-32's side.** Revision 6
+records both remaining details: a refreshed sample survives delegation and
+FENCE.I resume, and an unmasking scheduling return remains distinct from a
+terminal halt. The timer design now describes the matching adapter behavior.
+No further execution-API changes or answers are requested before implementation.
+
+Implement after the timer/counter design. The documented correctness tests,
+measurements and V-32 integration work remain outstanding; this confirmation
+does not establish performance, select a batch size or enable caching.
+Implementation awaits Nate's go. No runtime work was performed for this review.

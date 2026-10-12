@@ -2,9 +2,11 @@
 
 ## Current state
 
-- **`main` is on `0.1.9-SNAPSHOT`.** Since the local `v0.1.8` release (installed in `~/.m2` and tagged
-  on `origin`, not published) its only code change is T1's hook fix; the rest is design documentation. The
-  branch's T3 API break is not yet installed to `~/.m2` (the phase bump at T7 does that).
+- **`main` is on `0.1.9-SNAPSHOT`** and carries T1–T4, including breaking API changes that are
+  not yet installed to `~/.m2` (T7's phase bump does that). `v0.1.8` is installed locally and
+  tagged on `origin`, not published.
+- **Work directly on `main`** and push after each validated step, until API stabilization for
+  `0.2.0` (Nate, 2026-10-12). `feature/timer-counters` is merged and may stay.
 - **Next work is approved:** implement the settled timer/counter design, then the execution API
   design, following [the implementation plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md).
   Both designs are at revision 6 and confirmed by V-32.
@@ -14,13 +16,13 @@
 ## Resume here
 
 **Step T5 of [the plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md): read-only CSR write
-traps**, on `feature/timer-counters` (pushed). Not started. Apply each behavior change to
+traps**, on `main`. Not started. Apply each behavior change to
 `ReferenceCore` in the same commit and list it under "Changes from the baseline" in its class
 Javadoc. New tests live in `TimerTest` or a CSR-focused class; directed differential cases in
 `ReferenceDifferentialTest` (its `csrHook` program already writes read-only numbers).
 
-Landed: T1 (hook jump-PC fix) on `main` at `3f4fdda`; on the branch, T2 (reference core and
-differential) at `08d26db`, T3 (shared time source, standard compare) at `fdd68f0`, and T4
+Landed on `main`: T1 (hook jump-PC fix) at `3f4fdda`, T2 (reference core and differential) at
+`08d26db`, T3 (shared time source, standard compare) at `fdd68f0`, and T4
 (standard WFI, implemented-only `mie`/`mip`, `injectInterrupt` no longer clears the stall flag)
 at `525c925`. Update the plan's status table and this section as steps land.
 
@@ -28,7 +30,7 @@ T4's WFI/`PostExecHook` question is settled for A1 (V-32's recommendation, in th
 step). V-32's [packets 001–003 review](docs/V32_PACKET_REVIEW_2026-10-12.md) needs nothing from
 the core; its core-side notes are appended.
 
-**Validation status:** `feature/timer-counters` at `525c925` passed `./mvnw clean verify` (642
+**Validation status:** `525c925` passed `./mvnw clean verify` (642
 core tests in each of three cache configurations, plus CLI and bench) and `./release.sh`. No
 bench run yet; T7's full matrix covers T1 and later steps (T3 adds one source read and compare
 per `step` call; T4 changes only entry, CSR and WFI paths). The `v0.1.8` tag passed `release:perform` (570 core

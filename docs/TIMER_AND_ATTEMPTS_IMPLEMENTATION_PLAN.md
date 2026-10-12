@@ -14,10 +14,10 @@ commit in the status table, as in [FEATURE_REQUEST_PLAN.md](FEATURE_REQUEST_PLAN
 
 | Step | Scope | Status | Landing commit |
 | --- | --- | --- | --- |
-| T1 | `PostExecHook` jump-PC fix (MRET included) | Done, on `main` | `3f4fdda` |
-| T2 | Independent reference core and differential harness | Done, on `feature/timer-counters` | `08d26db` |
-| T3 | Shared time source, standard compare, `elapsedUs` removal | Done, on `feature/timer-counters` | `fdd68f0` |
-| T4 | Standard WFI, WARL `mie`/`mip` | Done, on `feature/timer-counters` | `525c925` |
+| T1 | `PostExecHook` jump-PC fix (MRET included) | Done | `3f4fdda` |
+| T2 | Independent reference core and differential harness | Done | `08d26db` |
+| T3 | Shared time source, standard compare, `elapsedUs` removal | Done | `fdd68f0` |
+| T4 | Standard WFI, WARL `mie`/`mip` | Done | `525c925` |
 | T5 | Read-only CSR write traps | Not started | |
 | T6 | Zicntr counters and `time` reads | Not started | |
 | T7 | Timer phase close: docs, bench, release check, V-32 handoff | Not started | |
@@ -31,8 +31,9 @@ commit in the status table, as in [FEATURE_REQUEST_PLAN.md](FEATURE_REQUEST_PLAN
 - **Direction:** follow V-32's needs and, where cheap to maintain, the RISC-V specification. Do
   not add a legacy mode or keep an old shortcut for its own sake; update existing tests to the new
   behavior.
-- **Branches:** phase T on `feature/timer-counters`, phase A on `feature/attempts`, branched from
-  `main` after T merges. Push branches to `origin`; merge to `main` at each phase close.
+- **Branch:** work directly on `main` and push after each validated step (Nate, 2026-10-12, until
+  API stabilization for `0.2.0`). T1–T4 were developed on `feature/timer-counters`, which `main`
+  fast-forwarded to at `3f1c36e`.
 - **One step, one or more logical commits**, each passing `./mvnw spotless:apply` and
   `./mvnw clean verify`. CHANGELOG entries under `[Unreleased]` go in the same commit as the
   change. The core suite already runs uncached and cached at 4 and 4096 slots (`TestCores`).
@@ -159,7 +160,7 @@ reads from [time sampling](TIMER_COUNTER_DESIGN.md#time-sampling).
   confirming `step()`'s and `runCached()`'s loops are still unswitched. A measured regression goes
   to Nate as a tradeoff decision. Record results under `docs/performance/<date>/timer-counters/`.
 - **Release check:** `./release.sh` (fresh baremetal build).
-- **Version and merge:** bump, `./mvnw install`, merge to `main`, push.
+- **Version:** bump, `./mvnw install`, push.
 - **V-32 handoff:** a short note for Nate to relay, listing the breaking changes and the migration
   sites the design names: `ApplicationProcessor.stepCycles`'s nonpositive branch and
   `TerminalFaultIntegrationTest`, `IOProcessor.run()`'s wait calculation, the LAUNCH timer
@@ -167,7 +168,7 @@ reads from [time sampling](TIMER_COUNTER_DESIGN.md#time-sampling).
 
 ## Phase A: execution API
 
-Starts from `main` after T7.
+Starts after T7.
 
 ### A1. `stepAttempts` and the uncached path
 
@@ -210,7 +211,7 @@ JVM and native. Record under `docs/performance/<date>/attempts/`. A regression g
 
 ### A4. Execution phase close
 
-Docs, CHANGELOG, landing commits, bump, install, merge, push. A trial snapshot for V-32 needs
+Docs, CHANGELOG, landing commits, bump, install, push. A trial snapshot for V-32 needs
 Nate's separate authorization.
 
 ## Out of scope

@@ -16,10 +16,18 @@ package com.alienspacebunny.emu;
  *   <li>{@code 0x341} — {@code mepc}
  *   <li>{@code 0x342} — {@code mcause}
  *   <li>{@code 0x343} — {@code mtval}
+ *   <li>{@code 0x306} — {@code mcounteren}
  *   <li>{@code 0x344} — {@code mip}
- *   <li>{@code 0xC00} — {@code cycle} (low 32 bits of the cycle counter)
+ *   <li>{@code 0xB00}, {@code 0xB80}, {@code 0xB02}, {@code 0xB82} — {@code mcycle}, {@code
+ *       mcycleh}, {@code minstret}, {@code minstreth}
+ *   <li>{@code 0xC00}–{@code 0xC02}, {@code 0xC80}–{@code 0xC82} — {@code cycle}, {@code time},
+ *       {@code instret} and their high halves (read-only)
  *   <li>{@code 0xF11} — {@code mvendorid} (read-only, fixed at {@code 0xFF0FF0FF})
  * </ul>
+ *
+ * <p>See {@link RV32IMACore}'s class Javadoc for the counters. {@code mcountinhibit} ({@code
+ * 0x320}) is not built in and reaches this hook, but nothing stored there inhibits the built-in
+ * counters.
  *
  * <p><b>Side-effect rules.</b> This hook is invoked only when CSR instruction semantics require
  * the read or write to occur:

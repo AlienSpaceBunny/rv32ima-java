@@ -12,6 +12,17 @@ for how this file is updated as part of cutting a release.
 - `MachineTimeSource`, the machine's shared timeline (unsigned microseconds), and
   `ManualTimeSource`, a deterministic source for tests, benchmarks and replay.
 - `RV32IMAState.TIMER_COMPARE_NEVER` (all ones), a practically distant compare.
+- Zicntr: `cycle`, `time` and `instret` with their high halves, the machine aliases `mcycle`,
+  `mcycleh`, `minstret` and `minstreth`, and `mcounteren` (CY, TM and IR) are built in, ahead of
+  any `CSRHook`. Reads see the value before the reading instruction; a write to an alias replaces
+  one half after the instruction, without that instruction's own increment. In user mode, a
+  counter read needs its `mcounteren` bit, which starts at 0. `mcountinhibit` stays with the
+  hook and inhibits nothing.
+- `RV32IMAState.getInstret()`/`setInstret()`, the retired-instruction count, and
+  `getMcycle()`/`setMcycle()` and `getMinstret()`/`setMinstret()`, the architectural counters.
+  Guest writes change only a per-hart offset behind each architectural counter, so `getCycle()`
+  and `getInstret()` stay guest-proof work counts; use their deltas for host accounting.
+- `RV32IMAState.mcounteren`.
 
 ### Changed
 - **Breaking:** every `RV32IMACore` is built with a `MachineTimeSource`:
@@ -40,6 +51,12 @@ for how this file is updated as part of cutting a release.
   `11`, such as `cycle` or `mvendorid`) raises an illegal-instruction exception before any read,
   hook call or write, even with `rd` = x0. Such writes were previously discarded or passed to the
   `CSRHook`.
+- **Breaking:** a `cycle` read returns the value before the reading instruction instead of
+  including it, and in user mode traps unless `mcounteren.CY` is set.
+- **Breaking:** `time`, `timeh` and the other counter numbers above no longer reach the
+  `CSRHook`. A legal `time` or `timeh` read samples the time source afresh, recomputes `MTIP`,
+  and takes a timer interrupt it makes deliverable after the reading instruction, in the same
+  `step` call.
 - The CLI derives time from a host-clock source, or from the cycle count with `-l`, as before.
 
 ### Fixed

@@ -18,8 +18,31 @@ import java.util.Objects;
  * back.
  *
  * <p><b>Time.</b> Every core is built with a {@link MachineTimeSource}, shared by all harts on
- * the machine. The core samples it once per {@link #step} call and never accumulates time; see
- * {@link #step} for the sampling points.
+ * the machine. The core samples it once per {@link #step} call and on every legal {@code time} or
+ * {@code timeh} read, and never accumulates time; see {@link #step} for the sampling points.
+ *
+ * <p><b>Counters (Zicntr).</b> Built in, ahead of any {@link CSRHook}:
+ *
+ * <ul>
+ *   <li>{@code cycle}/{@code cycleh} ({@code 0xC00}/{@code 0xC80}) and the machine aliases {@code
+ *       mcycle}/{@code mcycleh} ({@code 0xB00}/{@code 0xB80}) read {@link RV32IMAState#getMcycle()};
+ *   <li>{@code instret}/{@code instreth} ({@code 0xC02}/{@code 0xC82}) and {@code minstret}/{@code
+ *       minstreth} ({@code 0xB02}/{@code 0xB82}) read {@link RV32IMAState#getMinstret()};
+ *   <li>{@code time}/{@code timeh} ({@code 0xC01}/{@code 0xC81}) read a fresh sample;
+ *   <li>{@code mcounteren} ({@code 0x306}) keeps CY, TM and IR.
+ * </ul>
+ *
+ * <p>A read returns the value before the reading instruction: a {@code cycle} read excludes the
+ * reading instruction, and an {@code instret} read counts the instructions retired before it. A
+ * write to {@code mcycle}, {@code minstret} or one of their high halves replaces that half after
+ * the writing instruction, whose own increment is suppressed; the other half keeps its value from
+ * before the instruction. Guest writes change only the per-hart offsets behind the architectural
+ * counters, never {@link RV32IMAState#getCycle()} or {@link RV32IMAState#getInstret()}. In user
+ * mode, reading one of the three user counters needs its {@code mcounteren} bit, or the access is
+ * an illegal instruction; that check follows the privilege and read-only checks and precedes any
+ * read or sample. {@code mcountinhibit} ({@code 0x320}) is not implemented: it goes to the {@link
+ * CSRHook}, and nothing the hook stores there inhibits the built-in counters. Nor are the {@code
+ * hpmcounter}s, which go to the hook as other read-only numbers do.
  *
  * <p><b>Interrupts.</b> {@code MTIP} (timer) is managed entirely by this class: it is set exactly
  * when the latest time sample is at or past {@code mtimecmp}, unsigned, with no special case for
@@ -134,6 +157,9 @@ public class RV32IMACore {
      * illegal instruction.
      */
     private static final int CSR_READ_ONLY_FIELD = 0xC00;
+
+    /** {@code mcounteren}'s implemented bits: CY (bit 0), TM (bit 1) and IR (bit 2). */
+    private static final int IMPLEMENTED_COUNTER_ENABLES = 0x7;
 
     /*
      * Trap dispatch uses a "+1" internal encoding on the local {@code trap} variable so that
@@ -1054,7 +1080,25 @@ public class RV32IMACore {
         void onPostExec(int pc, int ir, int trap);
     }
 
-    private int readCsr(RV32IMAState state, CSRHook csrHook, int csrno, long cycle) {
+    /**
+     * Samples the time source as the hart's latest sample and recomputes {@code MTIP} from it.
+     *
+     * @return the sample.
+     */
+    private long sampleTime(RV32IMAState state) {
+        long now = timeSource.nowMicros();
+        state.timerl = (int) now;
+        state.timerh = (int) (now >>> 32);
+        updateTimerPending(state);
+        return now;
+    }
+
+    /**
+     * Reads a CSR whose access already passed every legality check. {@code cyclesBefore} and
+     * {@code retiredBefore} are the work counts before the reading instruction, which the
+     * interpreter keeps in locals.
+     */
+    private int readCsr(RV32IMAState state, CSRHook csrHook, int csrno, long cyclesBefore, long retiredBefore) {
         if (isaConfig.hasF()) {
             switch (csrno) {
                 case 0x001:
@@ -1071,8 +1115,14 @@ public class RV32IMACore {
             case 0x340 -> state.mscratch;
             case 0x305 -> state.mtvec;
             case 0x304 -> state.mie & IMPLEMENTED_INTERRUPTS;
-            case 0xC00 -> (int) cycle;
             case 0x344 -> state.mip & IMPLEMENTED_INTERRUPTS;
+            case 0xC00, 0xB00 -> (int) (cyclesBefore + state.mcycleOffset);
+            case 0xC80, 0xB80 -> (int) ((cyclesBefore + state.mcycleOffset) >>> 32);
+            case 0xC02, 0xB02 -> (int) (retiredBefore + state.minstretOffset);
+            case 0xC82, 0xB82 -> (int) ((retiredBefore + state.minstretOffset) >>> 32);
+            case 0xC01 -> (int) sampleTime(state);
+            case 0xC81 -> (int) (sampleTime(state) >>> 32);
+            case 0x306 -> state.mcounteren & IMPLEMENTED_COUNTER_ENABLES;
             case 0x341 -> state.mepc;
             case 0x300 -> state.mstatus;
             case 0x342 -> state.mcause;
@@ -1083,7 +1133,14 @@ public class RV32IMACore {
         };
     }
 
-    private void writeCsr(RV32IMAState state, CSRHook csrHook, int csrno, int writeValue) {
+    /**
+     * Writes a CSR whose access already passed every legality check. A counter write replaces
+     * the value after the writing instruction, suppressing that instruction's own increment, so
+     * the new offset is taken against the work counts after it: {@code cyclesBefore + 1} and
+     * {@code retiredBefore + 1}.
+     */
+    private void writeCsr(
+            RV32IMAState state, CSRHook csrHook, int csrno, int writeValue, long cyclesBefore, long retiredBefore) {
         if (isaConfig.hasF()) {
             switch (csrno) {
                 case 0x001:
@@ -1124,12 +1181,34 @@ public class RV32IMACore {
             case 0x343:
                 state.mtval = writeValue;
                 break;
+            case 0xB00:
+            case 0xB80: {
+                long mcycle = withHalf(cyclesBefore + state.mcycleOffset, csrno == 0xB80, writeValue);
+                state.mcycleOffset = mcycle - (cyclesBefore + 1);
+                break;
+            }
+            case 0xB02:
+            case 0xB82: {
+                long minstret = withHalf(retiredBefore + state.minstretOffset, csrno == 0xB82, writeValue);
+                state.minstretOffset = minstret - (retiredBefore + 1);
+                break;
+            }
+            case 0x306:
+                state.mcounteren = writeValue & IMPLEMENTED_COUNTER_ENABLES;
+                break;
             default:
                 if (csrHook != null) {
                     csrHook.handleWrite(csrno, writeValue);
                 }
                 break;
         }
+    }
+
+    /** Replaces the high or low 32 bits of {@code value} with {@code half}. */
+    private static long withHalf(long value, boolean high, int half) {
+        return high
+                ? ((long) half << 32) | (value & 0xFFFFFFFFL)
+                : (value & 0xFFFFFFFF00000000L) | Integer.toUnsignedLong(half);
     }
 
     // ---- Cold opcode groups (F and A) -------------------------------------------------------
@@ -1444,13 +1523,19 @@ public class RV32IMACore {
      * Executes up to {@code count} instructions on the given hart.
      *
      * <p><b>Time.</b> After validating {@code count} and before executing any instruction, the
-     * call samples the core's {@link MachineTimeSource} exactly once; nothing later in the call
-     * samples again, including the decoded cache's internal steps. The sample becomes the hart's
-     * latest ({@link RV32IMAState#getTimer()}), and {@code MTIP} in {@code mip} is set if it is at
-     * or past {@code mtimecmp}, unsigned, and cleared otherwise. A deadline crossed during the call
-     * is noticed at the next sample. Interrupt reevaluation after a {@code mstatus}, {@code mie} or
-     * {@code mip} write or an {@code MRET} recomputes {@code MTIP} from the latest sample without
-     * sampling again.
+     * call samples the core's {@link MachineTimeSource} once. After that, only a legal {@code
+     * time} or {@code timeh} read samples, afresh each time; the decoded cache's internal steps
+     * and its {@code FENCE.I} resume do not. A read that traps does not sample. Each sample becomes
+     * the hart's latest ({@link RV32IMAState#getTimer()}), and {@code MTIP} in {@code mip} is set
+     * if it is at or past {@code mtimecmp}, unsigned, and cleared otherwise. A {@code time} read
+     * that makes a timer interrupt deliverable has it taken after the reading instruction retires,
+     * within the same call. A deadline crossed during the call is otherwise noticed at the next
+     * sample. Interrupt reevaluation after a {@code mstatus}, {@code mie} or {@code mip} write or
+     * an {@code MRET} recomputes {@code MTIP} from the latest sample without sampling again.
+     *
+     * <p><b>Counters.</b> Before it returns, the call publishes {@link RV32IMAState#getCycle()} and
+     * {@link RV32IMAState#getInstret()}, including on a {@code WFI} return. Within the call both may
+     * lag, so a {@code PostExecHook} must not rely on them.
      *
      * <p><b>WFI.</b> The wake condition is a pending, locally enabled, implemented interrupt:
      * {@code mip & mie & (MSIP | MTIP | MEIP)} is nonzero, whatever {@code mstatus.MIE}. Executing
@@ -1514,10 +1599,7 @@ public class RV32IMACore {
                 throw new IllegalArgumentException("count must be at least 1: " + count);
             }
             // The call's one time sample.
-            long now = timeSource.nowMicros();
-            state.timerl = (int) now;
-            state.timerh = (int) (now >>> 32);
-            updateTimerPending(state);
+            sampleTime(state);
 
             // Check for a pending machine interrupt before starting the instruction loop. This core
             // models only M-mode and U-mode, so mstatus.MIE gates interrupts only while executing in
@@ -1559,9 +1641,13 @@ public class RV32IMACore {
         int instrLen = 4;
         boolean hasC = isaConfig.hasC();
         long cycle = state.getCycle();
+        // The loop ends at its first exception, so every instruction before the current one
+        // retired: the retired count is retiredBase + cycle, less one for a final exception. This
+        // keeps retirement out of the per-instruction work.
+        long retiredBase = state.getInstret() - cycle;
 
         // Set by an instruction that can change interrupt deliverability (a write to mstatus,
-        // mie, or mip, or MRET); checked once that instruction has fully retired so a newly
+        // mie, or mip, MRET, or a time read); checked once that instruction has fully retired so a newly
         // deliverable interrupt is taken before the next guest instruction in this batch runs.
         boolean reevaluateInterrupts = false;
 
@@ -1936,9 +2022,27 @@ public class RV32IMACore {
                                     break;
                                 }
 
+                                // cycle, time and instret and their high halves: user mode needs
+                                // the counter's mcounteren bit.
+                                int userCounter = csrno & ~0x80;
+                                if (privilege == PRIV_USER
+                                        && userCounter >= 0xC00
+                                        && userCounter <= 0xC02
+                                        && (state.mcounteren & (1 << (userCounter & 3))) == 0) {
+                                    trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
+                                    break;
+                                }
+
+                                // The work counts before this instruction; it is already in cycle.
+                                long cyclesBefore = cycle - 1;
+                                long retiredBefore = retiredBase + cyclesBefore;
                                 int rs1 = state.regs[rs1Index];
                                 boolean shouldRead = !(isWrite && rdid == 0);
-                                rval = shouldRead ? readCsr(state, csrHook, csrno, cycle) : 0;
+                                rval = shouldRead ? readCsr(state, csrHook, csrno, cyclesBefore, retiredBefore) : 0;
+                                if (userCounter == 0xC01) {
+                                    // A time read took a fresh sample and recomputed MTIP.
+                                    reevaluateInterrupts = true;
+                                }
                                 int writeValue = rs1;
 
                                 switch (microop) {
@@ -1965,7 +2069,7 @@ public class RV32IMACore {
                                 }
 
                                 if (shouldWrite) {
-                                    writeCsr(state, csrHook, csrno, writeValue);
+                                    writeCsr(state, csrHook, csrno, writeValue, cyclesBefore, retiredBefore);
                                     if (csrno == 0x300 || csrno == 0x304 || csrno == 0x344) {
                                         reevaluateInterrupts = true; // mstatus, mie, mip
                                     }
@@ -2014,6 +2118,7 @@ public class RV32IMACore {
                                                 // also deliverable was normally taken before it.
                                                 break;
                                             }
+                                            state.setInstret(retiredBase + cycle); // WFI retires
                                             state.setCycle(cycle);
                                             state.pc = pc + instrLen;
                                             state.extraflags |= EXTRAFLAG_WFI;
@@ -2065,8 +2170,8 @@ public class RV32IMACore {
                 pc += instrLen;
 
                 if (reevaluateInterrupts) {
-                    // The instruction that just retired changed mstatus/mie/mip or executed MRET;
-                    // an interrupt it made deliverable must be taken before any further guest
+                    // The instruction that just retired changed mstatus/mie/mip, executed MRET or
+                    // read time; an interrupt it made deliverable must be taken before any further guest
                     // instruction. Per the privileged spec, xRET and interrupt-CSR writes require
                     // immediate reevaluation, not just the ordinary bounded-delay rule. pc already
                     // points at the next instruction; back it up by instrLen so the trap handler's
@@ -2086,11 +2191,14 @@ public class RV32IMACore {
         }
 
         // Handle traps and interrupts.
+        boolean exception = false;
         if (trap != 0) {
+            exception = (trap & INTERRUPT_FLAG) == 0;
             pc = commitTrap(state, pc, trap, ir, rval, instrLen);
             dcBatchEnded = true;
         }
 
+        state.setInstret(retiredBase + cycle - (exception ? 1 : 0));
         state.setCycle(cycle);
         state.pc = pc;
         return 0;
@@ -2564,6 +2672,7 @@ public class RV32IMACore {
         int alignMask = hasC ? 1 : 3;
         int pc = state.pc;
         long cycle = state.getCycle();
+        long retiredBase = state.getInstret() - cycle; // as in step()'s loop
 
         for (int icount = 0; icount < count; icount++) {
             int privilege = state.extraflags & EXTRAFLAG_PRIV_MASK;
@@ -2580,6 +2689,7 @@ public class RV32IMACore {
                     if (op == DC_FETCH_FAULT) {
                         // As step()'s loop's fetch fault: no hook call, mtval = pc.
                         pc = commitTrap(state, pc, exceptionTrap(EXC_INSTRUCTION_ACCESS_FAULT), 0, pc, 4);
+                        state.setInstret(retiredBase + cycle);
                         state.setCycle(cycle + 1);
                         state.pc = pc;
                         return 0;
@@ -2597,6 +2707,7 @@ public class RV32IMACore {
                 }
                 dcDelegations++;
                 state.pc = pc;
+                state.setInstret(retiredBase + cycle);
                 state.setCycle(cycle);
                 dcBatchEnded = false;
                 dcMode = DC_MODE_DELEGATING;
@@ -2614,6 +2725,7 @@ public class RV32IMACore {
                 }
                 pc = state.pc;
                 cycle = state.getCycle();
+                retiredBase = state.getInstret() - cycle;
                 continue;
             }
 
@@ -2729,6 +2841,7 @@ public class RV32IMACore {
                 int ir = dcWords[slot];
                 if (postExec != null) postExec.onPostExec(pc, ir, trap);
                 pc = commitTrap(state, pc, trap, ir, rval, instrLen);
+                state.setInstret(retiredBase + cycle - 1);
                 state.setCycle(cycle);
                 state.pc = pc;
                 return 0;
@@ -2740,6 +2853,7 @@ public class RV32IMACore {
             pc = nextPc;
         }
 
+        state.setInstret(retiredBase + cycle);
         state.setCycle(cycle);
         state.pc = pc;
         return 0;

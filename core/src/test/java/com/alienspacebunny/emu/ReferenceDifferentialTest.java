@@ -22,13 +22,16 @@ import org.junit.jupiter.params.provider.CsvSource;
  * relaunch elsewhere in the code) and the same random batch sizes. After every call the test
  * compares the call's result and the whole committed state (registers, FP registers, pc, CSRs, privilege, {@code extraflags}, counters and
  * the hart's reservation fields). Within a batch, each {@code PostExecHook} event and the state
- * it sees are compared too, except pc and the cycle count, which a batch keeps in locals. Every
+ * it sees are compared too, except pc and the cycle and retired counts, which a batch keeps in
+ * locals. Every
  * data access, device access, CSR-hook call and reservation decision is logged in order and
  * compared, as are memory, device state and the bus's own reservation entry. Fetches are not
  * logged, since the cache legitimately skips them.
  *
  * <p>Programs are seeded random code plus directed cases for paths random code rarely reaches:
- * LR/SC sequences, user mode, WFI and interrupts, faults, and CSR-hook accesses.
+ * LR/SC sequences, user mode, WFI and interrupts, faults, CSR-hook accesses and counters. The
+ * time sources advance on every read, so a differing number of samples shows up as differing
+ * time.
  */
 public class ReferenceDifferentialTest {
     private static final int BASE = 0x80000000;
@@ -41,7 +44,7 @@ public class ReferenceDifferentialTest {
     private static final int[] POINTER_REGS = {2, 8, 9, 10, 11};
     private static final int[] CSRS = {
         0x300, 0x304, 0x344, 0x340, 0x341, 0x342, 0x343, 0xC00, 0x001, 0x002, 0x003, 0x301, 0xF11, 0x7C0, 0xC01, 0xC80,
-        0xB00, 0xF14, 0x305
+        0xB00, 0xF14, 0x305, 0xC02, 0xC81, 0xC82, 0xB80, 0xB02, 0xB82, 0x306, 0x320
     };
 
     private static final int ECALL = 0x00000073;
@@ -410,11 +413,16 @@ public class ReferenceDifferentialTest {
                 "timerl",
                 "timerh",
                 "timermatchl",
-                "timermatchh"));
+                "timermatchh",
+                "mcounteren",
+                "mcycle offset.hi",
+                "mcycle offset.lo",
+                "minstret offset.hi",
+                "minstret offset.lo"));
         STATE_FIELDS = names.toArray(String[]::new);
     }
 
-    /** The given prefix values, then every state field except pc and the cycle count. */
+    /** The given prefix values, then every state field except pc and the two work counts. */
     private static int[] snapshot(RV32IMAState s, int... prefix) {
         int[] out = new int[prefix.length + STATE_FIELDS.length];
         System.arraycopy(prefix, 0, out, 0, prefix.length);
@@ -443,7 +451,12 @@ public class ReferenceDifferentialTest {
             s.timerl,
             s.timerh,
             s.timermatchl,
-            s.timermatchh
+            s.timermatchh,
+            s.mcounteren,
+            (int) (s.mcycleOffset >>> 32),
+            (int) s.mcycleOffset,
+            (int) (s.minstretOffset >>> 32),
+            (int) s.minstretOffset
         };
         System.arraycopy(tail, 0, out, i, tail.length);
         return out;
@@ -461,18 +474,32 @@ public class ReferenceDifferentialTest {
     }
 
     private static final String[] HOOK_PREFIX = {"hook pc", "hook ir", "hook trap"};
-    private static final String[] BOUNDARY_PREFIX = {"result", "pc", "cyclel", "cycleh"};
+    private static final String[] BOUNDARY_PREFIX = {"result", "pc", "cyclel", "cycleh", "instret.lo", "instret.hi"};
+
+    private static int[] boundary(RV32IMAState s, int result) {
+        return snapshot(s, result, s.pc, s.cyclel, s.cycleh, (int) s.getInstret(), (int) (s.getInstret() >>> 32));
+    }
+
+    /** A source that advances by one on every read, so the two cores must sample equally often. */
+    private static final class AdvancingSource implements MachineTimeSource {
+        private long next;
+
+        @Override
+        public long nowMicros() {
+            return next++;
+        }
+
+        void advance(long micros) {
+            next += micros;
+        }
+    }
 
     private static void assertSameMachines(Machine ref, Machine core, int refResult, int coreResult, String where) {
         assertEquals(ref.hookEvents.size(), core.hookEvents.size(), where + ": hook event count");
         for (int i = 0; i < ref.hookEvents.size(); i++) {
             assertSnapshot(ref.hookEvents.get(i), core.hookEvents.get(i), HOOK_PREFIX, where + ", hook event " + i);
         }
-        assertSnapshot(
-                snapshot(ref.state, refResult, ref.state.pc, ref.state.cyclel, ref.state.cycleh),
-                snapshot(core.state, coreResult, core.state.pc, core.state.cyclel, core.state.cycleh),
-                BOUNDARY_PREFIX,
-                where);
+        assertSnapshot(boundary(ref.state, refResult), boundary(core.state, coreResult), BOUNDARY_PREFIX, where);
         assertEquals(ref.bus.log, core.bus.log, where + ": bus and CSR-hook log");
         assertArrayEquals(ref.bus.ram, core.bus.ram, where + ": memory");
         assertEquals(ref.bus.deviceReads, core.bus.deviceReads, where + ": device reads");
@@ -497,8 +524,8 @@ public class ReferenceDifferentialTest {
             int iterations) {
         Random rnd = new Random(seed);
         // Separate sources, advanced together, so neither core can see the other's samples.
-        ManualTimeSource refTime = new ManualTimeSource();
-        ManualTimeSource coreTime = new ManualTimeSource();
+        AdvancingSource refTime = new AdvancingSource();
+        AdvancingSource coreTime = new AdvancingSource();
         RV32IMACore core = TestCores.create(isa, coreTime);
         Machine ref = new Machine(program.copy(), new ReferenceCore(isa, refTime)::step, window);
         Machine dut = new Machine(program.copy(), core::step, window);
@@ -528,6 +555,30 @@ public class ReferenceDifferentialTest {
                 case 18 -> {
                     ref.state.setTimerMatch(RV32IMAState.TIMER_COMPARE_NEVER);
                     dut.state.setTimerMatch(RV32IMAState.TIMER_COMPARE_NEVER);
+                }
+                case 20 -> {
+                    // Callback-style counter edits near a low-word rollover.
+                    long near = 0xFFFF_FFF0L + rnd.nextInt(32) + ((long) rnd.nextInt(4) << 32);
+                    int which = rnd.nextInt(4);
+                    for (RV32IMAState state : new RV32IMAState[] {ref.state, dut.state}) {
+                        switch (which) {
+                            case 0 -> state.setCycle(near);
+                            case 1 -> state.setInstret(near);
+                            case 2 -> state.setMcycle(near);
+                            default -> state.setMinstret(near);
+                        }
+                    }
+                }
+                case 22, 23 -> {
+                    // A deadline a few samples ahead, so a time read in the next call may cross it.
+                    long match = ref.state.getTimer() + 2 + rnd.nextInt(4);
+                    ref.state.setTimerMatch(match);
+                    dut.state.setTimerMatch(match);
+                }
+                case 21 -> {
+                    int enables = rnd.nextInt(16); // includes an unimplemented bit
+                    ref.state.mcounteren = enables;
+                    dut.state.mcounteren = enables;
                 }
                 case 19 -> {
                     int reserved = rnd.nextInt() & ~0x888; // host edits are not masked
@@ -797,7 +848,7 @@ public class ReferenceDifferentialTest {
     }
 
     @ParameterizedTest(name = "{0}")
-    @CsvSource({"lrsc", "userMode", "interrupts", "wfi", "faults", "csrHook", "readOnlyCsr"})
+    @CsvSource({"lrsc", "userMode", "interrupts", "wfi", "faults", "csrHook", "readOnlyCsr", "counters", "timeReads"})
     public void directedProgramsMatchReference(String name) {
         switch (name) {
             case "lrsc" ->
@@ -838,7 +889,7 @@ public class ReferenceDifferentialTest {
                                 csr(2, 5, 0, 0x300), // M-mode CSR: illegal
                                 csr(2, 5, 0, 0xC00), // cycle
                                 csr(1, 0, 5, 0x7C0), // a hook CSR from U
-                                csr(2, 5, 0, 0xC01), // time, a hook CSR today
+                                csr(2, 5, 0, 0xC01), // time: needs mcounteren.TM
                                 ECALL,
                                 EBREAK,
                                 MRET, // illegal in U
@@ -967,6 +1018,65 @@ public class ReferenceDifferentialTest {
                                 csr(7, 5, 0, 0xF11), // csrrci, zero immediate: mvendorid
                                 csr(2, 5, 0, 0xC00)), // csrr cycle
                         directedState(0, 0));
+            case "counters" ->
+                runDirected(
+                        name,
+                        directedProgram(
+                                csr(1, 0, 18, 0x304), // csrw mie, x18: undo the handler's masking
+                                csr(2, 5, 0, 0xC00), // csrr x5, cycle
+                                csr(2, 5, 0, 0xC80), // cycleh
+                                csr(2, 5, 0, 0xC02), // instret
+                                csr(2, 5, 0, 0xC82), // instreth
+                                csr(2, 5, 0, 0xC01), // time: samples, may take the timer interrupt
+                                csr(2, 5, 0, 0xC81), // timeh
+                                csr(1, 5, 20, 0xB00), // csrrw x5, mcycle, x20: near rollover
+                                csr(2, 5, 0, 0xB00), // read straight after the write
+                                csr(2, 5, 0, 0xC80),
+                                csr(1, 5, 7, 0xB80), // csrrw x5, mcycleh, x7
+                                csr(1, 5, 20, 0xB02), // csrrw x5, minstret, x20
+                                csr(2, 5, 0, 0xC02),
+                                csr(1, 0, 7, 0xB82), // csrw minstreth, x7
+                                csr(2, 5, 0, 0xC82),
+                                csr(6, 5, 1, 0xB00), // csrrsi x5, mcycle, 1
+                                csr(7, 5, 1, 0xB02), // csrrci x5, minstret, 1
+                                csr(5, 0, 5, 0x306), // csrwi mcounteren, CY | IR
+                                csr(2, 5, 0, 0x306),
+                                csr(1, 0, 21, 0x320), // csrw mcountinhibit, x21: the hook's
+                                csr(2, 5, 0, 0x320),
+                                ECALL, // does not retire
+                                csr(2, 5, 0, 0xC02),
+                                csr(3, 0, 6, 0x300), // csrc mstatus, x6: MPP = U
+                                (5 << 7) | 0x17, // auipc x5, 0
+                                addi(5, 5, 16),
+                                csr(1, 0, 5, 0x341), // csrw mepc, x5
+                                MRET, // to user mode, where the rest of the program stays
+                                csr(2, 5, 0, 0xC00), // gated by mcounteren
+                                csr(2, 5, 0, 0xC01),
+                                csr(2, 5, 0, 0xC02),
+                                csr(2, 5, 0, 0xC80),
+                                csr(2, 5, 0, 0xC81),
+                                csr(2, 5, 0, 0xC82),
+                                csr(1, 5, 7, 0xC01), // a write: read-only, before the gate
+                                csr(2, 5, 0, 0xB00), // machine-only
+                                csr(2, 5, 0, 0xC03)), // hpmcounter3: the hook's, ungated
+                        directedState(0x888, 0x8).andThen(state -> {
+                            state.regs[20] = 0xFFFFFFF0;
+                            state.regs[21] = -1;
+                        }));
+            case "timeReads" ->
+                runDirected(
+                        name,
+                        directedProgram(
+                                csr(1, 0, 18, 0x304), // csrw mie, x18: undo the handler's masking
+                                csr(2, 5, 0, 0xC01), // csrr x5, time: each read samples
+                                addi(14, 14, 1),
+                                csr(2, 5, 0, 0xC81), // timeh
+                                csr(2, 5, 0, 0xC01),
+                                csr(7, 0, 8, 0x300), // csrci mstatus, MIE: due but not deliverable
+                                csr(2, 5, 0, 0xC01),
+                                csr(6, 0, 8, 0x300), // csrsi mstatus, MIE
+                                csr(2, 5, 0, 0xC01)),
+                        directedState(0x888, 0x8));
             default -> throw new IllegalArgumentException(name);
         }
     }

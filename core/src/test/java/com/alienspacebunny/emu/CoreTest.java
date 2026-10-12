@@ -1834,18 +1834,20 @@ public class CoreTest {
     @Test
     public void userModeCanReadUserAccessibleCsr() {
         // 0xC00 (cycle) has privilege field 0b00 in its address encoding -- must pass in user
-        // mode, unlike M-mode-only CSRs such as mstatus.
+        // mode, unlike M-mode-only CSRs such as mstatus, once mcounteren.CY allows it.
         int ramSize = 1024;
         try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
             RV32IMAState state = new RV32IMAState();
             state.pc = RAM_OFFSET;
+            state.mcounteren = 1;
             state.setCycle(42);
             ram.writeInt(RAM_OFFSET, csrInstruction(0xC00, 2, 5, 0)); // csrrs x5, cycle, x0
 
             TestCores.create().step(state, ram, RAM_OFFSET, ramSize, 1, null, null);
 
             assertEquals(0, state.mcause);
-            assertEquals(43, state.regs[5]); // cycle increments once per instruction before fetch
+            assertEquals(42, state.regs[5]); // the value before the reading instruction
+            assertEquals(43, state.getCycle());
         }
     }
 

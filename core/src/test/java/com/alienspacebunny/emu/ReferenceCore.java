@@ -33,6 +33,17 @@ import java.util.Objects;
  *       after the privilege check, write intent on a CSR number with bits 11–10 = {@code 11}
  *       raises an illegal-instruction exception before any read, hook call or write, even with
  *       {@code rd = x0}.
+ *   <li>Zicntr counters and {@code time} reads (step T6, {@code docs/TIMER_COUNTER_DESIGN.md},
+ *       "Counters"): {@code step} counts retired instructions one by one into {@link
+ *       RV32IMAState#getInstret()}, an executed {@code WFI} included, and publishes the count
+ *       with the cycle count. {@code cycle}, {@code instret}, their high halves and the {@code
+ *       mcycle}/{@code minstret} aliases read the architectural value before the reading
+ *       instruction ({@code cycle} no longer includes it); alias writes replace one half after
+ *       the instruction, without its own increment, by changing the state's offsets. {@code
+ *       time} and {@code timeh} sample the source afresh, recompute {@code MTIP} and reevaluate
+ *       interrupts after the instruction. {@code mcounteren} keeps its three low bits, and in
+ *       U-mode a clear bit makes the matching counter read an illegal instruction, checked after
+ *       the read-only check.
  * </ul>
  *
  * <p><b>Intentional differences from {@link RV32IMACore}.</b> None yet. Each later behavior
@@ -949,7 +960,38 @@ final class ReferenceCore {
         return rdRs1Full == 0 ? 0 : encodeRType(0x33, 0, 0, rdRs1Full, rdRs1Full, rs2Full); // C.ADD
     }
 
-    private int readCsr(RV32IMAState state, CSRHook csrHook, int csrno, long cycle) {
+    /**
+     * Step T6: {@code cycle} already counts the reading instruction, and {@code instret} counts
+     * the instructions retired before it.
+     */
+    private int readCsr(RV32IMAState state, CSRHook csrHook, int csrno, long cycle, long instret) {
+        long mcycle = cycle - 1 + state.mcycleOffset;
+        long minstret = instret + state.minstretOffset;
+        switch (csrno) {
+            case 0xC00, 0xB00:
+                return (int) mcycle;
+            case 0xC80, 0xB80:
+                return (int) (mcycle >>> 32);
+            case 0xC02, 0xB02:
+                return (int) minstret;
+            case 0xC82, 0xB82:
+                return (int) (minstret >>> 32);
+            case 0xC01, 0xC81: {
+                long now = time.nowMicros();
+                state.timerl = (int) now;
+                state.timerh = (int) (now >>> 32);
+                if (Long.compareUnsigned(now, state.getTimerMatch()) >= 0) {
+                    state.mip |= MIP_MTIP;
+                } else {
+                    state.mip &= ~MIP_MTIP;
+                }
+                return csrno == 0xC01 ? (int) now : (int) (now >>> 32);
+            }
+            case 0x306:
+                return state.mcounteren & 7;
+            default:
+                break;
+        }
         if (isaConfig.hasF()) {
             switch (csrno) {
                 case 0x001:
@@ -966,7 +1008,6 @@ final class ReferenceCore {
             case 0x340 -> state.mscratch;
             case 0x305 -> state.mtvec;
             case 0x304 -> state.mie & IMPLEMENTED;
-            case 0xC00 -> (int) cycle;
             case 0x344 -> state.mip & IMPLEMENTED;
             case 0x341 -> state.mepc;
             case 0x300 -> state.mstatus;
@@ -978,7 +1019,34 @@ final class ReferenceCore {
         };
     }
 
-    private void writeCsr(RV32IMAState state, CSRHook csrHook, int csrno, int writeValue) {
+    /**
+     * Step T6: after the writing instruction the written counter holds the new value; its own
+     * increment, already in {@code cycle} and still to come for {@code instret}, does not count.
+     */
+    private void writeCsr(RV32IMAState state, CSRHook csrHook, int csrno, int writeValue, long cycle, long instret) {
+        long oldMcycle = cycle - 1 + state.mcycleOffset;
+        long oldMinstret = instret + state.minstretOffset;
+        long low = writeValue & 0xFFFFFFFFL;
+        long high = (long) writeValue << 32;
+        switch (csrno) {
+            case 0xB00:
+                state.mcycleOffset = ((oldMcycle & 0xFFFFFFFF00000000L) | low) - cycle;
+                return;
+            case 0xB80:
+                state.mcycleOffset = (high | (oldMcycle & 0xFFFFFFFFL)) - cycle;
+                return;
+            case 0xB02:
+                state.minstretOffset = ((oldMinstret & 0xFFFFFFFF00000000L) | low) - (instret + 1);
+                return;
+            case 0xB82:
+                state.minstretOffset = (high | (oldMinstret & 0xFFFFFFFFL)) - (instret + 1);
+                return;
+            case 0x306:
+                state.mcounteren = writeValue & 7;
+                return;
+            default:
+                break;
+        }
         if (isaConfig.hasF()) {
             switch (csrno) {
                 case 0x001:
@@ -1105,6 +1173,7 @@ final class ReferenceCore {
         int instrLen = 4;
         boolean hasC = isaConfig.hasC();
         long cycle = state.getCycle();
+        long instret = state.getInstret(); // step T6: counted per retired instruction
 
         // Check for a pending machine interrupt before starting the instruction loop. This core
         // models only M-mode and U-mode, so mstatus.MIE gates interrupts only while executing in
@@ -1740,7 +1809,24 @@ final class ReferenceCore {
                                     break;
                                 }
 
-                                rval = shouldRead ? readCsr(state, csrHook, csrno, cycle) : 0;
+                                // Step T6: user-mode counter reads need their mcounteren bit.
+                                boolean userCounter = csrno == 0xC00
+                                        || csrno == 0xC01
+                                        || csrno == 0xC02
+                                        || csrno == 0xC80
+                                        || csrno == 0xC81
+                                        || csrno == 0xC82;
+                                if (userCounter
+                                        && privilege == PRIV_USER
+                                        && ((state.mcounteren >> (csrno & 3)) & 1) == 0) {
+                                    trap = exceptionTrap(EXC_ILLEGAL_INSTRUCTION);
+                                    break;
+                                }
+
+                                rval = shouldRead ? readCsr(state, csrHook, csrno, cycle, instret) : 0;
+                                if (csrno == 0xC01 || csrno == 0xC81) {
+                                    reevaluateInterrupts = true; // step T6: a time read sampled
+                                }
                                 int writeValue = rs1;
 
                                 switch (microop) {
@@ -1767,7 +1853,7 @@ final class ReferenceCore {
                                 }
 
                                 if (shouldWrite) {
-                                    writeCsr(state, csrHook, csrno, writeValue);
+                                    writeCsr(state, csrHook, csrno, writeValue, cycle, instret);
                                     if (csrno == 0x300 || csrno == 0x304 || csrno == 0x344) {
                                         reevaluateInterrupts = true; // mstatus, mie, mip
                                     }
@@ -1813,6 +1899,7 @@ final class ReferenceCore {
                                             if ((state.mip & state.mie & IMPLEMENTED) != 0) {
                                                 break; // already woken: retire and continue
                                             }
+                                            state.setInstret(instret + 1); // step T6: WFI retires
                                             state.setCycle(cycle);
                                             state.pc = pc + instrLen;
                                             state.extraflags |= EXTRAFLAG_WFI;
@@ -1935,6 +2022,7 @@ final class ReferenceCore {
                     }
                 }
 
+                instret++; // step T6: the instruction retired
                 if (postExec != null) postExec.onPostExec(instrPc, ir, trap);
                 pc += instrLen;
 
@@ -1980,6 +2068,7 @@ final class ReferenceCore {
             trap = 0;
         }
 
+        state.setInstret(instret);
         state.setCycle(cycle);
         state.pc = pc;
         return 0;

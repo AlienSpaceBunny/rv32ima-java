@@ -106,9 +106,9 @@ Time, timer and WFI (the `RV32IMACore` class and `step` Javadoc are
 authoritative):
 
 - Each `step` call samples the core's `MachineTimeSource` once, after
-  validating `count` and before any instruction. Nothing inside the call
-  samples again, including the decoded cache's internal steps and its resume
-  after `FENCE.I`. The sample becomes `state.getTimer()`, the hart's latest
+  validating `count` and before any instruction. Inside the call only a legal
+  `time` or `timeh` read samples again, afresh each time; the decoded cache's
+  internal steps and its resume after `FENCE.I` do not. The sample becomes `state.getTimer()`, the hart's latest
   sample rather than a live clock; there is no `setTimer`. The core never
   accumulates time. `ManualTimeSource` is a deterministic source for tests,
   benchmarks and replay.
@@ -119,7 +119,8 @@ authoritative):
   recomputed from the latest sample, without sampling, when a CSR write or
   `MRET` reevaluates interrupts, so a compare moved through MMIO before `MRET`
   does not re-enter the handler. A deadline crossed during a call is noticed
-  at the next sample.
+  at the next sample; a `time` read that makes a timer interrupt deliverable
+  has it taken after the read, in the same call.
 - `WFI` follows the privileged specification and never changes `mstatus`. Its
   wake condition is a pending, locally enabled, implemented interrupt:
   `mip & mie & (MSIP | MTIP | MEIP)` is nonzero, whatever `mstatus.MIE`.
@@ -135,7 +136,7 @@ authoritative):
   illegal-instruction regardless of `mstatus.MPP`. `MRET`/`ECALL`/`EBREAK`/
   `WFI` with a non-zero `rd` or `rs1` field are illegal (reserved encodings).
 - Interrupts are reevaluated within a batch, not only at `step` entry: after
-  a write to `mstatus`, `mie`, or `mip`, or after `MRET`, an interrupt that
+  a write to `mstatus`, `mie`, or `mip`, a `time` read, or `MRET`, an interrupt that
   became deliverable is taken before the next guest instruction runs, in the
   same `step` call. `mepc` is the next instruction's address (the `MRET`
   target, or the instruction after the CSR write — compressed or not), and
@@ -377,7 +378,12 @@ RAM, VRAM, and hooks. Keep `MMIOBus` for simple range-routed devices.
 `CSRHook` handles custom CSRs that are not implemented directly by
 `RV32IMACore`.
 
-- Known machine CSRs are handled by the core first.
+- Known machine CSRs are handled by the core first, including the Zicntr
+  counters (`cycle`, `time`, `instret`, their high halves, `mcycle`,
+  `minstret` and their high halves) and `mcounteren`. Counter reads return
+  the value before the reading instruction; a `time` read samples the time
+  source. `mcountinhibit` is not built in: it reaches the hook, and what the
+  hook stores there inhibits nothing.
 - Unknown CSR reads call `CSRHook.handleRead(...)` when a hook is present, or
   return `0` when no hook is present.
 - Unknown CSR writes call `CSRHook.handleWrite(...)` when a hook is present, or
@@ -412,6 +418,15 @@ RAM, VRAM, and hooks. Keep `MMIOBus` for simple range-routed devices.
 - `getCycle()/setCycle()`, `getTimer()` (the latest time sample), and
   `getTimerMatch()/setTimerMatch()` expose the 64-bit split registers; prefer
   them over the raw half-word fields except in a CLINT MMIO hook.
+- Two work counts the guest never changes: `getCycle()` (instructions
+  attempted, traps included) and `getInstret()` (instructions retired). The
+  guest-visible `mcycle` and `minstret` are `getMcycle()` and `getMinstret()`:
+  each work count plus a per-hart offset that guest writes change.
+  `setCycle`/`setInstret` move the architectural view with them;
+  `setMcycle`/`setMinstret` change only the offset. A reset that wants both at
+  zero calls `setCycle(0)` and then `setMcycle(0)`.
+- `mcounteren` (CY, TM, IR) gates user-mode reads of `cycle`, `time` and
+  `instret`; it starts at 0.
 - `extraflags` holds the privilege level (bits 0–1: machine = `3`, user = `0`)
   and the WFI flag (bit 2).
 - LR/SC reservation state is held separately in `reservationAddr` and

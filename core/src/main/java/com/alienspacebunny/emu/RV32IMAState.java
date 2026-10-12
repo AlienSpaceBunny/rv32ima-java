@@ -3,14 +3,16 @@ package com.alienspacebunny.emu;
 /**
  * Mutable state of a single RV32IMA hart.
  *
- * <p>All fields are public. They fall into two categories:
+ * <p>The retired-instruction count and the {@code mcycle}/{@code minstret} offsets are reached
+ * through accessors ({@link #getInstret()}, {@link #getMcycle()}, {@link #getMinstret()} and
+ * their setters). Every other field is public, in two categories:
  *
  * <ul>
  *   <li><em>Stable API fields</em> — safe to read and write between calls to {@link
  *       RV32IMACore#step}: {@link #regs}, {@link #pc}, {@link #hartId}, {@link #mstatus}, {@link
  *       #mscratch}, {@link #mtvec}, {@link #mie}, {@link #mip}, {@link #mepc}, {@link #mtval},
  *       {@link #mcause}, {@link #extraflags}, {@link #reservationAddr}, {@link
- *       #reservationValid}, {@link #fregs}, {@link #fcsr}.
+ *       #reservationValid}, {@link #fregs}, {@link #fcsr}, {@link #mcounteren}.
  *   <li><em>CLINT layout fields</em> — {@link #cyclel}, {@link #cycleh}, {@link #timerl}, {@link
  *       #timerh}, {@link #timermatchl}, {@link #timermatchh}. These are the raw 32-bit halves of
  *       the 64-bit cycle counter, machine timer ({@code mtime}), and timer-compare value ({@code
@@ -165,13 +167,31 @@ public class RV32IMAState {
     public int fcsr;
 
     /**
+     * Machine counter-enable register ({@code mcounteren}). Bits 0 (CY), 1 (TM) and 2 (IR) let
+     * user mode read {@code cycle}, {@code time} and {@code instret}, with their high halves; a
+     * clear bit makes such a read an illegal instruction. These are the only implemented bits: a
+     * guest write keeps only them, and guest reads and the user-mode check ignore any other bit a
+     * host edit sets here. Starts at 0.
+     */
+    public int mcounteren;
+
+    // Retired instructions, and the offsets that make mcycle and minstret from the two work
+    // counts. Package-private so the core can apply a guest write without rebasing its locals.
+    private long instret;
+    long mcycleOffset;
+    long minstretOffset;
+
+    /**
      * Creates a new {@code RV32IMAState} with every field zero or false, except the timer compare,
      * which is {@link #TIMER_COMPARE_NEVER}.
      */
     public RV32IMAState() {}
 
     /**
-     * Returns the 64-bit cycle counter composed from {@link #cycleh} and {@link #cyclel}.
+     * Returns the 64-bit cycle counter composed from {@link #cycleh} and {@link #cyclel}: the
+     * instructions the hart attempted, including ones that raised an exception and fetch faults,
+     * but not interrupt entries or {@code WFI} stalls. The guest never changes it; its writes to
+     * {@code mcycle} go to {@link #getMcycle()}'s offset instead.
      *
      * @return the 64-bit cycle count.
      */
@@ -180,13 +200,81 @@ public class RV32IMAState {
     }
 
     /**
-     * Sets the 64-bit cycle counter split across {@link #cycleh} and {@link #cyclel}.
+     * Sets the 64-bit cycle counter split across {@link #cycleh} and {@link #cyclel}. The {@code
+     * mcycle} offset is kept, so {@link #getMcycle()} moves by the same amount.
      *
      * @param cycle the new 64-bit cycle count.
      */
     public void setCycle(long cycle) {
         this.cyclel = (int) cycle;
         this.cycleh = (int) (cycle >>> 32);
+    }
+
+    /**
+     * Returns the retired-instruction count: instructions that completed, including an executed
+     * {@code WFI} and an instruction followed by an interrupt, but not ones that raised an
+     * exception ({@code ECALL}, {@code EBREAK} and fetch faults included), interrupt entries or
+     * {@code WFI} stalls. The guest never changes it, so its deltas are a work count for the
+     * embedder; its writes to {@code minstret} go to {@link #getMinstret()}'s offset instead.
+     *
+     * @return the 64-bit retired count, unsigned.
+     */
+    public long getInstret() {
+        return instret;
+    }
+
+    /**
+     * Sets the retired-instruction count. The {@code minstret} offset is kept, so {@link
+     * #getMinstret()} moves by the same amount.
+     *
+     * @param instret the new 64-bit retired count, unsigned.
+     */
+    public void setInstret(long instret) {
+        this.instret = instret;
+    }
+
+    /**
+     * Returns the architectural {@code mcycle}, which the guest reads as {@code cycle} or {@code
+     * mcycle}: {@link #getCycle()} plus a per-hart offset that guest writes to {@code mcycle} and
+     * {@code mcycleh} change.
+     *
+     * @return the 64-bit {@code mcycle} value, unsigned.
+     */
+    public long getMcycle() {
+        return getCycle() + mcycleOffset;
+    }
+
+    /**
+     * Sets the architectural {@code mcycle} by changing its offset; {@link #getCycle()} is
+     * unchanged. A reset that wants both at zero calls {@code setCycle(0)} and then {@code
+     * setMcycle(0)}.
+     *
+     * @param mcycle the new 64-bit {@code mcycle} value, unsigned.
+     */
+    public void setMcycle(long mcycle) {
+        mcycleOffset = mcycle - getCycle();
+    }
+
+    /**
+     * Returns the architectural {@code minstret}, which the guest reads as {@code instret} or
+     * {@code minstret}: {@link #getInstret()} plus a per-hart offset that guest writes to {@code
+     * minstret} and {@code minstreth} change. Use {@link #getInstret()} deltas, not these, for
+     * host accounting.
+     *
+     * @return the 64-bit {@code minstret} value, unsigned.
+     */
+    public long getMinstret() {
+        return instret + minstretOffset;
+    }
+
+    /**
+     * Sets the architectural {@code minstret} by changing its offset; {@link #getInstret()} is
+     * unchanged.
+     *
+     * @param minstret the new 64-bit {@code minstret} value, unsigned.
+     */
+    public void setMinstret(long minstret) {
+        minstretOffset = minstret - instret;
     }
 
     /**

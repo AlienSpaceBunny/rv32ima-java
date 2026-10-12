@@ -16,7 +16,7 @@
 | [DECODED_ICACHE_PLAN.md](DECODED_ICACHE_PLAN.md) | Complete: merged as `0.1.8-SNAPSHOT`. Agreed design and ordered next steps for the opt-in decoded instruction cache: API, structure, validation, measurement, V-32 trial build. |
 | [performance/2026-10-10/decoded-cache/README.md](performance/2026-10-10/decoded-cache/README.md) | Decoded-cache measurements: default-off cost, sizing at 256–16K slots against `main` and the tier-2 ceiling, counters, and the Native Image unswitching finding. |
 | [TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md](TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md) | **Current work.** Ordered steps (T1–T7, then A1–A4) implementing the two designs below, with a status table recording landing commits. |
-| [TIMER_COUNTER_DESIGN.md](TIMER_COUNTER_DESIGN.md) | **Current spec.** Revision 6, confirmed by V-32 (its reviews are kept in the file): one shared time source replacing `elapsedUs`, standard compare and WFI, WARL `mie`/`mip`, always-on Zicntr with separate work and architectural counters, device-level timer masking on V-32's side. Implemented first (phase T). |
+| [TIMER_COUNTER_DESIGN.md](TIMER_COUNTER_DESIGN.md) | **Implemented spec** (phase T, revision 6, confirmed by V-32): one shared time source replacing `elapsedUs`, standard compare and WFI, WARL `mie`/`mip`, always-on Zicntr with separate work and architectural counters, device-level timer masking on V-32's side. Landing commits in its Status section; its review history is archived. |
 | [EXECUTION_API_DESIGN.md](EXECUTION_API_DESIGN.md) | **Current spec.** Revision 6, confirmed by V-32 (its reviews are kept in the file): `stepAttempts` with committed per-attempt callbacks, fused into the cached loop, one time sample per call on every path. Implemented after the timer design (phase A). |
 | [V32_PACKET_REVIEW_2026-10-12.md](V32_PACKET_REVIEW_2026-10-12.md) | V-32's review of its device packets 001–003 against the two CPU designs, with core-side notes appended. Context only: no core work requested. Its links are relative to V-32's `docs/packets/`. |
 | [BACKLOG.md](BACKLOG.md) | Blocked, waiting and deferred work: items waiting on Nate or V-32, the remaining-shortcuts audit, D, archiving. |
@@ -36,6 +36,7 @@ preserved; link targets are adjusted for the archive layout or the source reposi
 
 | Document | Superseded by |
 |---|---|
+| [archive/TIMER_COUNTER_DESIGN_REV6_WITH_REVIEWS_2026-10-12.md](archive/TIMER_COUNTER_DESIGN_REV6_WITH_REVIEWS_2026-10-12.md) | The [implemented timer/counter design](TIMER_COUNTER_DESIGN.md); keeps V-32's reviews of every revision and the per-revision change lists. |
 | [archive/V32_DECODED_CACHE_TRIAL.md](archive/V32_DECODED_CACHE_TRIAL.md) | Completed trial handoff for `0.1.8-icache-SNAPSHOT`; V-32's result is in [V32_CACHE_MERGE_AND_EXECUTION_API_FEEDBACK.md](V32_CACHE_MERGE_AND_EXECUTION_API_FEEDBACK.md). |
 | [archive/DECODED_ICACHE_SCOPE_DRAFT_2026-10-10.md](archive/DECODED_ICACHE_SCOPE_DRAFT_2026-10-10.md) | [Agreed plan](DECODED_ICACHE_PLAN.md) and [protocol](DECODED_ICACHE_PROTOCOL.md); keeps the nine questions V-32 answered. |
 | [archive/CLEANUP_TODO.md](archive/CLEANUP_TODO.md) | Completed C1–C7 standards pass; retained as implementation history. |

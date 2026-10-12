@@ -26,8 +26,10 @@ import java.util.function.IntFunction;
  * --warmup-seconds S}, {@code --min-rounds R}, {@code --samples N}, {@code --label L}, {@code
  * --reverse} (reverse workload order), {@code --skew K} (negative check: perturb every
  * expectation by K), {@code --scale full|test}, {@code --decoded-cache N} (give every guest core a
- * decoded instruction cache of N slots) and {@code --cache-stats} (print each cached core's
- * counters to stderr at the end, one {@code cache-stats} CSV row per workload).
+ * decoded instruction cache of N slots), {@code --attempts N} (run every guest workload through
+ * {@code stepAttempts} with N attempts per call and an AP-like controller, instead of {@code step}
+ * batches) and {@code --cache-stats} (print each cached core's counters to stderr at the end, one
+ * {@code cache-stats} CSV row per workload).
  */
 final class Harness {
     static final String HEADER = "label,runtime,bus,workload,phase,round,nanos,work,gc_count,gc_ms,alloc_bytes";
@@ -55,6 +57,7 @@ final class Harness {
         long skew = 0;
         Workloads.Scale scale = Workloads.Scale.FULL;
         int cacheSlots = 0;
+        int attempts = 0;
         boolean cacheStats = false;
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
@@ -68,6 +71,7 @@ final class Harness {
                 case "--skew" -> skew = Long.parseLong(args[++i]);
                 case "--scale" -> scale = Workloads.Scale.valueOf(args[++i].toUpperCase(Locale.ROOT));
                 case "--decoded-cache" -> cacheSlots = Integer.parseInt(args[++i]);
+                case "--attempts" -> attempts = Integer.parseInt(args[++i]);
                 case "--cache-stats" -> cacheStats = true;
                 default -> throw new IllegalArgumentException("unknown argument " + args[i]);
             }
@@ -77,7 +81,7 @@ final class Harness {
             throw new IllegalArgumentException("--bus must be one of " + buses.keySet());
         }
 
-        List<Workload> workloads = select(Workloads.all(scale, skew, cacheSlots), selection);
+        List<Workload> workloads = select(Workloads.all(scale, skew, cacheSlots, attempts), selection);
         if (reverse) {
             Collections.reverse(workloads);
         }

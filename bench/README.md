@@ -71,6 +71,12 @@ adds the cache counters as `cache-stats` CSV rows on stderr. `run_matrix.py
 --decoded-cache 256,1024` adds `<label>-dc<N>` cells for the `jvm`, `mono`, `poly`
 and `poly-o3` images.
 
+`--attempts N` runs every guest workload through `stepAttempts` with N attempts
+per call instead of `step` batches, with V-32's AP shape as the controller: a
+volatile mailbox read into `mip` before and after each attempt and a volatile stop
+check. With it, every workload is attempt-at-a-time, so `reg-ap-step1` is the same
+as `reg-ap`. `run_matrix.py` does not pass it yet; run the images directly.
+
 For one ad-hoc run, use `java -jar bench/target/rv32emu-bench-*.jar --bus bytearray`
 (see `Harness` for options). `--skew 1` must make every workload fail; that is the
 negative check.

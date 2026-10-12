@@ -27,6 +27,8 @@ for how this file is updated as part of cutting a release.
   committed single-instruction attempts, with optional callbacks before and after each one and
   one time sample per call. `AttemptResult.exitReason()` reports a controller stop, a `WFI` stall
   or the budget. A nonpositive budget throws before any callback.
+- Bench: `--attempts N` runs every guest workload through `stepAttempts` with an AP-like
+  controller.
 
 ### Changed
 - **Breaking:** every `RV32IMACore` is built with a `MachineTimeSource`:

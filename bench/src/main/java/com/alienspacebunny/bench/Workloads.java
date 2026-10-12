@@ -24,6 +24,7 @@ import static com.alienspacebunny.bench.Asm.ZERO;
 
 import com.alienspacebunny.emu.AccessContext;
 import com.alienspacebunny.emu.AccessKind;
+import com.alienspacebunny.emu.AttemptController;
 import com.alienspacebunny.emu.DecodedCacheConfig;
 import com.alienspacebunny.emu.IsaConfig;
 import com.alienspacebunny.emu.ManualTimeSource;
@@ -98,7 +99,23 @@ final class Workloads {
      * slots} slots (0 for none) whose cacheable range is the guest program.
      */
     static List<Workload> all(Scale scale, long skew, int slots) {
+        return all(scale, skew, slots, 0);
+    }
+
+    /**
+     * {@code stepAttempts} budget for the guest workloads; 0 runs them with {@code step} batches.
+     * Set by {@link #all(Scale, long, int, int)}.
+     */
+    private static int attemptsBudget;
+
+    /**
+     * Every workload, as {@link #all(Scale, long, int)}, with every guest workload run through
+     * {@code stepAttempts} at {@code attempts} per call and an {@link ApController} if {@code
+     * attempts} is positive.
+     */
+    static List<Workload> all(Scale scale, long skew, int slots, int attempts) {
         cacheSlots = slots;
+        attemptsBudget = attempts;
         int n = scale.regIterations;
         return List.of(
                 new RegLoop("reg-ima", IMA, false, n, 4096, skew),
@@ -168,6 +185,54 @@ final class Workloads {
 
     /** Every workload's time source. It stays at 0: no workload uses the timer. */
     static final ManualTimeSource TIME = new ManualTimeSource();
+
+    /**
+     * V-32's AP shape for {@code --attempts}: before and after each attempt it reads a volatile
+     * mailbox into {@code mip.MEIP}, as the AP refreshes its pending interrupts, and the second
+     * callback checks a volatile stop flag. Nothing sets either, so the guest runs undisturbed.
+     */
+    static final class ApController implements AttemptController {
+        private static final int MEIP = 1 << 11;
+        volatile int mailbox;
+        volatile boolean stop;
+
+        @Override
+        public void beforeAttempt(RV32IMAState state) {
+            state.mip = (state.mip & ~MEIP) | (mailbox & MEIP);
+        }
+
+        @Override
+        public boolean afterAttempt(RV32IMAState state, int coreResult) {
+            state.mip = (state.mip & ~MEIP) | (mailbox & MEIP);
+            return stop;
+        }
+    }
+
+    private static final ApController AP_CONTROLLER = new ApController();
+
+    /**
+     * Runs a guest to its terminating {@code WFI}: {@code step} batches of {@code chunk}, or
+     * {@code stepAttempts} calls with {@link #AP_CONTROLLER} under {@code --attempts}.
+     */
+    static void runToWfi(String name, RV32IMACore core, RV32IMAState s, MemoryBus bus, int chunk, long maxCalls) {
+        long calls = 0;
+        if (attemptsBudget > 0) {
+            int budget = attemptsBudget;
+            while (core.stepAttempts(s, bus, 0, MEM_SIZE, budget, null, AP_CONTROLLER)
+                            .coreResult()
+                    == 0) {
+                if (++calls > maxCalls) {
+                    throw new IllegalStateException(name + ": no WFI after " + calls + " stepAttempts calls");
+                }
+            }
+            return;
+        }
+        while (core.step(s, bus, 0, MEM_SIZE, chunk, null, null) == 0) {
+            if (++calls > maxCalls) {
+                throw new IllegalStateException(name + ": no WFI after " + calls + " step calls");
+            }
+        }
+    }
 
     /** A core for a guest program of {@code programLength} bytes at address 0. */
     static RV32IMACore newCore(IsaConfig isa, int programLength) {
@@ -246,15 +311,8 @@ final class Workloads {
 
         @Override
         long run(MemoryBus bus) {
-            RV32IMAState s = state;
-            long maxCalls = expectedInstructions + 16;
-            long calls = 0;
-            while (core.step(s, bus, 0, MEM_SIZE, chunk, null, null) == 0) {
-                if (++calls > maxCalls) {
-                    throw new IllegalStateException(name + ": no WFI after " + calls + " step calls");
-                }
-            }
-            return s.getCycle();
+            runToWfi(name, core, state, bus, chunk, expectedInstructions + 16);
+            return state.getCycle();
         }
 
         @Override
@@ -821,17 +879,10 @@ final class Workloads {
 
         @Override
         long run(MemoryBus bus) {
-            RV32IMAState s = state;
             // An unpinned image (count 0) may run up to 2^32 instructions so verification can
             // report its actual count for pinning.
-            long maxCalls = expectedInstructions > 0 ? expectedInstructions + 16 : 1L << 20;
-            long calls = 0;
-            while (core.step(s, bus, 0, MEM_SIZE, 4096, null, null) == 0) {
-                if (++calls > maxCalls) {
-                    throw new IllegalStateException(name + ": no WFI after " + calls + " step calls");
-                }
-            }
-            return s.getCycle();
+            runToWfi(name, core, state, bus, 4096, expectedInstructions > 0 ? expectedInstructions + 16 : 1L << 20);
+            return state.getCycle();
         }
 
         @Override

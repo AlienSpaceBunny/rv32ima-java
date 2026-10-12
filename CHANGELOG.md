@@ -29,7 +29,9 @@ for how this file is updated as part of cutting a release.
   or the budget. A nonpositive budget throws before any callback. With the decoded cache on,
   the attempts run in a cached loop of their own.
 - Bench: `--attempts N` runs every guest workload through `stepAttempts` with an AP-like
-  controller.
+  controller; adding `--step-loop` runs the same attempts as `step(count=1)` calls between the
+  same callbacks, V-32's former AP loop. `run_matrix.py --attempts N,.. --step-loop N` adds
+  those cells.
 
 ### Changed
 - **Breaking:** every `RV32IMACore` is built with a `MachineTimeSource`:

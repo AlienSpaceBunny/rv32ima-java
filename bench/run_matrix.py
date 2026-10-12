@@ -5,7 +5,8 @@ stderr log, and writes summary.csv (median and full range per cell) plus manifes
 
 Usage:
   bench/run_matrix.py --output DIR --native-dir DIR [--java PATH] [--jar PATH]
-                      [--warmup-seconds 10] [--samples 3] [--forks 2] [--quick]
+                      [--decoded-cache N,..] [--attempts N,..] [--step-loop N]
+                      [--warmup-seconds 10] [--samples 3] [--forks 2]
   bench/run_matrix.py --summarize DIR      # rebuild summary.csv from raw output
 """
 
@@ -62,6 +63,15 @@ def cells(args):
                 if label in ("jvm", "mono", "poly", "poly-o3"):
                     dc.append((f"{label}-dc{slots}", prefix + ["--decoded-cache", slots], bus))
         out += dc
+    # Attempt-at-a-time variants of those cells, cached or not: stepAttempts at each budget, and
+    # V-32's former loop of step(count=1) calls in units of N.
+    modes = [(f"att{n}", ["--attempts", n]) for n in args.attempts.split(",")] if args.attempts else []
+    if args.step_loop:
+        modes.append((f"loop{args.step_loop}", ["--attempts", args.step_loop, "--step-loop"]))
+    out += [(f"{label}-{suffix}", prefix + extra, bus)
+            for suffix, extra in modes
+            for label, prefix, bus in list(out)
+            if label.split("-dc")[0] in ("jvm", "mono", "poly", "poly-o3")]
     if args.only:
         labels = set(args.only.split(","))
         out = [c for c in out if c[0] in labels]
@@ -162,6 +172,11 @@ def main():
     p.add_argument("--graal-java", help="GraalVM JDK java; adds jvm-graaljit / jvm-graalc2 cells")
     p.add_argument("--decoded-cache",
                    help="comma-separated slot counts; adds <label>-dc<N> cells for jvm, mono, poly, poly-o3")
+    p.add_argument("--attempts",
+                   help="comma-separated stepAttempts budgets; adds <label>-att<N> cells for jvm, mono, poly, poly-o3 "
+                        "and their -dc<N> cells")
+    p.add_argument("--step-loop",
+                   help="budget N; adds <cell>-loop<N> cells running step(count=1) loops with the same callbacks")
     p.add_argument("--only", help="comma-separated image labels to run (e.g. jvm-graaljit,jvm-graalc2)")
     p.add_argument("--warmup-seconds", type=float, default=10)
     p.add_argument("--samples", type=int, default=3)

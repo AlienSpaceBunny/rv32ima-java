@@ -75,7 +75,10 @@ and `poly-o3` images.
 per call instead of `step` batches, with V-32's AP shape as the controller: a
 volatile mailbox read into `mip` before and after each attempt and a volatile stop
 check. With it, every workload is attempt-at-a-time, so `reg-ap-step1` is the same
-as `reg-ap`. `run_matrix.py` does not pass it yet; run the images directly.
+as `reg-ap`. Adding `--step-loop` runs the same attempts as `step(count=1)` calls between the
+same callbacks, in units of N: V-32's AP loop before `stepAttempts`. `run_matrix.py --attempts
+1061,65536 --step-loop 1061` adds `<label>-att<N>` and `<label>-loop<N>` cells for the `jvm`,
+`mono`, `poly` and `poly-o3` images and their `-dc<N>` cells.
 
 For one ad-hoc run, use `java -jar bench/target/rv32emu-bench-*.jar --bus bytearray`
 (see `Harness` for options). `--skew 1` must make every workload fail; that is the

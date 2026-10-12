@@ -28,7 +28,9 @@ import java.util.function.IntFunction;
  * expectation by K), {@code --scale full|test}, {@code --decoded-cache N} (give every guest core a
  * decoded instruction cache of N slots), {@code --attempts N} (run every guest workload through
  * {@code stepAttempts} with N attempts per call and an AP-like controller, instead of {@code step}
- * batches) and {@code --cache-stats} (print each cached core's counters to stderr at the end, one
+ * batches), {@code --step-loop} (with {@code --attempts N}: run each attempt as a {@code
+ * step(count=1)} call between the same callbacks, V-32's AP loop before {@code stepAttempts}) and
+ * {@code --cache-stats} (print each cached core's counters to stderr at the end, one
  * {@code cache-stats} CSV row per workload).
  */
 final class Harness {
@@ -58,6 +60,7 @@ final class Harness {
         Workloads.Scale scale = Workloads.Scale.FULL;
         int cacheSlots = 0;
         int attempts = 0;
+        boolean stepLoop = false;
         boolean cacheStats = false;
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
@@ -72,6 +75,7 @@ final class Harness {
                 case "--scale" -> scale = Workloads.Scale.valueOf(args[++i].toUpperCase(Locale.ROOT));
                 case "--decoded-cache" -> cacheSlots = Integer.parseInt(args[++i]);
                 case "--attempts" -> attempts = Integer.parseInt(args[++i]);
+                case "--step-loop" -> stepLoop = true;
                 case "--cache-stats" -> cacheStats = true;
                 default -> throw new IllegalArgumentException("unknown argument " + args[i]);
             }
@@ -81,7 +85,7 @@ final class Harness {
             throw new IllegalArgumentException("--bus must be one of " + buses.keySet());
         }
 
-        List<Workload> workloads = select(Workloads.all(scale, skew, cacheSlots, attempts), selection);
+        List<Workload> workloads = select(Workloads.all(scale, skew, cacheSlots, attempts, stepLoop), selection);
         if (reverse) {
             Collections.reverse(workloads);
         }

@@ -55,6 +55,31 @@ class WorkloadTest {
         }
     }
 
+    @Test
+    void everyWorkloadVerifiesAttemptAtATime() {
+        try {
+            for (int slots : new int[] {0, 4096}) {
+                for (boolean stepLoop : new boolean[] {false, true}) {
+                    MemoryBus bus = new ByteArrayBus(Workloads.MEM_SIZE);
+                    for (Workload w : Workloads.all(Workloads.Scale.TEST, 0, slots, 61, stepLoop)) {
+                        String where = w.name + ", " + slots + " slots, step loop " + stepLoop;
+                        assertDoesNotThrow(
+                                () -> {
+                                    w.prepareOnce(bus);
+                                    w.prepare(bus);
+                                    w.run(bus);
+                                    w.verify(bus);
+                                },
+                                where);
+                    }
+                }
+            }
+            assertThrows(IllegalArgumentException.class, () -> Workloads.all(Workloads.Scale.TEST, 0, 0, 0, true));
+        } finally {
+            Workloads.all(Workloads.Scale.TEST, 0, 0); // back to step batches for the other tests
+        }
+    }
+
     /**
      * Runs a prebuilt guest image on a plain core and a cached core in lockstep, in random batch
      * sizes, comparing every PostExecHook event and the architectural state after each batch,

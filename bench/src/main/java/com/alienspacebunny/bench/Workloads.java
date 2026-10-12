@@ -99,23 +99,34 @@ final class Workloads {
      * slots} slots (0 for none) whose cacheable range is the guest program.
      */
     static List<Workload> all(Scale scale, long skew, int slots) {
-        return all(scale, skew, slots, 0);
+        return all(scale, skew, slots, 0, false);
     }
 
     /**
      * {@code stepAttempts} budget for the guest workloads; 0 runs them with {@code step} batches.
-     * Set by {@link #all(Scale, long, int, int)}.
+     * Set by {@link #all(Scale, long, int, int, boolean)}.
      */
     private static int attemptsBudget;
 
     /**
+     * Whether attempts run as {@code step(count=1)} calls with the same callbacks, V-32's AP loop
+     * before {@code stepAttempts}, instead of {@code stepAttempts} calls.
+     */
+    private static boolean stepLoop;
+
+    /**
      * Every workload, as {@link #all(Scale, long, int)}, with every guest workload run through
      * {@code stepAttempts} at {@code attempts} per call and an {@link ApController} if {@code
-     * attempts} is positive.
+     * attempts} is positive. With {@code stepLoop}, each attempt is instead a {@code
+     * step(count=1)} call between the same callbacks, in units of {@code attempts}.
      */
-    static List<Workload> all(Scale scale, long skew, int slots, int attempts) {
+    static List<Workload> all(Scale scale, long skew, int slots, int attempts, boolean stepLoop) {
+        if (stepLoop && attempts <= 0) {
+            throw new IllegalArgumentException("a step(count=1) loop needs an attempts budget");
+        }
         cacheSlots = slots;
         attemptsBudget = attempts;
+        Workloads.stepLoop = stepLoop;
         int n = scale.regIterations;
         return List.of(
                 new RegLoop("reg-ima", IMA, false, n, 4096, skew),
@@ -212,10 +223,19 @@ final class Workloads {
 
     /**
      * Runs a guest to its terminating {@code WFI}: {@code step} batches of {@code chunk}, or
-     * {@code stepAttempts} calls with {@link #AP_CONTROLLER} under {@code --attempts}.
+     * {@code stepAttempts} calls with {@link #AP_CONTROLLER} under {@code --attempts}, or its
+     * {@code step(count=1)} loop under {@code --step-loop}.
      */
     static void runToWfi(String name, RV32IMACore core, RV32IMAState s, MemoryBus bus, int chunk, long maxCalls) {
         long calls = 0;
+        if (stepLoop) {
+            while (stepLoopUnit(core, s, bus, attemptsBudget) == 0) {
+                if (++calls > maxCalls) {
+                    throw new IllegalStateException(name + ": no WFI after " + calls + " step loops");
+                }
+            }
+            return;
+        }
         if (attemptsBudget > 0) {
             int budget = attemptsBudget;
             while (core.stepAttempts(s, bus, 0, MEM_SIZE, budget, null, AP_CONTROLLER)
@@ -232,6 +252,23 @@ final class Workloads {
                 throw new IllegalStateException(name + ": no WFI after " + calls + " step calls");
             }
         }
+    }
+
+    /**
+     * One scheduling unit of V-32's former AP loop: up to {@code budget} {@code step(count=1)}
+     * calls, each between {@link #AP_CONTROLLER}'s callbacks, ending early on a nonzero result or
+     * a stop. Returns the last result.
+     */
+    private static int stepLoopUnit(RV32IMACore core, RV32IMAState s, MemoryBus bus, int budget) {
+        ApController controller = AP_CONTROLLER;
+        for (int i = 0; i < budget; i++) {
+            controller.beforeAttempt(s);
+            int result = core.step(s, bus, 0, MEM_SIZE, 1, null, null);
+            if (controller.afterAttempt(s, result) || result != 0) {
+                return result;
+            }
+        }
+        return 0;
     }
 
     /** A core for a guest program of {@code programLength} bytes at address 0. */

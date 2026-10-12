@@ -5,8 +5,10 @@
 - **`main` is on `0.1.10-SNAPSHOT`, installed to `~/.m2`** (not tagged or published). It carries
   the timer/counter phase (T1–T7) and, not yet installed, steps A1 and A2. `v0.1.8` is installed
   locally and tagged on `origin`. The version bump for phase A waits for A4.
-- **V-32 trial:** [the handoff](docs/V32_TIMER_PHASE_HANDOFF.md) lists the breaking changes and
-  V-32's migration sites, for Nate to relay. Wait for V-32's test report before archiving it.
+- **V-32 adopted the trial** `0.1.10-attempts-SNAPSHOT` (V-32 `70237cf`): the AP's single
+  mechanism is `stepAttempts` with a 4096-slot cache at up to 1,061 attempts per call; the
+  separate cached attempt loop is ratified; no core API blocker
+  ([exchange, archived](docs/archive/V32_ATTEMPTS_RATIFICATION.md)).
 - **Work directly on `main`** and push after each validated step, until API stabilization for
   `0.2.0` (Nate, 2026-10-12).
 - **T7 bench tradeoff accepted** (Nate, 2026-10-12): `step(count=1)` about 1.12× slower natively
@@ -17,21 +19,13 @@
 
 ## Resume here
 
-**Waiting on V-32: [V32_ATTEMPTS_RATIFICATION.md](docs/V32_ATTEMPTS_RATIFICATION.md)**, for Nate
-to relay. Nate is agnostic on A2's copied loop but prefers one opinionated mechanism, and V-32's
-choice of what to consume decides. It asks V-32 which mechanism the AP will use (we recommend
-`stepAttempts` with the cache on) and to ratify A2's separate `runCachedAttempts()` loop, which
-copies `runCached()`'s fast handlers (about 200 lines). That loop leaves batched code unchanged
-and runs cached attempts 1.41–1.67× faster than A1's on native. The no-copy alternative gives
-1.08–1.17×. Evidence: [attempts-a2](docs/performance/2026-10-12/attempts-a2/README.md). Commit a
-received reply before editing the document.
+**Next: step A3 of [the plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md)**, the full
+`--attempts` measurement on JVM and native. V-32's path (cached, 4096 slots, budget 1,061) is the
+headline cell. `run_matrix.py` does not pass `--attempts` yet. Keep both cached loops'
+independent-reference differential and mutation coverage (V-32's ratification condition).
 
 **Trial build:** `0.1.10-attempts-SNAPSHOT` is installed in `~/.m2` from local tag
-`trial/0.1.10-attempts`. `main`'s POMs stay on `0.1.10-SNAPSHOT`.
-
-**Next: step A3 of [the plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md)**, the full
-`--attempts` measurement on JVM and native, once V-32 answers (a switch to another variant would
-need its own A3 run). `run_matrix.py` does not pass `--attempts` yet.
+`trial/0.1.10-attempts`, which V-32 now consumes. `main`'s POMs stay on `0.1.10-SNAPSHOT`.
 
 **Validation status:** the A2 tree passed `./mvnw clean verify` (801 core tests in each of three
 cache configurations, plus CLI and bench). Twelve mutations of the new loop and driver each fail

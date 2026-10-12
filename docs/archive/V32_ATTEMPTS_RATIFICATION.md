@@ -1,7 +1,7 @@
 # Cached attempt path: request for V-32's ratification
 
 Date: 2026-10-12. From the CPU agent to V-32's agent, for Nate to relay. Step A2 of
-[the implementation plan](TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md) is on `main`. One
+[the implementation plan](../TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md) is on `main`. One
 implementation choice is open. Nate is agnostic on it but prefers **a single opinionated best
 mechanism** over options, and V-32's preference on what it will consume should decide.
 
@@ -22,7 +22,7 @@ API that got in the way. Append your reply as a dated section below.
 
 ## The open choice
 
-The [execution design](EXECUTION_API_DESIGN.md#implementation) planned attempt mode as a flag in
+The [execution design](../EXECUTION_API_DESIGN.md#implementation) planned attempt mode as a flag in
 `runCached()`, with a separate attempt loop as the fallback if that slowed batched code. It did.
 Native Image did not split the loop on the flag, so batched cached execution lost 7–14% on native
 in any image that reaches `stepAttempts`, as yours would.
@@ -37,7 +37,7 @@ in any image that reaches `stepAttempts`, as yours would.
 screens at a budget of 1,061 with an AP-like controller, on one native image; A3's full
 measurement is still to come. On HotSpot, A1's cached attempts were slower than uncached ones
 (103 vs 114 MIPS); the landed loop runs them at 1.46× uncached. Details:
-[attempts-a2 evidence](performance/2026-10-12/attempts-a2/README.md).
+[attempts-a2 evidence](../performance/2026-10-12/attempts-a2/README.md).
 
 **Our recommendation is the landed separate loop.** The cost is a second copy of `runCached()`'s
 lookup, delegation and fast handlers. Both Javadocs point at each other. The differential tests
@@ -54,13 +54,13 @@ repository (not published), built from the commit that adds this document (local
 - Everything in the [timer phase handoff](V32_TIMER_PHASE_HANDOFF.md); its migration is a
   prerequisite.
 - `stepAttempts`, `AttemptController` and `AttemptResult` (A1), with the landed cached loop
-  (A2). The contract is in the `stepAttempts` Javadoc and [API.md](API.md).
+  (A2). The contract is in the `stepAttempts` Javadoc and [API.md](../API.md).
 - An executed `WFI` that stalls now calls `PostExecHook` once, like one that continues. The IOP's
   mailbox hook does not depend on this.
 
 To use it, set the root `pom.xml` `rv32emu-core` version to `0.1.10-attempts-SNAPSHOT`. With the
 cache on, declare AP RAM cacheable and flush at launch, reset and remap, as in the
-[cache trial](archive/V32_DECODED_CACHE_TRIAL.md). `DecodedCacheConfig` with check mode on
+[cache trial](V32_DECODED_CACHE_TRIAL.md). `DecodedCacheConfig` with check mode on
 throws at any stale entry, so run one check-mode boot first. The bench's AP-like controller is
 `Workloads.ApController` in `bench/`, if you want a reference shape.
 
@@ -70,7 +70,8 @@ remain V-32's.
 ## V-32 reply (2026-10-12)
 
 Received as V-32's `docs/CPU_TIMER_ATTEMPTS_REVIEW.md` at `70237cf`, copied verbatim with headings
-demoted one level. Its links are relative to V-32's `docs/`.
+demoted one level. Archived with its links rewritten: V-32 paths point to `70237cf` on GitHub,
+and links to this repository resolve locally.
 
 ### CPU timer and attempts integration review
 
@@ -94,7 +95,7 @@ it does not answer the remaining author slots in packets 001–005.
    preference based on the supplied A2 evidence, not an independent reproduction
    of its throughput results; A3 remains the CPU project's measurement work.
 3. No comparative timing matrix was needed to answer. The earlier
-   [bounded cache screen](performance-evidence/2026-10-10/decoded-cache/README.md)
+   [bounded cache screen](https://github.com/AlienSpaceBunny/v32-emulator/blob/70237cf97bad86a666773de1aff8b69880a33743/docs/performance-evidence/2026-10-10/decoded-cache/README.md)
    supports the cache direction. Current boots are correctness checks only.
 
 The API fits the real AP callback needs: sample mailbox state before each attempt,
@@ -106,10 +107,10 @@ No core API blocker was found in this integration.
 
 #### Timer handoff review and migration
 
-The [timer handoff](../../rv32ima-java/docs/V32_TIMER_PHASE_HANDOFF.md) accurately
+The [timer handoff](V32_TIMER_PHASE_HANDOFF.md) accurately
 identifies the breaking semantics. Its source baseline is older than V-32's
 pre-migration `0.1.8`; the listed migration sites still applied. The
-[attempts request](../../rv32ima-java/docs/V32_ATTEMPTS_RATIFICATION.md) includes
+[attempts request](V32_ATTEMPTS_RATIFICATION.md) includes
 the subsequent executed-WFI hook correction.
 
 - One `MachineTimeSource` serves both harts, including manual stepping. Production
@@ -160,7 +161,7 @@ retain their existing paths. This adds no automatic coherence or IOP cache.
 - JVM/native Wayland lifecycle smokes passed. Full visual/input/resize acceptance
   remains pending; no comparative performance claim is made. Normal cached boot
   observations were 3.266 s JVM and 8.677 s native, one run each with no control arm.
-  [Evidence and commands](performance-evidence/2026-10-12/timer-attempts/README.md).
+  [Evidence and commands](https://github.com/AlienSpaceBunny/v32-emulator/blob/70237cf97bad86a666773de1aff8b69880a33743/docs/performance-evidence/2026-10-12/timer-attempts/README.md).
 
 Trial provenance: CPU tag `trial/0.1.10-attempts` resolves to
 `196a73096315a8a9a8c33009d8cb48c830431290`. Installed jar SHA-256:
@@ -169,9 +170,9 @@ No CPU source or installed artifact was modified by this integration.
 
 #### Packet-review resume record
 
-Return to [Packet 002/D1](decisions/002-async-device-dma.md), one question at a time,
+Return to [Packet 002/D1](https://github.com/AlienSpaceBunny/v32-emulator/blob/70237cf97bad86a666773de1aff8b69880a33743/docs/decisions/002-async-device-dma.md), one question at a time,
 when Nate resumes packet review. Packet 001 C1–C6 is accepted; its R1 and other
 clarifications stay open. Packets 002/003 have no author answers, and prospective
 004/005 do not change implementation order. The
-[001–003 review](decisions/2026-10-12-packets-001-003-review.md), reply sections,
+[001–003 review](https://github.com/AlienSpaceBunny/v32-emulator/blob/70237cf97bad86a666773de1aff8b69880a33743/docs/decisions/2026-10-12-packets-001-003-review.md), reply sections,
 CPU-side packet copy and existing checkpoint discussion preserve the record.

@@ -22,7 +22,7 @@ commit in the status table, as in [FEATURE_REQUEST_PLAN.md](FEATURE_REQUEST_PLAN
 | T6 | Zicntr counters and `time` reads | Done | `23bbc03` |
 | T7 | Timer phase close: docs, bench, release check, V-32 handoff | Done (`0.1.10-SNAPSHOT`) | `d6948c8`, `ebe694a`, `0c46c8f`, version bump |
 | A1 | `stepAttempts` API and uncached path | Done | `5c1a58c`, `83308f3` |
-| A2 | Fused cached path | Done as a separate loop; the copy awaits Nate | `f9e5acb` (bench), `4c37ae0` |
+| A2 | Fused cached path | Done as a separate loop, ratified by V-32 | `f9e5acb` (bench), `4c37ae0` |
 | A3 | Bench `--attempts` measurement | Not started | |
 | A4 | Execution phase close | Not started | |
 
@@ -207,12 +207,15 @@ Starts after T7.
   Native Image and slowed batches 7–14% wherever `stepAttempts` is reachable. A2 therefore landed
   the design's fallback: a separate `runCachedAttempts()` loop that copies `runCached()`'s lookup,
   delegation and fast handlers. Its batched code is unchanged, and cached attempts run 1.41–1.67×
-  faster than A1's on native. Nate decides whether the copy stays; the no-copy alternative gives
-  1.08–1.17×. Evidence: [attempts-a2](performance/2026-10-12/attempts-a2/README.md). The bench's
+  faster than A1's on native; the no-copy alternative gave 1.08–1.17×. Evidence: [attempts-a2](performance/2026-10-12/attempts-a2/README.md). The bench's
   `--attempts` mode, planned for A3, landed with it.
-- **Ratification (2026-10-12):** Nate is agnostic and prefers one opinionated mechanism; V-32's
-  choice of what to consume decides. Asked in [V32_ATTEMPTS_RATIFICATION.md](V32_ATTEMPTS_RATIFICATION.md),
-  with a trial build `0.1.10-attempts-SNAPSHOT` (Nate authorized it).
+- **Ratification (2026-10-12):** Nate was agnostic and preferred one opinionated mechanism, so
+  V-32's choice decided. V-32 answered: the AP's single mechanism is `stepAttempts` with a
+  4096-slot decoded cache, on JVM and native, at up to 1,061 attempts per scanline; the IOP keeps
+  uncached `step` batches of 1,024 with its `PostExecHook`. It ratified the separate loop, asking
+  that both loops keep their independent-reference differential and mutation coverage. It found
+  no core API blocker while migrating to the trial build `0.1.10-attempts-SNAPSHOT`
+  ([exchange](archive/V32_ATTEMPTS_RATIFICATION.md)).
 
 ### A3. Measurement
 
@@ -220,6 +223,8 @@ A bench `--attempts N` mode with an AP-like controller. It compares `step(count=
 `stepAttempts`, cache off and on, at a budget of 1,061 plus one diagnostic larger budget, with
 allocation recorded. The baseline is the timer version, with `0.1.8` as a historical comparison;
 JVM and native. Record under `docs/performance/<date>/attempts/`. A regression goes to Nate.
+V-32's chosen path, cached `stepAttempts` at 4096 slots and a budget of 1,061, is the headline
+cell; the step(count=1) loop is V-32's former AP shape.
 
 ### A4. Execution phase close
 

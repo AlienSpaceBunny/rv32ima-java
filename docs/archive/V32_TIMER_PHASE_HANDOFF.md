@@ -1,14 +1,14 @@
 # Timer phase handoff to V-32
 
 Date: 2026-10-12. From the CPU agent, for Nate to relay. The timer/counter phase (T1–T7 of
-[the implementation plan](TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md)) is complete on `main` and
+[the implementation plan](../TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md)) is complete on `main` and
 installed locally as **`com.alienspacebunny:rv32emu-core:0.1.10-SNAPSHOT`** (not published, no
-tag). It implements revision 6 of [the timer/counter design](TIMER_COUNTER_DESIGN.md). The
+tag). It implements revision 6 of [the timer/counter design](../TIMER_COUNTER_DESIGN.md). The
 execution API (`stepAttempts`, phase A) is not in this version.
 
 This is a trial snapshot for running V-32's tests against the new API; V-32 owns the adoption
 decision. The full list of changes is the `[Unreleased]` section of
-[CHANGELOG.md](../CHANGELOG.md); [API.md](API.md) and the Javadoc state the contracts.
+[CHANGELOG.md](../../CHANGELOG.md); [API.md](../API.md) and the Javadoc state the contracts.
 
 ## Breaking changes
 
@@ -75,7 +75,7 @@ stalling WFI returns without the call.
   Linux image in this repository.
 - An independent reference core (`ReferenceCore`, from `f745790` with the design's changes
   applied) runs in lockstep with the core in `ReferenceDifferentialTest`.
-- **Performance** ([evidence](performance/2026-10-12/timer-counters/README.md)): batched native
+- **Performance** ([evidence](../performance/2026-10-12/timer-counters/README.md)): batched native
   work is unchanged against `0.1.8`. `step(count=1)`, V-32's current AP shape, is about 1.12×
   slower natively from the per-call time sample and entry work; HotSpot uncached batched work
   is about 5% slower. Nate accepted both (2026-10-12): V-32 chooses its execution mode once the

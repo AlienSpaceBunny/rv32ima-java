@@ -57,6 +57,8 @@ for how this file is updated as part of cutting a release.
   `CSRHook`. A legal `time` or `timeh` read samples the time source afresh, recomputes `MTIP`,
   and takes a timer interrupt it makes deliverable after the reading instruction, in the same
   `step` call.
+- An executed `WFI` that stalls now calls the `PostExecHook` once, as one that continues already
+  did. A call that finds the hart already stalled still executes nothing and calls no hook.
 - The CLI derives time from a host-clock source, or from the cycle count with `-l`, as before.
 
 ### Fixed

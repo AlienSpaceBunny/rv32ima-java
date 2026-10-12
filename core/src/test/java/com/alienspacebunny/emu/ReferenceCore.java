@@ -44,6 +44,9 @@ import java.util.Objects;
  *       interrupts after the instruction. {@code mcounteren} keeps its three low bits, and in
  *       U-mode a clear bit makes the matching counter read an illegal instruction, checked after
  *       the read-only check.
+ *   <li>{@code PostExecHook} on a stalling {@code WFI} (step A1, {@code
+ *       docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md}): an executed {@code WFI} that stalls calls
+ *       the hook once, as one that continues already did.
  * </ul>
  *
  * <p><b>Intentional differences from {@link RV32IMACore}.</b> None yet. Each later behavior
@@ -1898,6 +1901,9 @@ final class ReferenceCore {
                                         case 0x105: // WFI
                                             if ((state.mip & state.mie & IMPLEMENTED) != 0) {
                                                 break; // already woken: retire and continue
+                                            }
+                                            if (postExec != null) { // step A1: a stalling WFI calls the hook
+                                                postExec.onPostExec(instrPc, ir, 0);
                                             }
                                             state.setInstret(instret + 1); // step T6: WFI retires
                                             state.setCycle(cycle);

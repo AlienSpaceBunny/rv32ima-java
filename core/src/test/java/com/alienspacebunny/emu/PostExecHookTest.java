@@ -13,8 +13,10 @@ import org.junit.jupiter.params.provider.CsvSource;
  * Verifies the PC that {@link RV32IMACore.PostExecHook} reports for control transfers: a taken or
  * untaken jump, branch or MRET is reported at its own PC, never at its target. Each case runs the
  * transfer and then one instruction at its destination in a single batch, so the second event
- * also checks where execution went. The suite reruns with the decoded cache on (see {@link
- * TestCores}), which covers the cached path's fast handlers.
+ * also checks where execution went. Also verifies that an executed {@code WFI} calls the hook
+ * once, stalling or not, and a check of an existing stall does not. The suite reruns with the
+ * decoded cache on (see {@link TestCores}), which covers the cached path's fast handlers and its
+ * delegation.
  */
 public class PostExecHookTest {
     private static final int RAM_OFFSET = 0x80000000;
@@ -24,6 +26,8 @@ public class PostExecHookTest {
     private static final int NOP = 0x00000013; // ADDI x0, x0, 0
     private static final int C_NOP = 0x0001;
     private static final int MRET = 0x30200073;
+    private static final int WFI = 0x10500073;
+    private static final int MSIP = 1 << 3;
 
     private record Event(int pc, int trap) {}
 
@@ -207,5 +211,39 @@ public class PostExecHookTest {
         int instruction = bnez ? cBnez(8, offset) : cBeqz(8, offset);
         List<Event> events = run(HAS_C, instruction, true, s -> s.regs[8] = value);
         assertTransfer(events, taken ? TARGET : RAM_OFFSET + 2);
+    }
+
+    // ---- WFI ----
+
+    @Test
+    public void stallingWfiCallsTheHookOnce() {
+        RV32IMAState[] seen = new RV32IMAState[1];
+        List<Event> events = run(IsaConfig.RV32IMA_ZICSR, WFI, false, s -> seen[0] = s);
+        assertEquals(List.of(new Event(RAM_OFFSET, 0)), events);
+        assertEquals(RAM_OFFSET + 4, seen[0].pc); // it stalled: the NOP after it did not run
+        assertEquals(4, seen[0].extraflags & 4);
+    }
+
+    @Test
+    public void continuingWfiCallsTheHookOnce() {
+        // A pending, locally enabled MSIP that M-mode with MIE clear cannot take: WFI retires and
+        // the call continues.
+        List<Event> events = run(IsaConfig.RV32IMA_ZICSR, WFI, false, s -> {
+            s.mie = MSIP;
+            s.mip = MSIP;
+        });
+        assertEquals(List.of(new Event(RAM_OFFSET, 0), new Event(RAM_OFFSET + 4, 0)), events);
+    }
+
+    @Test
+    public void checkOfAnExistingStallDoesNotCallTheHook() {
+        RV32IMAState[] seen = new RV32IMAState[1];
+        List<Event> events = run(IsaConfig.RV32IMA_ZICSR, WFI, false, s -> {
+            s.extraflags |= 4;
+            seen[0] = s;
+        });
+        assertEquals(List.of(), events);
+        assertEquals(RAM_OFFSET, seen[0].pc);
+        assertEquals(0, seen[0].getCycle());
     }
 }

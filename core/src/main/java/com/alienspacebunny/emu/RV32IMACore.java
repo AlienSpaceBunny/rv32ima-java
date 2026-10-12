@@ -1054,6 +1054,9 @@ public class RV32IMACore {
      *       the destination register but before the PC is advanced to the next instruction.
      *   <li>For instructions that raise a trap: called before the trap is committed to the machine
      *       CSRs ({@code mepc}, {@code mcause}, {@code mtval}, {@code mstatus}).
+     *   <li>For an executed {@code WFI}: called once, whether the hart stalls or the call
+     *       continues, before the PC advances. A call that finds the hart already stalled executes
+     *       no instruction and does not call the hook.
      *   <li>For instruction-fetch failures (PC out of the executable range, misaligned, or the
      *       bus rejecting the fetch with an {@link IndexOutOfBoundsException}): the hook is
      *       <em>not</em> called.
@@ -2117,6 +2120,8 @@ public class RV32IMACore {
                                                 // also deliverable was normally taken before it.
                                                 break;
                                             }
+                                            // An executed WFI calls the hook once, stalling or not.
+                                            if (postExec != null) postExec.onPostExec(instrPc, ir, 0);
                                             state.setInstret(retiredBase + cycle); // WFI retires
                                             state.setCycle(cycle);
                                             state.pc = pc + instrLen;

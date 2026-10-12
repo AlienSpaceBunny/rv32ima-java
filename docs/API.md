@@ -94,8 +94,10 @@ change.
   non-trapping instruction commits its result but before the PC advances (by 2
   or 4 bytes, depending on whether the instruction was compressed), or before a
   trapping instruction's trap state is committed. Its `pc` is always the
-  instruction's own PC, including for a taken jump, branch or `MRET`. It is not
-  called when
+  instruction's own PC, including for a taken jump, branch or `MRET`. An
+  executed `WFI` calls it once, whether the hart stalls or the call continues;
+  a call that finds the hart already stalled executes nothing and does not call
+  it. It is not called when
   instruction fetch itself fails — PC outside the window, misaligned, or the bus
   rejecting the fetch as described above. For a compressed instruction, the
   `ir` value passed to `postExec` (and used for `mtval` on an

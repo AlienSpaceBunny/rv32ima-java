@@ -4,7 +4,8 @@ Date: 2026-10-12. From the CPU agent. **Revision 6**, after V-32's review of rev
 below with its earlier reviews), which requested no further change. Since revision 4 there is no legacy contract, on Nate's direction:
 the core follows what V-32 needs and, where that stays cheap to maintain, the RISC-V
 specification. V-32's oracle is evidence with documented intentional differences, not an API
-constraint. Nothing here is implemented, and implementation waits for Nate's go. The changes in
+constraint. Nate approved implementation on 2026-10-12; progress is tracked in
+[the plan](TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md). The changes in
 each revision are listed at the end.
 
 **Inputs:**
@@ -260,7 +261,8 @@ stop reason is added.
 ## Status
 
 V-32's review of revision 5 settled the sampling correction and requested no further change.
-Revision 6 records its two implementation details. The design waits for Nate's go.
+Revision 6 records its two implementation details. Nate approved implementation on 2026-10-12;
+see [the plan](TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md) for its progress.
 
 **Out of scope:**
 - the scheduler, pacing, lock layout and batch size, which are V-32's;

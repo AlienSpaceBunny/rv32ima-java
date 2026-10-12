@@ -3,7 +3,8 @@
 ## Current state
 
 - **`main` is on `0.1.10-SNAPSHOT`, installed to `~/.m2`** (not tagged or published). It carries
-  the whole timer/counter phase (T1–T7). `v0.1.8` is installed locally and tagged on `origin`.
+  the timer/counter phase (T1–T7) and, not yet installed, step A1. `v0.1.8` is installed locally
+  and tagged on `origin`. The version bump for phase A waits for A4.
 - **V-32 trial:** [the handoff](docs/V32_TIMER_PHASE_HANDOFF.md) lists the breaking changes and
   V-32's migration sites, for Nate to relay. Wait for V-32's test report before archiving it.
 - **Work directly on `main`** and push after each validated step, until API stabilization for
@@ -14,20 +15,23 @@
 
 ## Resume here
 
-**Step A1 of [the plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md): `stepAttempts` and the
-uncached path**, implementing [the execution API design](docs/EXECUTION_API_DESIGN.md)
-(revision 6). Not started. It includes the agreed `PostExecHook`/WFI rule (an executed WFI calls
-the hook once, stalling or not). If Nate wants a mitigation for the bench tradeoff first, do that
-before A1.
+**Step A2 of [the plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md): the fused cached path**,
+per [the execution API design](docs/EXECUTION_API_DESIGN.md) (revision 6). Not started. Today a
+cached core's `stepAttempts` runs each attempt as a cached single-instruction batch through the
+same internal entry as the uncached path; A2 moves attempts into `runCached()`'s loop behind an
+explicit flag. A2's tests include the seeded lockstep against repeated `step(count=1)` with a
+fixed source, and the delegated `time` read retained across a `FENCE.I` resume.
 
-T7 landed as `d6948c8` (Javadoc and API.md fixes), `ebe694a` (timer design archived and trimmed),
-`0c46c8f` (bench evidence) and the version-bump commit.
+A1 landed as `5c1a58c` (an executed, stalling `WFI` calls the `PostExecHook`) and `83308f3`
+(`stepAttempts`, `AttemptController`, `AttemptResult`; the reference core's attempt driver; V-32's
+oracle ported as `AttemptBoundaryTest`; new cases in `StepAttemptsTest`). The internal entry is an
+`attemptEntry` flag that `step()` tests once per call; it adds no work to the instruction loop.
 
-**Validation status:** the T7 tree passed `./mvnw clean verify` (699 core tests in each of three
-cache configurations, plus CLI and bench), `./release.sh` with a freshly built baremetal binary,
-and `./mvnw clean install` at `0.1.10-SNAPSHOT`. Symbolized native builds show `step()` and
-`runCached()` still unswitched. `release.sh` rewrites `baremetal/baremetal.elf` and its debug
-listing with debug-string noise only; restore them rather than committing.
+**Validation status:** the A1 tree passed `./mvnw clean verify` (788 core tests in each of three
+cache configurations, plus CLI and bench). A mutation that makes the attempt entry sample fails 38
+of the new tests. Not run for A1: `./release.sh` and bench (neither required by the plan until
+A3/A4). `release.sh` rewrites `baremetal/baremetal.elf` and its debug listing with debug-string
+noise only; restore them rather than committing.
 
 ## Rules for this work
 

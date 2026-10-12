@@ -349,7 +349,6 @@ public class ReferenceDifferentialTest {
                 MemoryBus mem,
                 int ramOffset,
                 int ramSize,
-                int elapsedUs,
                 int count,
                 RV32IMACore.PostExecHook postExec,
                 CSRHook csrHook);
@@ -373,8 +372,8 @@ public class ReferenceDifferentialTest {
             this.postExec = (pc, ir, trap) -> hookEvents.add(snapshot(state, pc, ir, trap));
         }
 
-        int step(int elapsed, int count, boolean hooked) {
-            return stepper.step(state, bus, BASE, window, elapsed, count, hooked ? postExec : null, csrHook);
+        int step(int count, boolean hooked) {
+            return stepper.step(state, bus, BASE, window, count, hooked ? postExec : null, csrHook);
         }
 
         void clearObservations() {
@@ -497,8 +496,11 @@ public class ReferenceDifferentialTest {
             long seed,
             int iterations) {
         Random rnd = new Random(seed);
-        RV32IMACore core = TestCores.create(isa);
-        Machine ref = new Machine(program.copy(), new ReferenceCore(isa)::step, window);
+        // Separate sources, advanced together, so neither core can see the other's samples.
+        ManualTimeSource refTime = new ManualTimeSource();
+        ManualTimeSource coreTime = new ManualTimeSource();
+        RV32IMACore core = TestCores.create(isa, coreTime);
+        Machine ref = new Machine(program.copy(), new ReferenceCore(isa, refTime)::step, window);
         Machine dut = new Machine(program.copy(), core::step, window);
         setup.accept(ref.state);
         setup.accept(dut.state);
@@ -520,8 +522,12 @@ public class ReferenceDifferentialTest {
                     dut.state.setTimerMatch(match);
                 }
                 case 5 -> {
-                    ref.state.setTimerMatch(0);
+                    ref.state.setTimerMatch(0); // always due: zero is not special
                     dut.state.setTimerMatch(0);
+                }
+                case 18 -> {
+                    ref.state.setTimerMatch(RV32IMAState.TIMER_COMPARE_NEVER);
+                    dut.state.setTimerMatch(RV32IMAState.TIMER_COMPARE_NEVER);
                 }
                 case 6, 7 -> {
                     ref.state.extraflags &= ~4; // release a WFI stall
@@ -546,9 +552,11 @@ public class ReferenceDifferentialTest {
             }
             int count = rnd.nextInt(3) == 0 ? 1 : 1 + rnd.nextInt(32);
             int elapsed = rnd.nextInt(3);
+            refTime.advance(elapsed);
+            coreTime.advance(elapsed);
             boolean hooked = rnd.nextInt(4) != 0;
-            int refResult = ref.step(elapsed, count, hooked);
-            int dutResult = dut.step(elapsed, count, hooked);
+            int refResult = ref.step(count, hooked);
+            int dutResult = dut.step(count, hooked);
             String where = label + ", seed " + seed + ", slots " + TestCores.SLOTS + ", iteration " + iteration;
             assertSameMachines(ref, dut, refResult, dutResult, where);
             retiredHookEvents += ref.hookEvents.size();

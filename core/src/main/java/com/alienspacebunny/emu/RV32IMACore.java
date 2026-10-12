@@ -9,31 +9,32 @@ import java.util.Objects;
  * <p>Ported from <a href="https://github.com/cnlohr/mini-rv32ima">mini-rv32ima</a> (MIT licence).
  * Supports the RV32I base integer instruction set, the RV32M integer multiplication extension, the
  * RV32A atomic extension (LR/SC and ten AMO operations), and machine-mode CSR instructions
- * (Zicsr). The zero-argument constructor configures exactly this base ISA; the {@link
- * #RV32IMACore(IsaConfig)} constructor accepts an {@link IsaConfig} for the additional optional
- * extensions being layered on for the V-32 AP/IOP multi-hart feature work. As of the Phase 3 work,
+ * (Zicsr). The {@link #RV32IMACore(MachineTimeSource)} constructor configures exactly this base
+ * ISA; the {@link #RV32IMACore(IsaConfig, DecodedCacheConfig, MachineTimeSource)} constructor
+ * accepts an {@link IsaConfig} for the additional optional extensions being layered on for the
+ * V-32 AP/IOP multi-hart feature work. As of the Phase 3 work,
  * {@code Zba}, {@code Zbb}, and {@code Zabha} (byte/halfword AMOs) are decoded when enabled; {@code
  * C} and {@code F} are not decoded yet and only affect the {@code misa} CSR value the guest reads
  * back.
  *
- * <p><b>Intentional deviations from the RISC-V specification.</b> Two behaviours are inherited
- * from the upstream C implementation and preserved intentionally:
+ * <p><b>Intentional deviation from the RISC-V specification.</b> One behaviour is inherited from
+ * the upstream C implementation and preserved intentionally: <b>WFI sets {@code mstatus.MIE}
+ * before suspending.</b> The RISC-V specification treats {@code WFI} as a hint and does not
+ * mandate privilege-state changes. This implementation unconditionally sets bit 3 ({@code MIE})
+ * in {@code mstatus} before entering the WFI stall so that a pending timer interrupt can wake the
+ * hart even if the guest had not enabled interrupts. Do not remove this behaviour without also
+ * adjusting the interrupt-enable check in {@link #step}.
  *
- * <ul>
- *   <li><b>WFI sets {@code mstatus.MIE} before suspending.</b> The RISC-V specification treats
- *       {@code WFI} as a hint and does not mandate privilege-state changes. This implementation
- *       unconditionally sets bit 3 ({@code MIE}) in {@code mstatus} before entering the WFI stall
- *       so that a pending timer interrupt can wake the hart even if the guest had not enabled
- *       interrupts. Do not remove this behaviour without also adjusting the interrupt-enable check
- *       in {@link #step}.
- *   <li><b>Timer interrupt gated by {@code timerMatch != 0}.</b> {@code MTIP} is raised only when
- *       {@code mtimecmp} is non-zero and {@code mtime >= mtimecmp}. When both are zero (reset
- *       state), no interrupt fires. This prevents a spurious timer interrupt before the guest
- *       configures {@code mtimecmp}.
- * </ul>
+ * <p><b>Time.</b> Every core is built with a {@link MachineTimeSource}, shared by all harts on
+ * the machine. The core samples it once per {@link #step} call and never accumulates time; see
+ * {@link #step} for the sampling points.
  *
- * <p><b>Interrupts.</b> {@code MTIP} (timer) is managed entirely by this class from {@code
- * mtimecmp}. {@code MSIP} (software) and {@code MEIP} (external) are pending/enable bits an
+ * <p><b>Interrupts.</b> {@code MTIP} (timer) is managed entirely by this class: it is set exactly
+ * when the latest time sample is at or past {@code mtimecmp}, unsigned, with no special case for
+ * zero. {@link RV32IMAState#TIMER_COMPARE_NEVER} is a practically distant deadline. {@code MTIP}
+ * is recomputed at each sample and, from the latest sample, whenever a {@code mstatus}, {@code
+ * mie} or {@code mip} write or an {@code MRET} reevaluates interrupts, so a compare the guest
+ * moved through MMIO before {@code MRET} is seen there. {@code MSIP} (software) and {@code MEIP} (external) are pending/enable bits an
  * embedder sets directly on {@code mip}/{@code mie}, typically via {@link #injectInterrupt}. All
  * three are gated identically: individually enabled in {@code mie}, and either the hart is
  * running in user mode or {@code mstatus.MIE} is set (machine-mode interrupts are not maskable by
@@ -42,6 +43,7 @@ import java.util.Objects;
  */
 public class RV32IMACore {
     private final IsaConfig isaConfig;
+    private final MachineTimeSource timeSource;
 
     // Decoded instruction cache (see the "Decoded instruction cache" section below). All three
     // arrays are null when the cache is off.
@@ -52,40 +54,33 @@ public class RV32IMACore {
 
     /**
      * Creates a new {@code RV32IMACore} execution engine configured for {@link
-     * IsaConfig#RV32IMA_ZICSR} (no optional extensions). Identical to the core before {@link
-     * IsaConfig} existed.
-     */
-    public RV32IMACore() {
-        this(IsaConfig.RV32IMA_ZICSR);
-    }
-
-    /**
-     * Creates a new {@code RV32IMACore} execution engine configured for the given extension set.
+     * IsaConfig#RV32IMA_ZICSR} (no optional extensions), without a decoded instruction cache.
      *
-     * @param isaConfig the extension configuration; only affects the {@code misa} CSR value as of
-     *     the Phase 1 foundation work (see {@link IsaConfig}'s class Javadoc).
-     * @throws NullPointerException if {@code isaConfig} is {@code null}.
+     * @param timeSource the machine's shared time source.
+     * @throws NullPointerException if {@code timeSource} is {@code null}.
      */
-    public RV32IMACore(IsaConfig isaConfig) {
-        this(isaConfig, DecodedCacheConfig.OFF);
+    public RV32IMACore(MachineTimeSource timeSource) {
+        this(IsaConfig.RV32IMA_ZICSR, DecodedCacheConfig.OFF, timeSource);
     }
 
     /**
-     * Creates a new {@code RV32IMACore} with an optional decoded instruction cache. The cache's
-     * coherence contract is in {@link #flushDecodedCache()}'s Javadoc; read it before enabling the
-     * cache. With {@link DecodedCacheConfig#OFF} this is identical to {@link
-     * #RV32IMACore(IsaConfig)}.
+     * Creates a new {@code RV32IMACore} for the given extension set, with an optional decoded
+     * instruction cache. The cache's coherence contract is in {@link #flushDecodedCache()}'s
+     * Javadoc; read it before enabling the cache.
      *
      * <p>An enabled cache caches nothing until {@link #addDecodedCacheRange} declares where
      * cacheable code lives.
      *
      * @param isaConfig the extension configuration.
-     * @param cacheConfig the cache size and check mode.
-     * @throws NullPointerException if either argument is {@code null}.
+     * @param cacheConfig the cache size and check mode; {@link DecodedCacheConfig#OFF} for none.
+     * @param timeSource the machine's shared time source; one instance serves every hart on the
+     *     machine.
+     * @throws NullPointerException if any argument is {@code null}.
      */
-    public RV32IMACore(IsaConfig isaConfig, DecodedCacheConfig cacheConfig) {
+    public RV32IMACore(IsaConfig isaConfig, DecodedCacheConfig cacheConfig, MachineTimeSource timeSource) {
         this.isaConfig = Objects.requireNonNull(isaConfig, "isaConfig");
         Objects.requireNonNull(cacheConfig, "cacheConfig");
+        this.timeSource = Objects.requireNonNull(timeSource, "timeSource");
         int slots = cacheConfig.slots();
         this.dcTags = slots > 0 ? new int[slots] : null;
         this.dcWords = slots > 0 ? new int[slots] : null;
@@ -200,11 +195,24 @@ public class RV32IMACore {
      *
      * @param state the target hart's state.
      * @param interruptBit the {@code mip}/{@code mie} bit index to set: 3 (MSIP), 7 (MTIP — normally
-     *     core-managed from {@code mtimecmp}; injecting it directly is unusual), or 11 (MEIP).
+     *     core-managed from {@code mtimecmp}, so the next sample or reevaluation overwrites it), or
+     *     11 (MEIP).
      */
     public static void injectInterrupt(RV32IMAState state, int interruptBit) {
         state.mip |= 1 << interruptBit;
         state.extraflags &= ~EXTRAFLAG_WFI;
+    }
+
+    /**
+     * Sets {@code MTIP} exactly when the hart's latest time sample is at or past its compare,
+     * unsigned, and clears it otherwise. Leaves every other {@code mip} bit alone.
+     *
+     * @return whether the compare is due.
+     */
+    private static boolean updateTimerPending(RV32IMAState state) {
+        boolean due = Long.compareUnsigned(state.getTimer(), state.getTimerMatch()) >= 0;
+        state.mip = due ? state.mip | MIP_MTIP : state.mip & ~MIP_MTIP;
+        return due;
     }
 
     /**
@@ -1423,10 +1431,14 @@ public class RV32IMACore {
     /**
      * Executes up to {@code count} instructions on the given hart.
      *
-     * <p><b>Timer.</b> Before executing any instructions, the machine timer ({@code mtime}) is
-     * advanced by {@code elapsedUs} microseconds. If the updated timer meets or exceeds {@code
-     * mtimecmp} and {@code mtimecmp != 0}, {@code MTIP} in {@code mip} is set; otherwise it is
-     * cleared. See the class-level note on the startup timer guard.
+     * <p><b>Time.</b> After validating {@code count} and before executing any instruction, the
+     * call samples the core's {@link MachineTimeSource} exactly once; nothing later in the call
+     * samples again, including the decoded cache's internal steps. The sample becomes the hart's
+     * latest ({@link RV32IMAState#getTimer()}), and {@code MTIP} in {@code mip} is set if it is at
+     * or past {@code mtimecmp}, unsigned, and cleared otherwise. A deadline crossed during the call
+     * is noticed at the next sample. Interrupt reevaluation after a {@code mstatus}, {@code mie} or
+     * {@code mip} write or an {@code MRET} recomputes {@code MTIP} from the latest sample without
+     * sampling again.
      *
      * <p><b>WFI.</b> If the hart is in the WFI stall state and no interrupt is pending, no
      * instructions are executed and this method returns {@code 1} immediately. The caller should
@@ -1456,22 +1468,22 @@ public class RV32IMACore {
      * @param mem the memory bus for instruction fetch and data access.
      * @param ramOffset base address of executable RAM (unsigned 32-bit guest address).
      * @param ramSize size of executable RAM in bytes.
-     * @param elapsedUs microseconds elapsed since the previous call; added to {@code mtime} before
-     *     any instructions run.
-     * @param count maximum number of instructions to execute; may execute fewer if a trap fires.
+     * @param count maximum number of instructions to execute, at least 1; may execute fewer if a
+     *     trap fires.
      * @param postExec optional callback invoked after each instruction or trap; may be {@code
      *     null}.
      * @param csrHook optional hook for custom CSR accesses; may be {@code null}, in which case
      *     reads of non-built-in CSRs return {@code 0} and writes are silently discarded.
      * @return {@code 0} after executing instructions or handling a trap; {@code 1} if the hart is
      *     in WFI and no instruction was executed.
+     * @throws IllegalArgumentException if {@code count} is less than 1, before any time sample or
+     *     state change.
      */
     public int step(
             RV32IMAState state,
             MemoryBus mem,
             int ramOffset,
             int ramSize,
-            int elapsedUs,
             int count,
             PostExecHook postExec,
             CSRHook csrHook) {
@@ -1479,17 +1491,15 @@ public class RV32IMACore {
         // checks: they already ran at the start of the cached batch.
         int trap = 0;
         if (dcMode != DC_MODE_DELEGATING) {
-            long currentTimer = state.getTimer();
-            long newTimer = currentTimer + elapsedUs;
-            state.setTimer(newTimer);
-
-            // Handle Timer interrupt.
-            long timerMatch = state.getTimerMatch();
-            if (timerMatch != 0 && Long.compareUnsigned(newTimer, timerMatch) >= 0) {
+            if (count <= 0) {
+                throw new IllegalArgumentException("count must be at least 1: " + count);
+            }
+            // The call's one time sample.
+            long now = timeSource.nowMicros();
+            state.timerl = (int) now;
+            state.timerh = (int) (now >>> 32);
+            if (updateTimerPending(state)) {
                 state.extraflags &= ~EXTRAFLAG_WFI;
-                state.mip |= MIP_MTIP;
-            } else {
-                state.mip &= ~MIP_MTIP;
             }
 
             // Check for a pending machine interrupt before starting the instruction loop. This core
@@ -2044,8 +2054,11 @@ public class RV32IMACore {
                     // immediate reevaluation, not just the ordinary bounded-delay rule. pc already
                     // points at the next instruction; back it up by instrLen so the trap handler's
                     // "+ instrLen" for interrupts lands mepc exactly there (same idiom as the
-                    // pre-loop dispatch), whatever the retired instruction's length was.
+                    // pre-loop dispatch), whatever the retired instruction's length was. MTIP is
+                    // recomputed from the latest sample first: a compare moved through MMIO
+                    // before an MRET must not re-enter the handler on a stale MTIP.
                     reevaluateInterrupts = false;
+                    updateTimerPending(state);
                     trap = pendingInterruptTrap(state);
                     if (trap != 0) {
                         pc -= instrLen;
@@ -2572,7 +2585,7 @@ public class RV32IMACore {
                 dcMode = DC_MODE_DELEGATING;
                 int result;
                 try {
-                    result = step(state, mem, ramOffset, ramSize, 0, 1, postExec, csrHook);
+                    result = step(state, mem, ramOffset, ramSize, 1, postExec, csrHook);
                 } finally {
                     dcMode = DC_MODE_ON;
                 }

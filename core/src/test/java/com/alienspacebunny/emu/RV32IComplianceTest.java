@@ -63,7 +63,7 @@ public class RV32IComplianceTest {
             state.regs[1] = rs1Val;
             state.regs[2] = rs2Val;
             ram.writeInt(RAM_OFFSET, op(funct7, funct3, 3, 1, 2));
-            TestCores.create().step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create().step(state, ram, RAM_OFFSET, RAM_SIZE, 1, null, null);
             return state.regs[3];
         }
     }
@@ -84,7 +84,7 @@ public class RV32IComplianceTest {
             state.regs[1] = rs1Val;
             state.regs[2] = rs2Val;
             ram.writeInt(RAM_OFFSET, op(funct7, funct3, 3, 1, 2));
-            core.step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            core.step(state, ram, RAM_OFFSET, RAM_SIZE, 1, null, null);
             return state.regs[3];
         }
     }
@@ -99,7 +99,7 @@ public class RV32IComplianceTest {
             RV32IMAState state = machineState();
             state.regs[1] = rs1Val;
             ram.writeInt(RAM_OFFSET, opImm(imm12, funct3, 3, 1));
-            core.step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            core.step(state, ram, RAM_OFFSET, RAM_SIZE, 1, null, null);
             return state.regs[3];
         }
     }
@@ -111,7 +111,7 @@ public class RV32IComplianceTest {
             state.regs[1] = rs1Val;
             state.regs[2] = rs2Val;
             ram.writeInt(RAM_OFFSET, op(funct7, funct3, 3, 1, 2));
-            TestCores.create(config).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create(config).step(state, ram, RAM_OFFSET, RAM_SIZE, 1, null, null);
             return state.mcause;
         }
     }
@@ -122,7 +122,7 @@ public class RV32IComplianceTest {
             RV32IMAState state = machineState();
             state.regs[1] = rs1Val;
             ram.writeInt(RAM_OFFSET, opImm(imm12, funct3, 3, 1));
-            TestCores.create(config).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create(config).step(state, ram, RAM_OFFSET, RAM_SIZE, 1, null, null);
             return state.mcause;
         }
     }
@@ -574,7 +574,7 @@ public class RV32IComplianceTest {
         try (FFMMemoryBus ram = new FFMMemoryBus(RAM_SIZE, RAM_OFFSET)) {
             RV32IMAState state = machineState();
             ram.writeInt(RAM_OFFSET, luiInstr(1, 0x12345));
-            TestCores.create().step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create().step(state, ram, RAM_OFFSET, RAM_SIZE, 1, null, null);
             assertEquals(0x12345000, state.regs[1]);
         }
     }
@@ -584,7 +584,7 @@ public class RV32IComplianceTest {
         try (FFMMemoryBus ram = new FFMMemoryBus(RAM_SIZE, RAM_OFFSET)) {
             RV32IMAState state = machineState();
             ram.writeInt(RAM_OFFSET, luiInstr(1, 0x80000));
-            TestCores.create().step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create().step(state, ram, RAM_OFFSET, RAM_SIZE, 1, null, null);
             assertEquals(0x80000000, state.regs[1]);
         }
     }
@@ -594,7 +594,7 @@ public class RV32IComplianceTest {
         try (FFMMemoryBus ram = new FFMMemoryBus(RAM_SIZE, RAM_OFFSET)) {
             RV32IMAState state = machineState();
             ram.writeInt(RAM_OFFSET, auipcInstr(1, 1));
-            TestCores.create().step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create().step(state, ram, RAM_OFFSET, RAM_SIZE, 1, null, null);
             assertEquals(RAM_OFFSET + 0x1000, state.regs[1]);
         }
     }
@@ -604,7 +604,7 @@ public class RV32IComplianceTest {
         try (FFMMemoryBus ram = new FFMMemoryBus(RAM_SIZE, RAM_OFFSET)) {
             RV32IMAState state = machineState();
             ram.writeInt(RAM_OFFSET, auipcInstr(1, 0));
-            TestCores.create().step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create().step(state, ram, RAM_OFFSET, RAM_SIZE, 1, null, null);
             assertEquals(RAM_OFFSET, state.regs[1]);
         }
     }
@@ -616,7 +616,7 @@ public class RV32IComplianceTest {
             ram.writeByte(RAM_OFFSET + 8, (byte) 0x7f);
             state.regs[1] = RAM_OFFSET;
             ram.writeInt(RAM_OFFSET, load(0, 2, 1, 8)); // LB x2, 8(x1)
-            TestCores.create().step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create().step(state, ram, RAM_OFFSET, RAM_SIZE, 1, null, null);
             assertEquals(127, state.regs[2]);
         }
     }
@@ -628,7 +628,7 @@ public class RV32IComplianceTest {
             ram.writeShort(RAM_OFFSET + 8, (short) 0x7fff);
             state.regs[1] = RAM_OFFSET;
             ram.writeInt(RAM_OFFSET, load(1, 2, 1, 8)); // LH x2, 8(x1)
-            TestCores.create().step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create().step(state, ram, RAM_OFFSET, RAM_SIZE, 1, null, null);
             assertEquals(0x7fff, state.regs[2]);
         }
     }
@@ -640,7 +640,7 @@ public class RV32IComplianceTest {
             ram.writeByte(RAM_OFFSET + 12, (byte) 0xab);
             state.regs[1] = RAM_OFFSET + 8;
             ram.writeInt(RAM_OFFSET, load(0, 2, 1, 4)); // LB x2, 4(x1) → addr RAM_OFFSET+12
-            TestCores.create().step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create().step(state, ram, RAM_OFFSET, RAM_SIZE, 1, null, null);
             assertEquals((byte) 0xab, (byte) state.regs[2]);
         }
     }
@@ -653,7 +653,7 @@ public class RV32IComplianceTest {
             state.regs[1] = RAM_OFFSET;
             state.regs[2] = 0x42;
             ram.writeInt(RAM_OFFSET, store(0, 1, 2, 9)); // SB x2, 9(x1) → writes byte at +9
-            TestCores.create().step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create().step(state, ram, RAM_OFFSET, RAM_SIZE, 1, null, null);
             // Byte at offset 9 (little-endian: second byte of the word at +8) should be 0x42
             assertEquals(0x42, Byte.toUnsignedInt(ram.readByte(RAM_OFFSET + 9)));
             // Adjacent bytes should be unchanged
@@ -728,7 +728,7 @@ public class RV32IComplianceTest {
             RV32IMAState state = machineState();
             state.regs[1] = 0xdeadffff;
             ram.writeInt(RAM_OFFSET, op(0x04, 4, 3, 1, 0)); // zext.h x3, x1
-            TestCores.create(ZBA_ZBB).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create(ZBA_ZBB).step(state, ram, RAM_OFFSET, RAM_SIZE, 1, null, null);
             assertEquals(0x0000ffff, state.regs[3]);
         }
     }

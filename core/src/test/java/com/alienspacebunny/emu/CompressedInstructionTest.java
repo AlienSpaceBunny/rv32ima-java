@@ -229,7 +229,7 @@ public class CompressedInstructionTest {
             } else {
                 ram.writeInt(RAM_OFFSET, instrWord);
             }
-            TestCores.create(config).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create(config).step(state, ram, RAM_OFFSET, RAM_SIZE, 1, null, null);
             return state;
         }
     }
@@ -408,7 +408,7 @@ public class CompressedInstructionTest {
         try (FFMMemoryBus ram = new FFMMemoryBus(RAM_SIZE, RAM_OFFSET)) {
             RV32IMAState state = machineState();
             ram.writeShort(RAM_OFFSET, (short) cJal(16));
-            TestCores.create(HAS_C).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create(HAS_C).step(state, ram, RAM_OFFSET, RAM_SIZE, 1, null, null);
             assertEquals(RAM_OFFSET + 2, state.regs[1]);
             assertEquals(RAM_OFFSET + 16, state.pc);
         }
@@ -419,7 +419,7 @@ public class CompressedInstructionTest {
         try (FFMMemoryBus ram = new FFMMemoryBus(RAM_SIZE, RAM_OFFSET)) {
             RV32IMAState state = machineState();
             ram.writeShort(RAM_OFFSET, (short) cJ(16));
-            TestCores.create(HAS_C).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create(HAS_C).step(state, ram, RAM_OFFSET, RAM_SIZE, 1, null, null);
             assertEquals(0, state.regs[1]);
             assertEquals(RAM_OFFSET + 16, state.pc);
         }
@@ -431,7 +431,7 @@ public class CompressedInstructionTest {
             RV32IMAState state = machineState();
             state.regs[9] = RAM_OFFSET + 0x40;
             ram.writeShort(RAM_OFFSET, (short) cJr(9));
-            TestCores.create(HAS_C).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create(HAS_C).step(state, ram, RAM_OFFSET, RAM_SIZE, 1, null, null);
             assertEquals(0, state.regs[1]);
             assertEquals(RAM_OFFSET + 0x40, state.pc);
         }
@@ -443,7 +443,7 @@ public class CompressedInstructionTest {
             RV32IMAState state = machineState();
             state.regs[9] = RAM_OFFSET + 0x40;
             ram.writeShort(RAM_OFFSET, (short) cJalr(9));
-            TestCores.create(HAS_C).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create(HAS_C).step(state, ram, RAM_OFFSET, RAM_SIZE, 1, null, null);
             assertEquals(RAM_OFFSET + 2, state.regs[1]);
             assertEquals(RAM_OFFSET + 0x40, state.pc);
         }
@@ -455,7 +455,7 @@ public class CompressedInstructionTest {
             RV32IMAState state = machineState();
             state.pc = RAM_OFFSET + 2; // odd-halfword address, reachable only under hasC
             ram.writeShort(RAM_OFFSET + 2, (short) cEbreak());
-            TestCores.create(HAS_C).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create(HAS_C).step(state, ram, RAM_OFFSET, RAM_SIZE, 1, null, null);
             assertEquals(3, state.mcause); // EXC_BREAKPOINT
             assertEquals(RAM_OFFSET + 2, state.mepc);
         }
@@ -474,7 +474,7 @@ public class CompressedInstructionTest {
             state.regs[9] = 0;
             ram.writeShort(RAM_OFFSET, (short) cAddi(8, 5)); // 2 bytes
             ram.writeInt(RAM_OFFSET + 2, opImm(7, 0, 9, 9)); // 4 bytes: ADDI x9, x9, 7
-            TestCores.create(HAS_C).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 2, null, null);
+            TestCores.create(HAS_C).step(state, ram, RAM_OFFSET, RAM_SIZE, 2, null, null);
             assertEquals(105, state.regs[8]);
             assertEquals(7, state.regs[9]);
             assertEquals(RAM_OFFSET + 6, state.pc);
@@ -489,7 +489,7 @@ public class CompressedInstructionTest {
             state.regs[9] = 0;
             ram.writeInt(RAM_OFFSET, opImm(7, 0, 9, 9)); // 4 bytes: ADDI x9, x9, 7
             ram.writeShort(RAM_OFFSET + 4, (short) cAddi(8, 5)); // 2 bytes, starts word-aligned this time
-            TestCores.create(HAS_C).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 2, null, null);
+            TestCores.create(HAS_C).step(state, ram, RAM_OFFSET, RAM_SIZE, 2, null, null);
             assertEquals(105, state.regs[8]);
             assertEquals(7, state.regs[9]);
             assertEquals(RAM_OFFSET + 6, state.pc);
@@ -530,7 +530,7 @@ public class CompressedInstructionTest {
             state.regs[8] = RAM_OFFSET + 0x40;
             setFReg(state, 9, bits);
             ram.writeShort(RAM_OFFSET, (short) cFsw(8, 9, 8));
-            TestCores.create(HAS_C_F).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create(HAS_C_F).step(state, ram, RAM_OFFSET, RAM_SIZE, 1, null, null);
             viaCompressed = ram.readInt(RAM_OFFSET + 0x48);
         }
         try (FFMMemoryBus ram = new FFMMemoryBus(RAM_SIZE, RAM_OFFSET)) {
@@ -538,7 +538,7 @@ public class CompressedInstructionTest {
             state.regs[8] = RAM_OFFSET + 0x40;
             setFReg(state, 9, bits);
             ram.writeInt(RAM_OFFSET, fsw(8, 9, 8));
-            TestCores.create(HAS_F).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create(HAS_F).step(state, ram, RAM_OFFSET, RAM_SIZE, 1, null, null);
             via32 = ram.readInt(RAM_OFFSET + 0x48);
         }
         assertEquals(bits, viaCompressed);
@@ -555,7 +555,7 @@ public class CompressedInstructionTest {
             state.regs[2] = RAM_OFFSET + 0x40;
             setFReg(state, 9, bits);
             ram.writeShort(RAM_OFFSET, (short) cFswsp(9, 8));
-            TestCores.create(HAS_C_F).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create(HAS_C_F).step(state, ram, RAM_OFFSET, RAM_SIZE, 1, null, null);
             viaCompressed = ram.readInt(RAM_OFFSET + 0x48);
         }
         try (FFMMemoryBus ram = new FFMMemoryBus(RAM_SIZE, RAM_OFFSET)) {
@@ -563,7 +563,7 @@ public class CompressedInstructionTest {
             state.regs[2] = RAM_OFFSET + 0x40;
             setFReg(state, 9, bits);
             ram.writeInt(RAM_OFFSET, fsw(2, 9, 8));
-            TestCores.create(HAS_F).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create(HAS_F).step(state, ram, RAM_OFFSET, RAM_SIZE, 1, null, null);
             via32 = ram.readInt(RAM_OFFSET + 0x48);
         }
         assertEquals(bits, viaCompressed);
@@ -654,7 +654,7 @@ public class CompressedInstructionTest {
         try (FFMMemoryBus ram = new FFMMemoryBus(RAM_SIZE, RAM_OFFSET)) {
             RV32IMAState state = machineState();
             ram.writeShort(RAM_OFFSET, (short) chalf);
-            TestCores.create(HAS_C).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create(HAS_C).step(state, ram, RAM_OFFSET, RAM_SIZE, 1, null, null);
             assertEquals(2, state.mcause); // EXC_ILLEGAL_INSTRUCTION
         }
     }
@@ -668,7 +668,7 @@ public class CompressedInstructionTest {
             state.pc = RAM_OFFSET + 2;
             state.regs[8] = 100;
             ram.writeShort(RAM_OFFSET + 2, (short) cAddi(8, 5));
-            TestCores.create().step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create().step(state, ram, RAM_OFFSET, RAM_SIZE, 1, null, null);
             assertEquals(0, state.mcause); // EXC_INSTRUCTION_MISALIGNED
         }
         try (FFMMemoryBus ram = new FFMMemoryBus(RAM_SIZE, RAM_OFFSET)) {
@@ -676,7 +676,7 @@ public class CompressedInstructionTest {
             state.pc = RAM_OFFSET + 2;
             state.regs[8] = 100;
             ram.writeShort(RAM_OFFSET + 2, (short) cAddi(8, 5));
-            TestCores.create(HAS_C).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create(HAS_C).step(state, ram, RAM_OFFSET, RAM_SIZE, 1, null, null);
             assertEquals(105, state.regs[8]);
             assertEquals(RAM_OFFSET + 4, state.pc);
         }
@@ -691,7 +691,7 @@ public class CompressedInstructionTest {
             RV32IMAState state = machineState();
             state.pc = RAM_OFFSET + RAM_SIZE - 2;
             ram.writeShort(RAM_OFFSET + RAM_SIZE - 2, (short) 0x0013); // low bits 11, otherwise NOP-shaped
-            TestCores.create(HAS_C).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create(HAS_C).step(state, ram, RAM_OFFSET, RAM_SIZE, 1, null, null);
             assertEquals(1, state.mcause); // EXC_INSTRUCTION_ACCESS_FAULT
             assertEquals(RAM_OFFSET + RAM_SIZE - 2, state.mtval);
         }

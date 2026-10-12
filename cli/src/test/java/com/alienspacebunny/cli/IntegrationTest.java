@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.alienspacebunny.emu.FFMMemoryBus;
 import com.alienspacebunny.emu.MMIOBus;
+import com.alienspacebunny.emu.ManualTimeSource;
 import com.alienspacebunny.emu.RV32IMACore;
 import com.alienspacebunny.emu.RV32IMAState;
 import java.io.ByteArrayOutputStream;
@@ -55,12 +56,14 @@ public class IntegrationTest {
             bus.registerHook(0x11000000, 0xC000, clint);
             bus.registerHook(0x11100000, 0x100, syscon);
 
-            RV32IMACore core = new RV32IMACore();
+            ManualTimeSource time = new ManualTimeSource();
+            RV32IMACore core = new RV32IMACore(time);
             MiniRV32IMACSRHook csrHook = new MiniRV32IMACSRHook(bus, ramOffset, ramAmt);
 
             // Run until poweroff or 10M instructions
             for (long i = 0; i < 10000000; i += 1024) {
-                core.step(state, bus, ramOffset, ramAmt, 100, 1024, null, csrHook);
+                time.advance(100);
+                core.step(state, bus, ramOffset, ramAmt, 1024, null, csrHook);
                 if (syscon.getLastStatus() == 0x5555) break;
             }
         } finally {

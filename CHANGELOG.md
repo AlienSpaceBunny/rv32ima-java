@@ -8,7 +8,29 @@ for how this file is updated as part of cutting a release.
 
 ## [Unreleased]
 
+### Added
+- `MachineTimeSource`, the machine's shared timeline (unsigned microseconds), and
+  `ManualTimeSource`, a deterministic source for tests, benchmarks and replay.
+- `RV32IMAState.TIMER_COMPARE_NEVER` (all ones), a practically distant compare.
+
+### Changed
+- **Breaking:** every `RV32IMACore` is built with a `MachineTimeSource`:
+  `RV32IMACore(MachineTimeSource)` and `RV32IMACore(IsaConfig, DecodedCacheConfig,
+  MachineTimeSource)` replace the three constructors without one.
+- **Breaking:** `step` loses its `elapsedUs` parameter. Each call samples the time source once
+  instead of adding elapsed time to the hart's `mtime`; `getTimer()` is that latest sample and
+  `RV32IMAState.setTimer` is removed.
+- **Breaking:** `step` with `count < 1` throws `IllegalArgumentException` before any sample or
+  state change. It previously still updated the timer and could enter an interrupt.
+- **Breaking:** the timer compare is standard: `MTIP` is set exactly when time is at or past
+  `mtimecmp`, unsigned, and a compare of zero no longer disables the timer. A new `RV32IMAState`
+  starts at `TIMER_COMPARE_NEVER` instead of zero.
+- The CLI derives time from a host-clock source, or from the cycle count with `-l`, as before.
+
 ### Fixed
+- Interrupt reevaluation after a `mstatus`, `mie` or `mip` write or an `MRET` recomputes `MTIP`
+  from the latest sample, so a compare moved through MMIO before `MRET` no longer re-enters the
+  timer handler on a stale `MTIP`.
 - `PostExecHook.onPostExec` now reports a taken jump, branch or `MRET` at the instruction's own
   PC, compressed forms included, with the decoded cache on or off. It previously reported the
   target minus the instruction length.

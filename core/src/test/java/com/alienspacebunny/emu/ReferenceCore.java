@@ -14,6 +14,13 @@ import java.util.Objects;
  *       instead of declaring its own.
  *   <li>The {@code PostExecHook} jump-PC fix (step T1): a taken jump, branch or {@code MRET}
  *       reports its own PC.
+ *   <li>Shared time source and standard compare (step T3, {@code docs/TIMER_COUNTER_DESIGN.md}):
+ *       the constructor takes a {@link MachineTimeSource}; {@code step} loses {@code elapsedUs},
+ *       rejects {@code count <= 0} before anything else, and samples the source once per call
+ *       instead of accumulating time. {@code MTIP} is {@code time >= mtimecmp}, unsigned, with
+ *       no zero special case, and is recomputed from the latest sample at interrupt reevaluation
+ *       after a CSR write or {@code MRET}. The Javadoc of {@code step}'s timer paragraph and
+ *       parameters changes with it.
  * </ul>
  *
  * <p><b>Intentional differences from {@link RV32IMACore}.</b> None yet. Each later behavior
@@ -24,25 +31,19 @@ import java.util.Objects;
  */
 final class ReferenceCore {
     private final IsaConfig isaConfig;
-
-    /**
-     * Creates a new {@code ReferenceCore} execution engine configured for {@link
-     * IsaConfig#RV32IMA_ZICSR} (no optional extensions). Identical to the core before {@link
-     * IsaConfig} existed.
-     */
-    ReferenceCore() {
-        this(IsaConfig.RV32IMA_ZICSR);
-    }
+    private final MachineTimeSource time;
 
     /**
      * Creates a new {@code ReferenceCore} execution engine configured for the given extension set.
      *
      * @param isaConfig the extension configuration; only affects the {@code misa} CSR value as of
      *     the Phase 1 foundation work (see {@link IsaConfig}'s class Javadoc).
-     * @throws NullPointerException if {@code isaConfig} is {@code null}.
+     * @param time the machine's shared time source.
+     * @throws NullPointerException if either argument is {@code null}.
      */
-    ReferenceCore(IsaConfig isaConfig) {
+    ReferenceCore(IsaConfig isaConfig, MachineTimeSource time) {
         this.isaConfig = Objects.requireNonNull(isaConfig, "isaConfig");
+        this.time = Objects.requireNonNull(time, "time");
     }
 
     private static final int MSTATUS_MIE = 0x08;
@@ -1016,10 +1017,9 @@ final class ReferenceCore {
     /**
      * Executes up to {@code count} instructions on the given hart.
      *
-     * <p><b>Timer.</b> Before executing any instructions, the machine timer ({@code mtime}) is
-     * advanced by {@code elapsedUs} microseconds. If the updated timer meets or exceeds {@code
-     * mtimecmp} and {@code mtimecmp != 0}, {@code MTIP} in {@code mip} is set; otherwise it is
-     * cleared. See the class-level note on the startup timer guard.
+     * <p><b>Timer.</b> Before executing any instructions, the time source is sampled once, and
+     * the sample becomes the hart's {@code mtime}. If it meets or exceeds {@code mtimecmp},
+     * unsigned, {@code MTIP} in {@code mip} is set; otherwise it is cleared.
      *
      * <p><b>WFI.</b> If the hart is in the WFI stall state and no interrupt is pending, no
      * instructions are executed and this method returns {@code 1} immediately. The caller should
@@ -1044,32 +1044,34 @@ final class ReferenceCore {
      * @param mem the memory bus for instruction fetch and data access.
      * @param ramOffset base address of executable RAM (unsigned 32-bit guest address).
      * @param ramSize size of executable RAM in bytes.
-     * @param elapsedUs microseconds elapsed since the previous call; added to {@code mtime} before
-     *     any instructions run.
-     * @param count maximum number of instructions to execute; may execute fewer if a trap fires.
+     * @param count maximum number of instructions to execute, at least 1; may execute fewer if a
+     *     trap fires.
      * @param postExec optional callback invoked after each instruction or trap; may be {@code
      *     null}.
      * @param csrHook optional hook for custom CSR accesses; may be {@code null}, in which case
      *     reads of non-built-in CSRs return {@code 0} and writes are silently discarded.
      * @return {@code 0} after executing instructions or handling a trap; {@code 1} if the hart is
      *     in WFI and no instruction was executed.
+     * @throws IllegalArgumentException if {@code count} is less than 1.
      */
     public int step(
             RV32IMAState state,
             MemoryBus mem,
             int ramOffset,
             int ramSize,
-            int elapsedUs,
             int count,
             RV32IMACore.PostExecHook postExec,
             CSRHook csrHook) {
-        long currentTimer = state.getTimer();
-        long newTimer = currentTimer + elapsedUs;
-        state.setTimer(newTimer);
+        if (count < 1) {
+            throw new IllegalArgumentException("count < 1: " + count);
+        }
+        long newTimer = time.nowMicros();
+        state.timerl = (int) newTimer;
+        state.timerh = (int) (newTimer >>> 32);
 
         // Handle Timer interrupt.
         long timerMatch = state.getTimerMatch();
-        if (timerMatch != 0 && Long.compareUnsigned(newTimer, timerMatch) >= 0) {
+        if (Long.compareUnsigned(newTimer, timerMatch) >= 0) {
             state.extraflags &= ~EXTRAFLAG_WFI;
             state.mip |= MIP_MTIP;
         } else {
@@ -1933,6 +1935,11 @@ final class ReferenceCore {
                     // "+ instrLen" for interrupts lands mepc exactly there (same idiom as the
                     // pre-loop dispatch), whatever the retired instruction's length was.
                     reevaluateInterrupts = false;
+                    if (Long.compareUnsigned(state.getTimer(), state.getTimerMatch()) >= 0) {
+                        state.mip |= MIP_MTIP;
+                    } else {
+                        state.mip &= ~MIP_MTIP;
+                    }
                     trap = pendingInterruptTrap(state);
                     if (trap != 0) {
                         pc -= instrLen;

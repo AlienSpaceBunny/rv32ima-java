@@ -2,6 +2,7 @@ package com.alienspacebunny.cli;
 
 import com.alienspacebunny.emu.FFMMemoryBus;
 import com.alienspacebunny.emu.MMIOBus;
+import com.alienspacebunny.emu.MachineTimeSource;
 import com.alienspacebunny.emu.RV32IMACore;
 import com.alienspacebunny.emu.RV32IMAState;
 import java.io.IOException;
@@ -41,26 +42,26 @@ public class Main {
             bus.registerHook(0x11000000, 0xC000, clint); // CLINT
             bus.registerHook(0x11100000, 0x100, syscon); // SYSCON
 
-            RV32IMACore core = new RV32IMACore();
+            // Time starts at 0: in fixed-update mode it follows the (monotonic) cycle count,
+            // otherwise the host clock since startup. Either way it is scaled by the divisor.
+            MachineTimeSource time;
+            if (fixedUpdate) {
+                time = () -> state.getCycle() / timeDivisor;
+            } else {
+                long epochNanos = System.nanoTime();
+                time = () -> (System.nanoTime() - epochNanos) / 1000 / timeDivisor;
+            }
+            RV32IMACore core = new RV32IMACore(time);
             MiniRV32IMACSRHook csrHook = new MiniRV32IMACSRHook(bus, ramOffset, ramAmt);
 
-            long lastTime = fixedUpdate ? 0 : System.nanoTime() / 1000 / timeDivisor;
             int instrsPerFlip = singleStep ? 1 : 1024;
 
             for (long rt = 0; instct < 0 || rt < instct; rt += instrsPerFlip) {
-                int elapsedUs;
-                if (fixedUpdate) {
-                    elapsedUs = (int) (state.getCycle() / timeDivisor - lastTime);
-                } else {
-                    elapsedUs = (int) (System.nanoTime() / 1000 / timeDivisor - lastTime);
-                }
-                lastTime += elapsedUs;
-
                 if (singleStep) {
                     dumpState(state, ram);
                 }
 
-                int ret = core.step(state, bus, ramOffset, ramAmt, elapsedUs, instrsPerFlip, null, csrHook);
+                int ret = core.step(state, bus, ramOffset, ramAmt, instrsPerFlip, null, csrHook);
                 if (ret == 1 && doSleep) {
                     try {
                         Thread.sleep(1);

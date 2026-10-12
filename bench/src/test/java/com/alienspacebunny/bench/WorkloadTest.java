@@ -68,8 +68,8 @@ class WorkloadTest {
             plainBus.writeByte(i, program[i]);
             cachedBus.writeByte(i, program[i]);
         }
-        RV32IMACore plain = new RV32IMACore(isa);
-        RV32IMACore cached = new RV32IMACore(isa, new DecodedCacheConfig(slots, false));
+        RV32IMACore plain = new RV32IMACore(isa, DecodedCacheConfig.OFF, Workloads.TIME);
+        RV32IMACore cached = new RV32IMACore(isa, new DecodedCacheConfig(slots, false), Workloads.TIME);
         cached.addDecodedCacheRange(0, program.length);
         RV32IMAState plainState = new RV32IMAState();
         RV32IMAState cachedState = new RV32IMAState();
@@ -90,7 +90,6 @@ class WorkloadTest {
                     plainBus,
                     0,
                     Workloads.MEM_SIZE,
-                    0,
                     count,
                     (pc, ir, trap) -> plainEvents[counts[0]++] = ((long) pc << 32) | Integer.toUnsignedLong(ir ^ trap),
                     null);
@@ -99,7 +98,6 @@ class WorkloadTest {
                     cachedBus,
                     0,
                     Workloads.MEM_SIZE,
-                    0,
                     count,
                     (pc, ir, trap) -> cachedEvents[counts[1]++] = ((long) pc << 32) | Integer.toUnsignedLong(ir ^ trap),
                     null);

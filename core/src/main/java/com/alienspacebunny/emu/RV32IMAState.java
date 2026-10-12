@@ -16,10 +16,17 @@ package com.alienspacebunny.emu;
  *       the 64-bit cycle counter, machine timer ({@code mtime}), and timer-compare value ({@code
  *       mtimecmp}). They are public so that a CLINT MMIO hook can implement byte-accurate register
  *       access. Prefer the accessor methods ({@link #getCycle()}, {@link #getTimer()}, {@link
- *       #getTimerMatch()}, and their setters) for all other use.
+ *       #getTimerMatch()}, and the setters) for all other use.
  * </ul>
  */
 public class RV32IMAState {
+    /**
+     * A practically distant timer compare, about 584,000 years at 1 MHz. It is not a disable bit:
+     * a time of all ones is still due. A new state holds it, so a fresh hart has no timer pending;
+     * an embedder writes it again to cancel the timer on reset.
+     */
+    public static final long TIMER_COMPARE_NEVER = -1L;
+
     /**
      * Integer register file x0–x31. x0 is not hardwired to zero in this array; {@link
      * RV32IMACore} prevents writes to x0 during instruction execution, but this invariant is not
@@ -56,14 +63,14 @@ public class RV32IMAState {
     public int cycleh;
 
     /**
-     * Low 32 bits of {@code mtime} (machine timer). See {@link #getTimer()} and {@link
-     * #setTimer}.
+     * Low 32 bits of the hart's latest time sample. See {@link #getTimer()}; the core overwrites
+     * it at every sample.
      */
     public int timerl;
 
     /**
-     * High 32 bits of {@code mtime} (machine timer). See {@link #getTimer()} and {@link
-     * #setTimer}.
+     * High 32 bits of the hart's latest time sample. See {@link #getTimer()}; the core overwrites
+     * it at every sample.
      */
     public int timerh;
 
@@ -71,13 +78,13 @@ public class RV32IMAState {
      * Low 32 bits of {@code mtimecmp} (timer compare). See {@link #getTimerMatch()} and {@link
      * #setTimerMatch}.
      */
-    public int timermatchl;
+    public int timermatchl = (int) TIMER_COMPARE_NEVER;
 
     /**
      * High 32 bits of {@code mtimecmp} (timer compare). See {@link #getTimerMatch()} and {@link
      * #setTimerMatch}.
      */
-    public int timermatchh;
+    public int timermatchh = (int) (TIMER_COMPARE_NEVER >>> 32);
 
     /** Machine scratch register ({@code mscratch}). */
     public int mscratch;
@@ -93,7 +100,8 @@ public class RV32IMAState {
 
     /**
      * Machine interrupt-pending register ({@code mip}). Bit 7 (MTIP) is managed entirely by the
-     * core: set when {@code mtime >= mtimecmp} (and {@code mtimecmp != 0}), cleared otherwise. Bits
+     * core: set when the latest time sample is at or past {@code mtimecmp}, unsigned, and cleared
+     * otherwise. Bits
      * 3 (MSIP) and 11 (MEIP) are set by the embedder, typically via {@link
      * RV32IMACore#injectInterrupt}, and cleared by guest or embedder acknowledgement.
      */
@@ -151,7 +159,10 @@ public class RV32IMAState {
      */
     public int fcsr;
 
-    /** Creates a new {@code RV32IMAState} with all fields at their default values (zero/false). */
+    /**
+     * Creates a new {@code RV32IMAState} with every field zero or false, except the timer compare,
+     * which is {@link #TIMER_COMPARE_NEVER}.
+     */
     public RV32IMAState() {}
 
     /**
@@ -174,24 +185,14 @@ public class RV32IMAState {
     }
 
     /**
-     * Returns the 64-bit machine timer ({@code mtime}) composed from {@link #timerh} and {@link
-     * #timerl}.
+     * Returns the hart's latest sample of its core's {@link MachineTimeSource}, composed from
+     * {@link #timerh} and {@link #timerl}. This is not a live clock: it goes stale while the hart
+     * is halted or between calls. Read the source itself for the current time.
      *
-     * @return the 64-bit {@code mtime} value.
+     * @return the latest sample, in microseconds, unsigned.
      */
     public long getTimer() {
         return (Integer.toUnsignedLong(timerh) << 32) | Integer.toUnsignedLong(timerl);
-    }
-
-    /**
-     * Sets the 64-bit machine timer ({@code mtime}) split across {@link #timerh} and {@link
-     * #timerl}.
-     *
-     * @param timer the new 64-bit {@code mtime} value.
-     */
-    public void setTimer(long timer) {
-        this.timerl = (int) timer;
-        this.timerh = (int) (timer >>> 32);
     }
 
     /**
@@ -208,7 +209,8 @@ public class RV32IMAState {
      * Sets the 64-bit timer compare value ({@code mtimecmp}) split across {@link #timermatchh}
      * and {@link #timermatchl}.
      *
-     * @param timerMatch the new 64-bit {@code mtimecmp} value.
+     * @param timerMatch the new 64-bit {@code mtimecmp} value, unsigned; {@link
+     *     #TIMER_COMPARE_NEVER} for a deadline that is practically never reached.
      */
     public void setTimerMatch(long timerMatch) {
         this.timermatchl = (int) timerMatch;

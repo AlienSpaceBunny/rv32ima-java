@@ -23,6 +23,9 @@ public class DecodedCacheTest {
     private static final int RAM_SIZE = 16 * 1024;
     private static final IsaConfig FULL = new IsaConfig(true, true, true, true, true);
     private static final IsaConfig NO_C = new IsaConfig(false, true, true, true, true);
+    /** Time for tests that do not use the timer; it stays at 0. */
+    private static final ManualTimeSource TIME = new ManualTimeSource();
+
     private static final int MCAUSE_FETCH_FAULT = 1;
     private static final int MCAUSE_ILLEGAL = 2;
 
@@ -206,9 +209,9 @@ public class DecodedCacheTest {
         assertFalse(new DecodedCacheConfig(0, false).enabled());
         assertTrue(new DecodedCacheConfig(1, false).enabled());
         assertTrue(new DecodedCacheConfig(1 << 14, true).enabled());
-        assertFalse(new RV32IMACore(FULL).hasDecodedCache());
-        assertFalse(new RV32IMACore(FULL, DecodedCacheConfig.OFF).hasDecodedCache());
-        assertTrue(new RV32IMACore(FULL, new DecodedCacheConfig(4, false)).hasDecodedCache());
+        assertFalse(new RV32IMACore(TIME).hasDecodedCache());
+        assertFalse(new RV32IMACore(FULL, DecodedCacheConfig.OFF, TIME).hasDecodedCache());
+        assertTrue(new RV32IMACore(FULL, new DecodedCacheConfig(4, false), TIME).hasDecodedCache());
     }
 
     @ParameterizedTest
@@ -219,12 +222,18 @@ public class DecodedCacheTest {
 
     @Test
     public void constructorRejectsNullCacheConfig() {
-        assertThrows(NullPointerException.class, () -> new RV32IMACore(FULL, null));
+        assertThrows(NullPointerException.class, () -> new RV32IMACore(FULL, null, TIME));
+    }
+
+    @Test
+    public void constructorRejectsNullTimeSource() {
+        assertThrows(NullPointerException.class, () -> new RV32IMACore(FULL, DecodedCacheConfig.OFF, null));
+        assertThrows(NullPointerException.class, () -> new RV32IMACore(null));
     }
 
     @Test
     public void rangeValidation() {
-        RV32IMACore core = new RV32IMACore(FULL, new DecodedCacheConfig(4, false));
+        RV32IMACore core = new RV32IMACore(FULL, new DecodedCacheConfig(4, false), TIME);
         assertThrows(IllegalArgumentException.class, () -> core.addDecodedCacheRange(BASE, 0));
         assertThrows(IllegalArgumentException.class, () -> core.addDecodedCacheRange(0xfffffff0, 0x20));
         core.addDecodedCacheRange(0xfffffff0, 0x10);
@@ -233,7 +242,7 @@ public class DecodedCacheTest {
 
     @Test
     public void flushingACachelessCoreDoesNothing() {
-        RV32IMACore core = new RV32IMACore(FULL);
+        RV32IMACore core = new RV32IMACore(FULL, DecodedCacheConfig.OFF, TIME);
         core.flushDecodedCache();
         core.addDecodedCacheRange(BASE, RAM_SIZE);
         core.clearDecodedCacheRanges();
@@ -243,7 +252,7 @@ public class DecodedCacheTest {
     // ---- Helpers for the directed cases ----
 
     private static RV32IMACore cachedCore(IsaConfig isa, boolean checkMode) {
-        RV32IMACore core = new RV32IMACore(isa, new DecodedCacheConfig(64, checkMode));
+        RV32IMACore core = new RV32IMACore(isa, new DecodedCacheConfig(64, checkMode), TIME);
         core.addDecodedCacheRange(BASE, RAM_SIZE);
         return core;
     }
@@ -276,7 +285,7 @@ public class DecodedCacheTest {
         Ram ram = counterLoop();
         RV32IMACore core = cachedCore(NO_C, false);
         RV32IMAState state = machineState(BASE);
-        core.step(state, ram, BASE, RAM_SIZE, 0, 1000, null, null);
+        core.step(state, ram, BASE, RAM_SIZE, 1000, null, null);
         assertEquals(500, state.regs[5]);
         assertEquals(2, core.getDecodedCacheStats().fills());
         assertEquals(0, core.getDecodedCacheStats().delegations());
@@ -286,9 +295,9 @@ public class DecodedCacheTest {
     @Test
     public void nothingIsCachedWithoutARange() {
         Ram ram = counterLoop();
-        RV32IMACore core = new RV32IMACore(NO_C, new DecodedCacheConfig(64, false));
+        RV32IMACore core = new RV32IMACore(NO_C, new DecodedCacheConfig(64, false), TIME);
         RV32IMAState state = machineState(BASE);
-        core.step(state, ram, BASE, RAM_SIZE, 0, 100, null, null);
+        core.step(state, ram, BASE, RAM_SIZE, 100, null, null);
         assertEquals(50, state.regs[5]);
         assertEquals(0, core.getDecodedCacheStats().fills());
         assertEquals(100, core.getDecodedCacheStats().delegations());
@@ -310,7 +319,7 @@ public class DecodedCacheTest {
         Ram ram = counterLoop();
         RV32IMACore core = cachedCore(NO_C, true);
         RV32IMAState state = machineState(BASE);
-        core.step(state, ram, BASE, RAM_SIZE, 0, 100, null, null);
+        core.step(state, ram, BASE, RAM_SIZE, 100, null, null);
         assertEquals(98, core.getDecodedCacheStats().checks());
         assertEquals(50, state.regs[5]);
     }
@@ -322,12 +331,12 @@ public class DecodedCacheTest {
         Ram ram = counterLoop();
         RV32IMACore core = cachedCore(NO_C, false);
         RV32IMAState state = machineState(BASE);
-        core.step(state, ram, BASE, RAM_SIZE, 0, 4, null, null);
+        core.step(state, ram, BASE, RAM_SIZE, 4, null, null);
         ram.denyFetch = (address, ctx) -> address == BASE;
 
         // Rule 2: the embedder flushes when permissions change; then the fetch faults.
         core.flushDecodedCache();
-        core.step(state, ram, BASE, RAM_SIZE, 0, 4, null, null);
+        core.step(state, ram, BASE, RAM_SIZE, 4, null, null);
         assertEquals(MCAUSE_FETCH_FAULT, state.mcause);
         assertEquals(BASE, state.mepc);
         assertEquals(BASE, state.mtval);
@@ -339,10 +348,10 @@ public class DecodedCacheTest {
         Ram ram = counterLoop();
         RV32IMACore core = cachedCore(NO_C, true);
         RV32IMAState state = machineState(BASE);
-        core.step(state, ram, BASE, RAM_SIZE, 0, 4, null, null);
+        core.step(state, ram, BASE, RAM_SIZE, 4, null, null);
         ram.denyFetch = (address, ctx) -> address == BASE;
-        IllegalStateException e = assertThrows(
-                IllegalStateException.class, () -> core.step(state, ram, BASE, RAM_SIZE, 0, 4, null, null));
+        IllegalStateException e =
+                assertThrows(IllegalStateException.class, () -> core.step(state, ram, BASE, RAM_SIZE, 4, null, null));
         assertTrue(e.getMessage().contains("0x80000000"), e.getMessage());
     }
 
@@ -351,10 +360,10 @@ public class DecodedCacheTest {
         Ram ram = counterLoop();
         RV32IMACore core = cachedCore(NO_C, false);
         RV32IMAState state = machineState(BASE + 4);
-        core.step(state, ram, BASE, RAM_SIZE, 0, 3, null, null);
+        core.step(state, ram, BASE, RAM_SIZE, 3, null, null);
         // Shrink the window so the warmed jal at BASE + 4 lies outside it.
         state.pc = BASE + 4;
-        core.step(state, ram, BASE, 4, 0, 1, null, null);
+        core.step(state, ram, BASE, 4, 1, null, null);
         assertEquals(MCAUSE_FETCH_FAULT, state.mcause);
         assertEquals(BASE + 4, state.mtval);
     }
@@ -365,13 +374,13 @@ public class DecodedCacheTest {
         Ram ram = new Ram(BASE, RAM_SIZE);
         writeWords(ram, BASE, addi(5, 0, 1));
         writeWords(ram, BASE + 0x2000, addi(5, 0, 2));
-        RV32IMACore core = new RV32IMACore(NO_C, new DecodedCacheConfig(64, false));
+        RV32IMACore core = new RV32IMACore(NO_C, new DecodedCacheConfig(64, false), TIME);
         core.addDecodedCacheRange(BASE, RAM_SIZE);
         RV32IMAState state = machineState(BASE);
-        core.step(state, ram, BASE, 0x1000, 0, 1, null, null);
+        core.step(state, ram, BASE, 0x1000, 1, null, null);
         assertEquals(1, state.regs[5]);
         state.pc = BASE + 0x2000;
-        core.step(state, ram, BASE + 0x2000, 0x1000, 0, 1, null, null);
+        core.step(state, ram, BASE + 0x2000, 0x1000, 1, null, null);
         assertEquals(2, state.regs[5]);
     }
 
@@ -383,22 +392,22 @@ public class DecodedCacheTest {
         writeWords(second, BASE, addi(5, 0, 2));
         RV32IMACore core = cachedCore(NO_C, false);
         RV32IMAState state = machineState(BASE);
-        core.step(state, first, BASE, RAM_SIZE, 0, 1, null, null);
+        core.step(state, first, BASE, RAM_SIZE, 1, null, null);
 
         // Another bus: its own code runs.
         state.pc = BASE;
-        core.step(state, second, BASE, RAM_SIZE, 0, 1, null, null);
+        core.step(state, second, BASE, RAM_SIZE, 1, null, null);
         assertEquals(2, state.regs[5]);
 
         // Another state instance and another hart ID each flush too.
         long flushes = core.getDecodedCacheStats().flushes();
         RV32IMAState other = machineState(BASE);
-        core.step(other, second, BASE, RAM_SIZE, 0, 1, null, null);
+        core.step(other, second, BASE, RAM_SIZE, 1, null, null);
         assertEquals(flushes + 1, core.getDecodedCacheStats().flushes());
         other.pc = BASE;
         other.hartId = 7;
         second.denyFetch = (address, ctx) -> ctx.hartId() == 7;
-        core.step(other, second, BASE, RAM_SIZE, 0, 1, null, null);
+        core.step(other, second, BASE, RAM_SIZE, 1, null, null);
         assertEquals(flushes + 2, core.getDecodedCacheStats().flushes());
         assertEquals(MCAUSE_FETCH_FAULT, other.mcause);
     }
@@ -413,10 +422,10 @@ public class DecodedCacheTest {
         RV32IMACore core = cachedCore(NO_C, false);
         RV32IMAState state = machineState(BASE);
         state.mepc = BASE + 8;
-        core.step(state, ram, BASE, RAM_SIZE, 0, 3, null, null);
+        core.step(state, ram, BASE, RAM_SIZE, 3, null, null);
         assertEquals(1, state.regs[5]);
         assertEquals(0, state.extraflags & 3);
-        core.step(state, ram, BASE, RAM_SIZE, 0, 1, null, null);
+        core.step(state, ram, BASE, RAM_SIZE, 1, null, null);
         assertEquals(1, state.regs[5]);
         assertEquals(MCAUSE_FETCH_FAULT, state.mcause);
         assertEquals(BASE + 8, state.mepc);
@@ -449,7 +458,7 @@ public class DecodedCacheTest {
         Ram ram = selfModifyingGuest(true);
         RV32IMACore core = cachedCore(NO_C, true);
         RV32IMAState state = machineState(BASE);
-        core.step(state, ram, BASE, RAM_SIZE, 0, 12, null, null);
+        core.step(state, ram, BASE, RAM_SIZE, 12, null, null);
         assertEquals(2, state.regs[5]);
         assertEquals(BASE + 0x20, state.pc);
     }
@@ -459,14 +468,14 @@ public class DecodedCacheTest {
         // Without check mode the old instruction may run (rule 1: unspecified until FENCE.I).
         RV32IMACore plain = cachedCore(NO_C, false);
         RV32IMAState state = machineState(BASE);
-        plain.step(state, selfModifyingGuest(false), BASE, RAM_SIZE, 0, 12, null, null);
+        plain.step(state, selfModifyingGuest(false), BASE, RAM_SIZE, 12, null, null);
         assertEquals(1, state.regs[5]);
 
         RV32IMACore checked = cachedCore(NO_C, true);
         RV32IMAState checkedState = machineState(BASE);
         Ram ram = selfModifyingGuest(false);
         IllegalStateException e = assertThrows(
-                IllegalStateException.class, () -> checked.step(checkedState, ram, BASE, RAM_SIZE, 0, 12, null, null));
+                IllegalStateException.class, () -> checked.step(checkedState, ram, BASE, RAM_SIZE, 12, null, null));
         assertTrue(e.getMessage().contains("0x80000100"), e.getMessage());
     }
 
@@ -474,10 +483,10 @@ public class DecodedCacheTest {
     public void fenceIFromUncacheableCodeStillFlushes() {
         // The FENCE.I runs from outside the cacheable range, so the cached path delegates it.
         Ram ram = selfModifyingGuest(true);
-        RV32IMACore core = new RV32IMACore(NO_C, new DecodedCacheConfig(64, true));
+        RV32IMACore core = new RV32IMACore(NO_C, new DecodedCacheConfig(64, true), TIME);
         core.addDecodedCacheRange(BASE + 0x100, 0x100);
         RV32IMAState state = machineState(BASE);
-        core.step(state, ram, BASE, RAM_SIZE, 0, 12, null, null);
+        core.step(state, ram, BASE, RAM_SIZE, 12, null, null);
         assertEquals(2, state.regs[5]);
     }
 
@@ -522,11 +531,11 @@ public class DecodedCacheTest {
         };
         RV32IMACore core = cachedCore(NO_C, true);
         RV32IMAState state = machineState(BASE);
-        core.step(state, ram, BASE, RAM_SIZE, 0, 10, null, null);
+        core.step(state, ram, BASE, RAM_SIZE, 10, null, null);
         assertEquals(5, state.regs[5]);
         alias.writeInt(BASE + 0x1000_0000, addi(5, 5, 100));
         core.flushDecodedCache();
-        core.step(state, ram, BASE, RAM_SIZE, 0, 10, null, null);
+        core.step(state, ram, BASE, RAM_SIZE, 10, null, null);
         assertEquals(505, state.regs[5]);
     }
 
@@ -534,10 +543,10 @@ public class DecodedCacheTest {
     public void instructionStraddlingARangeEndIsNeverCached() {
         // The range covers [BASE, BASE + 6): the jal at BASE + 4 straddles its end.
         Ram ram = counterLoop();
-        RV32IMACore core = new RV32IMACore(FULL, new DecodedCacheConfig(64, true));
+        RV32IMACore core = new RV32IMACore(FULL, new DecodedCacheConfig(64, true), TIME);
         core.addDecodedCacheRange(BASE, 6);
         RV32IMAState state = machineState(BASE);
-        core.step(state, ram, BASE, RAM_SIZE, 0, 100, null, null);
+        core.step(state, ram, BASE, RAM_SIZE, 100, null, null);
         assertEquals(50, state.regs[5]);
         assertEquals(1, core.getDecodedCacheStats().fills());
         assertEquals(50, core.getDecodedCacheStats().delegations());
@@ -549,7 +558,7 @@ public class DecodedCacheTest {
         ram.writeShort(BASE, (short) 0x0000); // the all-zero halfword is reserved
         RV32IMACore core = cachedCore(FULL, false);
         RV32IMAState state = machineState(BASE);
-        core.step(state, ram, BASE, RAM_SIZE, 0, 1, null, null);
+        core.step(state, ram, BASE, RAM_SIZE, 1, null, null);
         assertEquals(MCAUSE_ILLEGAL, state.mcause);
         assertEquals(0, core.getDecodedCacheStats().fills());
     }
@@ -561,7 +570,7 @@ public class DecodedCacheTest {
         RV32IMACore core = cachedCore(NO_C, false);
         RV32IMAState state = machineState(BASE);
         List<Integer> hookPcs = new ArrayList<>();
-        core.step(state, ram, BASE, RAM_SIZE, 0, 5, (pc, ir, trap) -> hookPcs.add(pc), null);
+        core.step(state, ram, BASE, RAM_SIZE, 5, (pc, ir, trap) -> hookPcs.add(pc), null);
         assertEquals(MCAUSE_FETCH_FAULT, state.mcause);
         assertEquals(BASE, state.mtval);
         assertEquals(1, state.getCycle());
@@ -575,7 +584,7 @@ public class DecodedCacheTest {
         writeWords(ram, BASE, addi(5, 0, 3), ECALL);
         RV32IMACore core = cachedCore(NO_C, false);
         RV32IMAState state = machineState(BASE);
-        core.step(state, ram, BASE, RAM_SIZE, 0, 10, null, null);
+        core.step(state, ram, BASE, RAM_SIZE, 10, null, null);
         assertEquals(11, state.mcause);
         assertEquals(BASE + 4, state.mepc);
         assertEquals(BASE + 0x1000, state.pc);
@@ -761,8 +770,9 @@ public class DecodedCacheTest {
         seedState(plainState, new Random(seed + 1000));
         RV32IMAState cachedState = new RV32IMAState();
         seedState(cachedState, new Random(seed + 1000));
-        RV32IMACore plain = new RV32IMACore(isa);
-        RV32IMACore cached = new RV32IMACore(isa, new DecodedCacheConfig(slots, checkMode));
+        ManualTimeSource time = new ManualTimeSource();
+        RV32IMACore plain = new RV32IMACore(isa, DecodedCacheConfig.OFF, time);
+        RV32IMACore cached = new RV32IMACore(isa, new DecodedCacheConfig(slots, checkMode), time);
         cached.addDecodedCacheRange(BASE, CODE_SIZE);
         List<HookEvent> plainHooks = new ArrayList<>();
         List<HookEvent> cachedHooks = new ArrayList<>();
@@ -785,13 +795,12 @@ public class DecodedCacheTest {
                 cachedState.extraflags &= ~4;
             }
             int count = 1 + rnd.nextInt(24);
-            int elapsed = rnd.nextInt(3);
+            time.advance(rnd.nextInt(3));
             int plainResult = plain.step(
                     plainState,
                     plainRam,
                     BASE,
                     RAM_SIZE,
-                    elapsed,
                     count,
                     (pc, ir, trap) -> plainHooks.add(new HookEvent(pc, ir, trap)),
                     null);
@@ -800,7 +809,6 @@ public class DecodedCacheTest {
                     cachedRam,
                     BASE,
                     RAM_SIZE,
-                    elapsed,
                     count,
                     (pc, ir, trap) -> cachedHooks.add(new HookEvent(pc, ir, trap)),
                     null);

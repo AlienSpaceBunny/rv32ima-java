@@ -11,8 +11,10 @@ should be composed around the core through `MemoryBus`, `HardwareHook`,
 
 ## Execution Core
 
-`RV32IMACore()` configures the base RV32IMA_Zicsr ISA. `RV32IMACore(IsaConfig)`
-accepts an `IsaConfig` for additional extensions (`RV32IMFC_ZBA_ZBB_ZICSR`,
+Every core is built with a `MachineTimeSource`, the machine's shared timeline
+(see "Time and timer" below). `RV32IMACore(MachineTimeSource)` configures the
+base RV32IMA_Zicsr ISA. `RV32IMACore(IsaConfig, DecodedCacheConfig,
+MachineTimeSource)` accepts an `IsaConfig` for additional extensions (`RV32IMFC_ZBA_ZBB_ZICSR`,
 `RV32IMC_ZBB_ZICSR`, or a custom combination). `hasZba`, `hasZbb`, `hasZabha`, `hasC`,
 and `hasF` are fully decoded — enabling one unlocks the corresponding
 instructions; unsupported or disabled encodings raise an illegal-instruction
@@ -61,7 +63,9 @@ CSR-writes them directly (typically before a sequence it wants to check
 afterward).
 
 `RV32IMACore.step(...)` executes up to `count` guest instructions against the
-provided mutable `RV32IMAState` and `MemoryBus`.
+provided mutable `RV32IMAState` and `MemoryBus`. `count` must be at least 1; a
+smaller value throws `IllegalArgumentException` before any time sample or state
+change.
 
 - `state.pc` is the guest program counter at entry and is updated before return.
 - `ramOffset` and `ramSize` define the legal instruction-fetch window as a
@@ -82,7 +86,6 @@ provided mutable `RV32IMAState` and `MemoryBus`.
 - Data loads and stores are delegated to `MemoryBus`; bus range failures should
   throw `IndexOutOfBoundsException`, which the core converts into guest load or
   store access-fault traps.
-- `elapsedUs` advances the machine timer before instruction execution.
 - Return value `0` means normal execution or trap handling completed.
 - Return value `1` means the CPU is waiting for interrupt and no instruction was
   executed.
@@ -99,12 +102,24 @@ provided mutable `RV32IMAState` and `MemoryBus`.
   `RV32IMACore`'s internal 32-bit expansion of the 16-bit encoding, not the
   original 16 bits.
 
-Timer behavior (see the `RV32IMACore` class Javadoc for the rationale behind
-the two intentional spec deviations):
+Time and timer (see the `RV32IMACore` class Javadoc for the rationale behind
+the intentional WFI deviation):
 
-- `MTIP` in `mip` is raised only when `mtimecmp != 0` and `mtime >= mtimecmp`;
-  it is cleared otherwise. The `mtimecmp != 0` guard suppresses a spurious
-  interrupt in the reset state before the guest configures `mtimecmp`.
+- Each `step` call samples the core's `MachineTimeSource` once, after
+  validating `count` and before any instruction. Nothing inside the call
+  samples again, including the decoded cache's internal steps and its resume
+  after `FENCE.I`. The sample becomes `state.getTimer()`, the hart's latest
+  sample rather than a live clock; there is no `setTimer`. The core never
+  accumulates time. `ManualTimeSource` is a deterministic source for tests,
+  benchmarks and replay.
+- `MTIP` in `mip` is set exactly when the latest sample is at or past
+  `mtimecmp`, unsigned, and cleared otherwise; zero is not special. A new
+  `RV32IMAState` holds `RV32IMAState.TIMER_COMPARE_NEVER` (all ones), a
+  practically distant deadline rather than a disable bit. `MTIP` is also
+  recomputed from the latest sample, without sampling, when a CSR write or
+  `MRET` reevaluates interrupts, so a compare moved through MMIO before `MRET`
+  does not re-enter the handler. A deadline crossed during a call is noticed
+  at the next sample.
 - `WFI` unconditionally sets `mstatus.MIE` before entering the wait state so a
   pending timer interrupt can wake the hart even if the guest had not enabled
   interrupts. If an enabled interrupt is already pending once `MIE` is set,
@@ -145,11 +160,10 @@ Interrupt gating and injection:
 Decoded instruction cache (opt-in; the coherence rules are in
 `flushDecodedCache()`'s Javadoc and [DECODED_ICACHE_PROTOCOL.md](DECODED_ICACHE_PROTOCOL.md)):
 
-- `RV32IMACore(IsaConfig, DecodedCacheConfig)` gives the core a direct-mapped
+- `RV32IMACore(IsaConfig, DecodedCacheConfig, MachineTimeSource)` gives the core a direct-mapped
   cache of decoded instructions. `DecodedCacheConfig(slots, checkMode)` takes 0
   (off, also `DecodedCacheConfig.OFF`) or a power of two. Each slot costs 16
-  bytes of host memory. Every other constructor leaves the cache off, and a
-  core without a cache behaves exactly as before.
+  bytes of host memory. `RV32IMACore(MachineTimeSource)` leaves the cache off.
 - Nothing is cached until `addDecodedCacheRange(base, size)` declares where
   cacheable code lives. Only memory whose fetches have no side effects may be
   declared. An instruction is cached only if four bytes from its PC lie in one
@@ -381,7 +395,7 @@ RAM, VRAM, and hooks. Keep `MMIOBus` for simple range-routed devices.
   `0`. The core reads it for access metadata and bus-side SC coordination, and
   does not modify it. Embedders with more than one concurrently participating
   hart must assign distinct, stable IDs.
-- `getCycle()/setCycle()`, `getTimer()/setTimer()`, and
+- `getCycle()/setCycle()`, `getTimer()` (the latest time sample), and
   `getTimerMatch()/setTimerMatch()` expose the 64-bit split registers; prefer
   them over the raw half-word fields except in a CLINT MMIO hook.
 - `extraflags` holds the privilege level (bits 0–1: machine = `3`, user = `0`)

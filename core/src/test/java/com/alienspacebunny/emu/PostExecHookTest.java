@@ -125,15 +125,7 @@ public class PostExecHookTest {
             setup.accept(state);
             List<Event> events = new ArrayList<>();
             TestCores.create(config)
-                    .step(
-                            state,
-                            ram,
-                            RAM_OFFSET,
-                            RAM_SIZE,
-                            0,
-                            2,
-                            (pc, ir, trap) -> events.add(new Event(pc, trap)),
-                            null);
+                    .step(state, ram, RAM_OFFSET, RAM_SIZE, 2, (pc, ir, trap) -> events.add(new Event(pc, trap)), null);
             return events;
         }
     }

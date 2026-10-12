@@ -66,7 +66,7 @@ public class FExtensionTest {
                 stateSetup.accept(state);
             }
             ram.writeInt(RAM_OFFSET, instrWord);
-            TestCores.create(config).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create(config).step(state, ram, RAM_OFFSET, RAM_SIZE, 1, null, null);
             return state;
         }
     }
@@ -82,7 +82,7 @@ public class FExtensionTest {
             state.regs[1] = RAM_OFFSET;
             ram.writeInt(RAM_OFFSET, flw(5, 1, DATA_OFFSET));
             ram.writeInt(RAM_OFFSET + DATA_OFFSET, bits);
-            TestCores.create(HAS_F).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create(HAS_F).step(state, ram, RAM_OFFSET, RAM_SIZE, 1, null, null);
         }
         assertEquals(0xFFFFFFFF00000000L | (bits & 0xFFFFFFFFL), state.fregs[5]);
     }
@@ -96,7 +96,7 @@ public class FExtensionTest {
             state.regs[1] = RAM_OFFSET;
             setFReg(state, 5, bits);
             ram.writeInt(RAM_OFFSET, fsw(1, 5, DATA_OFFSET));
-            TestCores.create(HAS_F).step(state, ram, RAM_OFFSET, RAM_SIZE, 0, 1, null, null);
+            TestCores.create(HAS_F).step(state, ram, RAM_OFFSET, RAM_SIZE, 1, null, null);
             readBack = ram.readInt(RAM_OFFSET + DATA_OFFSET);
         }
         assertEquals(bits, readBack);

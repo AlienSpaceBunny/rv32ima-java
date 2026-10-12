@@ -16,11 +16,16 @@ final class TestCores {
         return create(IsaConfig.RV32IMA_ZICSR);
     }
 
+    /** A core on its own time source, which stays at 0, so the compare is never due by default. */
     static RV32IMACore create(IsaConfig isaConfig) {
+        return create(isaConfig, new ManualTimeSource());
+    }
+
+    static RV32IMACore create(IsaConfig isaConfig, MachineTimeSource time) {
         if (SLOTS == 0) {
-            return new RV32IMACore(isaConfig);
+            return new RV32IMACore(isaConfig, DecodedCacheConfig.OFF, time);
         }
-        RV32IMACore core = new RV32IMACore(isaConfig, new DecodedCacheConfig(SLOTS, false));
+        RV32IMACore core = new RV32IMACore(isaConfig, new DecodedCacheConfig(SLOTS, false), time);
         core.addDecodedCacheRange(0, 0xFFFFFFFF);
         return core;
     }

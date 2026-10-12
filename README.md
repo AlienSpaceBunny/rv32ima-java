@@ -68,13 +68,14 @@ at guest address `0x80000000` and uses the base RV32IMA_Zicsr configuration.
 | `-c <count>` | Instruction budget, checked between batches; unlimited by default. |
 | `-s` | Execute one instruction per batch and dump register state. |
 | `-t <divisor>` | Positive timer divisor; defaults to 1. |
-| `-l` | Derive elapsed time from the cycle counter. |
+| `-l` | Derive machine time from the cycle counter. |
 | `-p` | Disable sleeping while waiting for an interrupt. |
 
 ## Library Usage
 
 ```java
 import com.alienspacebunny.emu.FFMMemoryBus;
+import com.alienspacebunny.emu.ManualTimeSource;
 import com.alienspacebunny.emu.RV32IMACore;
 import com.alienspacebunny.emu.RV32IMAState;
 
@@ -86,13 +87,14 @@ try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, ramOffset)) {
     state.pc = ramOffset;
     state.extraflags = 3; // Machine mode
 
-    RV32IMACore core = new RV32IMACore();
-    core.step(state, ram, ramOffset, ramSize, 0, 1, null, null);
+    RV32IMACore core = new RV32IMACore(new ManualTimeSource());
+    core.step(state, ram, ramOffset, ramSize, 1, null, null);
 }
 ```
 
 This executes one NOP. For a complete machine, load guest code into RAM, provide
-devices through a `MemoryBus`, and call `step` from the hart's scheduler.
+devices through a `MemoryBus`, share one `MachineTimeSource` between the harts (for
+example, host microseconds since startup), and call `step` from each hart's scheduler.
 
 ## Attribution & License
 

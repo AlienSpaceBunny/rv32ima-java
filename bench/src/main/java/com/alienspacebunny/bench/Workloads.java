@@ -26,6 +26,7 @@ import com.alienspacebunny.emu.AccessContext;
 import com.alienspacebunny.emu.AccessKind;
 import com.alienspacebunny.emu.DecodedCacheConfig;
 import com.alienspacebunny.emu.IsaConfig;
+import com.alienspacebunny.emu.ManualTimeSource;
 import com.alienspacebunny.emu.MemoryBus;
 import com.alienspacebunny.emu.RV32IMACore;
 import com.alienspacebunny.emu.RV32IMAState;
@@ -165,12 +166,15 @@ final class Workloads {
         return cacheSlots;
     }
 
+    /** Every workload's time source. It stays at 0: no workload uses the timer. */
+    static final ManualTimeSource TIME = new ManualTimeSource();
+
     /** A core for a guest program of {@code programLength} bytes at address 0. */
     static RV32IMACore newCore(IsaConfig isa, int programLength) {
         if (cacheSlots == 0) {
-            return new RV32IMACore(isa);
+            return new RV32IMACore(isa, DecodedCacheConfig.OFF, TIME);
         }
-        RV32IMACore core = new RV32IMACore(isa, new DecodedCacheConfig(cacheSlots, false));
+        RV32IMACore core = new RV32IMACore(isa, new DecodedCacheConfig(cacheSlots, false), TIME);
         core.addDecodedCacheRange(0, programLength);
         return core;
     }
@@ -245,7 +249,7 @@ final class Workloads {
             RV32IMAState s = state;
             long maxCalls = expectedInstructions + 16;
             long calls = 0;
-            while (core.step(s, bus, 0, MEM_SIZE, 0, chunk, null, null) == 0) {
+            while (core.step(s, bus, 0, MEM_SIZE, chunk, null, null) == 0) {
                 if (++calls > maxCalls) {
                     throw new IllegalStateException(name + ": no WFI after " + calls + " step calls");
                 }
@@ -822,7 +826,7 @@ final class Workloads {
             // report its actual count for pinning.
             long maxCalls = expectedInstructions > 0 ? expectedInstructions + 16 : 1L << 20;
             long calls = 0;
-            while (core.step(s, bus, 0, MEM_SIZE, 0, 4096, null, null) == 0) {
+            while (core.step(s, bus, 0, MEM_SIZE, 4096, null, null) == 0) {
                 if (++calls > maxCalls) {
                     throw new IllegalStateException(name + ": no WFI after " + calls + " step calls");
                 }

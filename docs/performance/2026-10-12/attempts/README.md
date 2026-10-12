@@ -5,8 +5,8 @@ Evidence for step A3 of [the plan](../../../TIMER_AND_ATTEMPTS_IMPLEMENTATION_PL
 HotSpot and Native Image. The baseline is the timer version (`5245585`), with `v0.1.8` as a
 historical comparison. Tables: [`comparison.md`](comparison.md).
 
-**One decision is Nate's:** the `step(count=1)` paths V-32 no longer uses on the AP are 2–7%
-slower than in the timer version (below). Everything else is unchanged or faster.
+The `step(count=1)` paths V-32 no longer uses on the AP are 2–7% slower than in the timer
+version (below); **Nate accepted this** (2026-10-12). Everything else is unchanged or faster.
 
 ## Summary
 

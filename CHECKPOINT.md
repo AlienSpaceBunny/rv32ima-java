@@ -19,14 +19,12 @@
 
 ## Resume here
 
-**Waiting on Nate: A3's `step(count=1)` regression** ([evidence](docs/performance/2026-10-12/attempts/README.md)).
-A3 is measured: V-32's cached `stepAttempts` path is 1.21–1.76× faster than its former cached
-`step(count=1)` loop, batches are unchanged, and the budget barely matters. The `step(count=1)`
-paths, which V-32's AP no longer uses, are 2–7% slower than in the timer version, probably from
-A1's `attemptEntry` check in `step()`'s entry. Proposed: accept. Alternative: a variant that
-moves the attempt entry out of `step()`, measured the same way.
+**A3 is done** ([evidence](docs/performance/2026-10-12/attempts/README.md)): V-32's cached
+`stepAttempts` path is 1.21–1.76× faster than its former cached `step(count=1)` loop, batches are
+unchanged, and the budget barely matters. Nate accepted the 2–7% `step(count=1)` regression
+(2026-10-12). A follow-up question from Nate arrived truncated; get the rest before A4.
 
-**Then: step A4 of [the plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md)**, the phase close
+**Next: step A4 of [the plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md)**, the phase close
 (docs, CHANGELOG review, `./release.sh`, version bump, install, push, archive the execution
 design's review history). V-32's AP budget of 1,061 attempts per call is a legacy value V-32
 will likely retune; nothing in the core should depend on it. Keep both cached loops'

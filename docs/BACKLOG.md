@@ -6,8 +6,6 @@ Remove an item when it is done, and note where its result went.
 
 ## Waiting on Nate
 
-- **A3's `step(count=1)` regression** (2–7% against the timer version): accept, or measure a
-  variant without the attempt check in `step()`'s entry. See [CHECKPOINT.md](../CHECKPOINT.md).
 - **Dependabot branches:** two on `origin` propose Maven 3.10.0 and Maven Wrapper 3.3.4. Shared
   tooling versions belong in `../alienspacebunny-build`, so decide there. (Stale merged branches
   may stay; Nate, 2026-10-12. The `v0.1.8` tag was pushed the same day.)

@@ -23,7 +23,7 @@ commit in the status table, as in [FEATURE_REQUEST_PLAN.md](FEATURE_REQUEST_PLAN
 | T7 | Timer phase close: docs, bench, release check, V-32 handoff | Done (`0.1.10-SNAPSHOT`) | `d6948c8`, `ebe694a`, `0c46c8f`, version bump |
 | A1 | `stepAttempts` API and uncached path | Done | `5c1a58c`, `83308f3` |
 | A2 | Fused cached path | Done as a separate loop, ratified by V-32 | `f9e5acb` (bench), `4c37ae0` |
-| A3 | Bench `--attempts` measurement | Done; a `step(count=1)` regression awaits Nate | `79cf4f7` (bench) |
+| A3 | Bench `--attempts` measurement | Done; `step(count=1)` regression accepted | `79cf4f7` (bench) |
 | A4 | Execution phase close | Not started | |
 
 ## Rules for every step
@@ -232,7 +232,7 @@ loop is V-32's former AP shape. The 1,061 budget is a legacy value, likely to be
   budget barely matters (64 costs 0–8%, 65,536 gains nothing). Native allocation is one 24-byte
   `AttemptResult` per call. Batched execution is unchanged. **For Nate:** the `step(count=1)`
   paths are 2–7% slower than in the timer version, probably from A1's `attemptEntry` check in
-  `step()`'s entry. V-32's AP no longer uses them; the proposal is to accept it.
+  `step()`'s entry. V-32's AP no longer uses them; Nate accepted it (2026-10-12).
   Evidence: [attempts](performance/2026-10-12/attempts/README.md).
 
 ### A4. Execution phase close

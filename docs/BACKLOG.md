@@ -12,11 +12,6 @@ Remove an item when it is done, and note where its result went.
 - **API freeze and publishing:** see [RELEASE_TODO.md](../RELEASE_TODO.md). The timer/counter and
   execution API work changes the public API first.
 
-- **Timer-phase bench tradeoff (T7):** `step(count=1)` is about 1.12× slower natively and
-  HotSpot uncached batched work about 5% slower than `0.1.8`; batched native work is unchanged.
-  See [the evidence](performance/2026-10-12/timer-counters/README.md). Accept, or ask for a
-  mitigation before or with phase A, whose `stepAttempts` amortizes the per-call sample.
-
 ## Waiting on V-32
 
 - **Archive [CPU_ARCHITECTURE_REVIEW_RESPONSE.md](CPU_ARCHITECTURE_REVIEW_RESPONSE.md)** once V-32

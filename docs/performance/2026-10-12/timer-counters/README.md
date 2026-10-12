@@ -2,8 +2,8 @@
 
 Evidence for step T7 of [the implementation plan](../../../TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md):
 `main` at `1c82200` (T1–T6) against the `v0.1.8` tag, on HotSpot and Native Image, uncached and
-with a 4096-slot decoded cache. **Two regressions go to Nate as a tradeoff decision;** nothing was
-changed in response.
+with a 4096-slot decoded cache. **Both regressions below were accepted** (Nate, 2026-10-12); V-32
+will choose its execution mode once the core is stable. Nothing was changed in response.
 
 ## Summary
 

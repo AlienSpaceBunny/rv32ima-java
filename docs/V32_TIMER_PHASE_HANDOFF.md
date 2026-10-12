@@ -78,8 +78,9 @@ stalling WFI returns without the call.
 - **Performance** ([evidence](performance/2026-10-12/timer-counters/README.md)): batched native
   work is unchanged against `0.1.8`. `step(count=1)`, V-32's current AP shape, is about 1.12×
   slower natively from the per-call time sample and entry work; HotSpot uncached batched work
-  is about 5% slower. Nate has these as a tradeoff decision; phase A's `stepAttempts` samples
-  once per call rather than once per attempt.
+  is about 5% slower. Nate accepted both (2026-10-12): V-32 chooses its execution mode once the
+  core is stable, and phase A's `stepAttempts` samples once per call rather than once per
+  attempt.
 
 ## Using the snapshot
 

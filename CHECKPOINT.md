@@ -9,9 +9,11 @@
   V-32's migration sites, for Nate to relay. Wait for V-32's test report before archiving it.
 - **Work directly on `main`** and push after each validated step, until API stabilization for
   `0.2.0` (Nate, 2026-10-12).
-- **Waiting on Nate:** the [T7 bench tradeoff](docs/performance/2026-10-12/timer-counters/README.md)
-  (`step(count=1)` about 1.12× slower natively, HotSpot uncached batched about 5% slower; batched
-  native unchanged). Other blocked and deferred items are in [docs/BACKLOG.md](docs/BACKLOG.md).
+- **T7 bench tradeoff accepted** (Nate, 2026-10-12): `step(count=1)` about 1.12× slower natively
+  and HotSpot uncached batched about 5% slower stay as they are; V-32 picks its execution mode
+  (`step` or `stepAttempts`, cache on or off) once the core is stable
+  ([evidence](docs/performance/2026-10-12/timer-counters/README.md)). Blocked and deferred items
+  are in [docs/BACKLOG.md](docs/BACKLOG.md).
 
 ## Resume here
 

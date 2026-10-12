@@ -49,7 +49,9 @@ than committing.
   version bump per phase with `versions:set`, `install`, commit and push). Shared tooling
   versions belong in `../alienspacebunny-build`.
 - **Benchmarks:** [`bench/`](bench/README.md) on JVM and native, pinned to `taskset -c 2,3`, with
-  nothing else running; outputs in the git-ignored `bench/out/`.
+  nothing else running; outputs in the git-ignored `bench/out/`. `step(count=1)` cells
+  (`reg-ap-step1` batched, `--step-loop`) are diagnostic only: report them, but only a massive
+  regression justifies optimization work (Nate, 2026-10-12). Its correctness tests stay.
 - **Native Image:** keep inner loops (array fills, flushes) out of interpreter loops; they stop
   loop unswitching. Verify with a symbolized build, as in
   [the cache evidence](docs/performance/2026-10-10/decoded-cache/README.md).

@@ -18,7 +18,7 @@ of traps, and an independent Java reference model of registers and memory.
 | `reg-ima` | Register ALU/branch loop, base ISA (one word fetch per instruction) |
 | `reg-ap` | Same 32-bit program on V-32's AP profile (C enabled: halfword probe + word fetch) |
 | `regc-ap` | Same loop, mostly compressed encodings |
-| `reg-ap-step1` | `reg-ap` with `step(count=1)`, like V-32's AP attempt loop |
+| `reg-ap-step1` | `reg-ap` with `step(count=1)`: per-call entry cost. Diagnostic only; V-32's AP now uses `stepAttempts` |
 | `copy4k-ap`, `copy6m-ap` | Word copy + checksum, small and large working sets |
 | `mix-ap` | LB/LH/LW/SB/SH/SW, AMOADD.W and an LR.W/SC.W pair |
 | `fp-ap` | FLW/FSW, FMADD.S, FADD.S, FMUL.S (checked against Java float and `Math.fma`) |
@@ -76,7 +76,8 @@ per call instead of `step` batches, with V-32's AP shape as the controller: a
 volatile mailbox read into `mip` before and after each attempt and a volatile stop
 check. With it, every workload is attempt-at-a-time, so `reg-ap-step1` is the same
 as `reg-ap`. Adding `--step-loop` runs the same attempts as `step(count=1)` calls between the
-same callbacks, in units of N: V-32's AP loop before `stepAttempts`. `run_matrix.py --attempts
+same callbacks, in units of N: V-32's AP loop before `stepAttempts`, kept as A3's baseline and
+as a diagnostic, not a gate. `run_matrix.py --attempts
 1061,65536 --step-loop 1061` adds `<label>-att<N>` and `<label>-loop<N>` cells for the `jvm`,
 `mono`, `poly` and `poly-o3` images and their `-dc<N>` cells.
 

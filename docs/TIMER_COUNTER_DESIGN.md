@@ -399,7 +399,7 @@ change. Revision 6 records its integration details. The design waits for Nate's 
 counter ordering and WFI details below before implementation.** This review is
 based on the live V-32 AP/IOP loops, `HartState`, the retained attempt oracle and
 the RISC-V specifications. It does not authorize implementation or adoption.
-V-32 repository references below are relative to `/home/nate/work/emulator`.
+V-32 repository references below are relative to the V-32 repository root.
 
 ### Answers to the five questions
 

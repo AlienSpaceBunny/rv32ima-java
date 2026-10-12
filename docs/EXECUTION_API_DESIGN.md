@@ -270,9 +270,9 @@ Revision 6 records its two implementation details. The design waits for Nate's g
 ## V-32 response: execution contract and timer extension
 
 2026-10-11. This answers the five questions against the retained
-[V-32 oracle](../../emulator/docs/performance-evidence/2026-10-09/ap-boundary-api/README.md)
+V-32 oracle (V-32 repository: `docs/performance-evidence/2026-10-09/ap-boundary-api/README.md`)
 and current integration. It also communicates the finalized
-[Packet 001 requirements](../../emulator/docs/CPU_ARCHITECTURE_REVIEW_FOLLOWUP.md#pending-response-after-packet-001).
+Packet 001 requirements (V-32 repository: `docs/CPU_ARCHITECTURE_REVIEW_FOLLOWUP.md`, "Pending response after Packet 001").
 This is a design response, not authorization to implement, enable caching, adopt
 the API, restart timing experiments or proceed to Packet 002.
 

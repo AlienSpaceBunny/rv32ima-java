@@ -43,6 +43,11 @@ report that instead.
   means none); read its class Javadoc and `exceptionTrap()` before changing trap logic.
 - Javadoc on `MemoryBus`, `HardwareHook`, `CSRHook`, `RV32IMACore`, and
   `RV32IMAState` is authoritative; `docs/API.md` is a narrative summary.
+- **There is no Linux image.** Upstream mini-rv32ima boots one; this repository
+  never has. The only guest images are baremetal (`baremetal/`, the CLI's
+  `IntegrationTest`, `release.sh`) and the bench guests. Any claim that a Linux
+  image must boot or be validated here is a hallucination; do not repeat it.
+  Linux compatibility is a post-V-32 item in `docs/BACKLOG.md`.
 
 ## Releases and documentation
 

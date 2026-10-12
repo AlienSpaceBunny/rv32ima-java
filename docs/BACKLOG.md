@@ -33,6 +33,8 @@ Remove an item when it is done, and note where its result went.
 
   Check each for a V-32 dependency first. Start after the execution API phase.
 - **D extension:** only the `misa` flag exists; no decode.
+- **Linux compatibility (after the V-32 project):** reassess whether to support booting a Linux
+  image, as upstream mini-rv32ima does. This repository has never had one (Nate, 2026-10-12).
 - **Archive completed cache-era exchanges:**
   - [DECODED_ICACHE_ADVISORY_REVIEW.md](DECODED_ICACHE_ADVISORY_REVIEW.md);
   - [CPU_ARCHITECTURE_REVIEW_FOLLOWUP.md](CPU_ARCHITECTURE_REVIEW_FOLLOWUP.md);

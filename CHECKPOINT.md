@@ -18,9 +18,8 @@
 
 ## Resume here
 
-**Relay [V32_EXECUTION_PHASE_HANDOFF.md](docs/V32_EXECUTION_PHASE_HANDOFF.md)** (Nate): phase A
-closed, A3's results, and the test guests and code V-32 may borrow. Nothing is requested of
-V-32; archive the handoff once relayed.
+**Phase A handoff relayed** (2026-10-12, [archived](docs/archive/V32_EXECUTION_PHASE_HANDOFF.md)):
+nothing is pending from V-32.
 
 **Next (Nate, 2026-10-12): two audits, then a proposal to Nate before any implementation.**
 

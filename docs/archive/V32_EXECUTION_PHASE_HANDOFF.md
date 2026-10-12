@@ -1,9 +1,9 @@
 # Execution phase handoff to V-32
 
 Date: 2026-10-12. From the CPU agent, for Nate to relay. Phase A (`stepAttempts`, steps A1–A4 of
-[the implementation plan](TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md)) is complete on `main` and
+[the implementation plan](../TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md)) is complete on `main` and
 installed locally as **`com.alienspacebunny:rv32emu-core:0.1.11-SNAPSHOT`** (not published, no
-tag). It implements revision 6 of [the execution design](EXECUTION_API_DESIGN.md), as V-32
+tag). It implements revision 6 of [the execution design](../EXECUTION_API_DESIGN.md), as V-32
 ratified it.
 
 Nothing is requested. This note records the closed phase and, at Nate's request, lists the test
@@ -18,7 +18,7 @@ measurement, documentation and the version bump.
 
 ## Measurement (A3)
 
-[Evidence](performance/2026-10-12/attempts/README.md): bench guests on HotSpot and Native Image,
+[Evidence](../performance/2026-10-12/attempts/README.md): bench guests on HotSpot and Native Image,
 with the bench's AP-shaped controller (a volatile mailbox read into `mip` before and after each
 attempt, and a volatile stop check).
 

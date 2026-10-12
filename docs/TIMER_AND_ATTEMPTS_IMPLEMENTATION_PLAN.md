@@ -244,7 +244,7 @@ Nate's separate authorization.
 - **Outcome (2026-10-12):** the execution design is trimmed to the implemented spec, its review
   history archived. `./release.sh` passed (801 core tests in each of three cache configurations,
   CLI, bench, fresh baremetal build). `0.1.11-SNAPSHOT` is installed; its core is identical to
-  the trial V-32 already runs. [The handoff](V32_EXECUTION_PHASE_HANDOFF.md) also lists the test
+  the trial V-32 already runs. [The handoff](archive/V32_EXECUTION_PHASE_HANDOFF.md), relayed 2026-10-12, also lists the test
   guests and code V-32 may borrow (Nate's request).
 
 ## Out of scope

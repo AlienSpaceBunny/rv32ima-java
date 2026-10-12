@@ -211,7 +211,7 @@ Starts after T7.
   `--attempts` mode, planned for A3, landed with it.
 - **Ratification (2026-10-12):** Nate was agnostic and preferred one opinionated mechanism, so
   V-32's choice decided. V-32 answered: the AP's single mechanism is `stepAttempts` with a
-  4096-slot decoded cache, on JVM and native, at up to 1,061 attempts per scanline; the IOP keeps
+  4096-slot decoded cache, on JVM and native, at up to 1,061 attempts per call; the IOP keeps
   uncached `step` batches of 1,024 with its `PostExecHook`. It ratified the separate loop, asking
   that both loops keep their independent-reference differential and mutation coverage. It found
   no core API blocker while migrating to the trial build `0.1.10-attempts-SNAPSHOT`

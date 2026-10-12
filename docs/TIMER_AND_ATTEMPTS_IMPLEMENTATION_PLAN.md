@@ -155,7 +155,9 @@ reads from [time sampling](TIMER_COUNTER_DESIGN.md#time-sampling).
 
 - **Docs:** `docs/API.md` and the authoritative Javadoc (`RV32IMACore`, `RV32IMAState`,
   `CSRHook`, `PostExecHook`); the CHANGELOG reviewed as a whole; landing commits recorded in the
-  status table above and in the timer design.
+  status table above and in the timer design. Archive the timer design's version with V-32's
+  review sections in `docs/archive/` and trim the working design to its current content, linking
+  the archived copy (Nate, 2026-10-12).
 - **Bench:** the full matrix against `0.1.8` on JVM and native, plus a symbolized native build
   confirming `step()`'s and `runCached()`'s loops are still unswitched. A measured regression goes
   to Nate as a tradeoff decision. Record results under `docs/performance/<date>/timer-counters/`.
@@ -211,7 +213,8 @@ JVM and native. Record under `docs/performance/<date>/attempts/`. A regression g
 
 ### A4. Execution phase close
 
-Docs, CHANGELOG, landing commits, bump, install, push. A trial snapshot for V-32 needs
+Docs, CHANGELOG, landing commits, bump, install, push. Archive the execution design's version
+with V-32's review sections, as T7 does for the timer design. A trial snapshot for V-32 needs
 Nate's separate authorization.
 
 ## Out of scope

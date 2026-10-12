@@ -13,20 +13,26 @@
 
 ## Resume here
 
-**Step T4 of [the plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md): standard WFI and WARL
-`mie`/`mip`**, on `feature/timer-counters` (pushed). Not started. Apply each behavior change to
+**Step T5 of [the plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md): read-only CSR write
+traps**, on `feature/timer-counters` (pushed). Not started. Apply each behavior change to
 `ReferenceCore` in the same commit and list it under "Changes from the baseline" in its class
-Javadoc. T4 removes the entry-time WFI wake on a due compare that T3 kept (`step()`'s
-`updateTimerPending` result) and the class Javadoc's remaining WFI deviation. New timer tests
-live in `TimerTest`; directed differential cases in `ReferenceDifferentialTest`.
+Javadoc. New tests live in `TimerTest` or a CSR-focused class; directed differential cases in
+`ReferenceDifferentialTest` (its `csrHook` program already writes read-only numbers).
 
-Landed: T1 (hook jump-PC fix) on `main` at `3f4fdda`; T2 (reference core and differential) at
-`08d26db` and T3 (shared time source, standard compare, `count < 1` rejected, stale-MTIP fix) at
-`fdd68f0`, both on the branch. Update the plan's status table and this section as steps land.
+Landed: T1 (hook jump-PC fix) on `main` at `3f4fdda`; on the branch, T2 (reference core and
+differential) at `08d26db`, T3 (shared time source, standard compare) at `fdd68f0`, and T4
+(standard WFI, implemented-only `mie`/`mip`, `injectInterrupt` no longer clears the stall flag)
+at `525c925`. Update the plan's status table and this section as steps land.
 
-**Validation status:** `feature/timer-counters` at `fdd68f0` passed `./mvnw clean verify` (620
-core tests in each of three cache configurations, plus CLI and bench). No bench run yet; T7's
-full matrix covers T1 and later steps (T3 adds one source read and compare per `step` call). The `v0.1.8` tag passed `release:perform` (570 core
+**Open question for Nate (from T4, not blocking):** a `WFI` that stalls still returns before
+calling `PostExecHook`, while one that finds the wake condition true now retires through the
+normal path and reports to the hook. Unchanged from before T4 for the stall path; settle it with
+the execution API's hook rules (A1) or earlier if V-32 needs it.
+
+**Validation status:** `feature/timer-counters` at `525c925` passed `./mvnw clean verify` (642
+core tests in each of three cache configurations, plus CLI and bench) and `./release.sh`. No
+bench run yet; T7's full matrix covers T1 and later steps (T3 adds one source read and compare
+per `step` call; T4 changes only entry, CSR and WFI paths). The `v0.1.8` tag passed `release:perform` (570 core
 tests in each of three cache configurations, plus CLI and bench) and `release.sh`.
 
 ## Rules for this work

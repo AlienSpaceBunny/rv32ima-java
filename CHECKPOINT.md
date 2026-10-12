@@ -29,8 +29,7 @@ implemented-only `mie`/`mip`) at `525c925`, T5 (read-only CSR write traps) at `5
 
 **For T7's bench:** T6 keeps one more `long` local (`retiredBase`) live across `step()`'s loop
 and `runCached()`'s loop, used only on the CSR path and at exits; check it costs nothing
-measurable. No Linux image is available locally, so only the baremetal image covers the "images
-still run" check.
+measurable.
 
 T4's WFI/`PostExecHook` question is settled for A1 (V-32's recommendation, in the plan's A1
 step). V-32's [packets 001–003 review](docs/V32_PACKET_REVIEW_2026-10-12.md) needs nothing from

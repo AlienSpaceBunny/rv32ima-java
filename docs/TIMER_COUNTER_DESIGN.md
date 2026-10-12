@@ -379,7 +379,8 @@ The core owns no epoch, reset policy or device. In V-32's terms:
 - **Existing tests** that depend on `elapsedUs`, zero-disables compare, WFI setting MIE or the
   inclusive `cycle` read are updated to the new behavior, not kept behind a mode.
 - **The decoded cache:** the suite runs cached and uncached, as `TestCores` already does.
-- **The baremetal and Linux images** used by `release.sh` and the CLI must still run.
+- **The baremetal image** used by `release.sh` and the CLI's `IntegrationTest` must still run.
+  This repository has no Linux image; mini-rv32ima's was never carried over.
 - **Bench:** compare against `0.1.8` on JVM and native. A measured regression is reported to Nate
   as a tradeoff decision; it is not a reason to keep a known shortcut. This version becomes the
   baseline for the execution API's attempt-fusion cost.

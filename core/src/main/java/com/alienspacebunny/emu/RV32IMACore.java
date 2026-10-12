@@ -17,14 +17,6 @@ import java.util.Objects;
  * C} and {@code F} are not decoded yet and only affect the {@code misa} CSR value the guest reads
  * back.
  *
- * <p><b>Intentional deviation from the RISC-V specification.</b> One behaviour is inherited from
- * the upstream C implementation and preserved intentionally: <b>WFI sets {@code mstatus.MIE}
- * before suspending.</b> The RISC-V specification treats {@code WFI} as a hint and does not
- * mandate privilege-state changes. This implementation unconditionally sets bit 3 ({@code MIE})
- * in {@code mstatus} before entering the WFI stall so that a pending timer interrupt can wake the
- * hart even if the guest had not enabled interrupts. Do not remove this behaviour without also
- * adjusting the interrupt-enable check in {@link #step}.
- *
  * <p><b>Time.</b> Every core is built with a {@link MachineTimeSource}, shared by all harts on
  * the machine. The core samples it once per {@link #step} call and never accumulates time; see
  * {@link #step} for the sampling points.
@@ -40,6 +32,16 @@ import java.util.Objects;
  * running in user mode or {@code mstatus.MIE} is set (machine-mode interrupts are not maskable by
  * {@code mstatus.MIE} while executing below machine mode). When more than one is simultaneously
  * pending and enabled, external takes priority over software, which takes priority over timer.
+ *
+ * <p><b>Implemented interrupt bits.</b> Only {@code MSIP}/{@code MSIE}, {@code MTIP}/{@code MTIE}
+ * and {@code MEIP}/{@code MEIE} are implemented. A guest write to {@code mie} keeps only those
+ * three enables; a guest write to {@code mip} is legal and changes nothing, since {@code MTIP}
+ * follows the compare and {@code MSIP} and {@code MEIP} belong to the embedder. Host-side edits of
+ * {@link RV32IMAState#mie} and {@link RV32IMAState#mip} are not masked, so guest reads, the
+ * {@code WFI} wake condition and interrupt delivery all ignore every other bit.
+ *
+ * <p><b>WFI.</b> {@code WFI} waits for a pending, locally enabled interrupt: the wake condition is
+ * {@code mip & mie} with any implemented bit set, whatever {@code mstatus.MIE}. See {@link #step}.
  */
 public class RV32IMACore {
     private final IsaConfig isaConfig;
@@ -105,10 +107,13 @@ public class RV32IMACore {
     /** {@code mip}/{@code mie} bit 11: machine external interrupt pending/enable (MEIP/MEIE). */
     private static final int MIP_MEIP = 1 << 11;
 
+    /** The {@code mip}/{@code mie} bits this hart implements; every other bit reads as 0. */
+    private static final int IMPLEMENTED_INTERRUPTS = MIP_MSIP | MIP_MTIP | MIP_MEIP;
+
     /** {@code extraflags} bits 0–1: current privilege level ({@link #PRIV_MACHINE}/{@link #PRIV_USER}). */
     private static final int EXTRAFLAG_PRIV_MASK = 0x3;
 
-    /** {@code extraflags} bit 2: WFI stall flag. Set on {@code WFI}; cleared when an interrupt arrives. */
+    /** {@code extraflags} bit 2: WFI stall flag. Set when {@code WFI} stalls; cleared when the hart wakes. */
     private static final int EXTRAFLAG_WFI = 0x4;
 
     private static final int PRIV_USER = 0;
@@ -183,13 +188,12 @@ public class RV32IMACore {
     }
 
     /**
-     * Marks a machine interrupt pending on {@code state} and, if the hart is stalled in {@code
-     * WFI}, wakes it.
+     * Marks a machine interrupt pending on {@code state}.
      *
-     * <p>Setting the pending bit alone does not guarantee delivery on the next {@link #step} call:
-     * the interrupt must also be individually enabled in {@code mie}, and — per the gating rule
-     * documented on {@link #step} — either the hart must be running in {@link #PRIV_USER}, or
-     * {@code mstatus.MIE} must be set. The caller is responsible for whatever synchronization
+     * <p>A hart stalled in {@code WFI} wakes at its next {@link #step} call if the interrupt is
+     * enabled in {@code mie}; this method does not touch the stall flag. Delivery additionally
+     * needs, per the gating rule documented on {@link #step}, either the hart running in {@link
+     * #PRIV_USER} or {@code mstatus.MIE} set. The caller is responsible for whatever synchronization
      * guards concurrent access to {@code state}, for example an I/O-processor hart injecting an
      * interrupt into an application-processor hart's state from another thread.
      *
@@ -200,31 +204,34 @@ public class RV32IMACore {
      */
     public static void injectInterrupt(RV32IMAState state, int interruptBit) {
         state.mip |= 1 << interruptBit;
-        state.extraflags &= ~EXTRAFLAG_WFI;
     }
 
     /**
      * Sets {@code MTIP} exactly when the hart's latest time sample is at or past its compare,
      * unsigned, and clears it otherwise. Leaves every other {@code mip} bit alone.
-     *
-     * @return whether the compare is due.
      */
-    private static boolean updateTimerPending(RV32IMAState state) {
+    private static void updateTimerPending(RV32IMAState state) {
         boolean due = Long.compareUnsigned(state.getTimer(), state.getTimerMatch()) >= 0;
         state.mip = due ? state.mip | MIP_MTIP : state.mip & ~MIP_MTIP;
-        return due;
     }
 
     /**
-     * Returns the {@code mip & mie} bits that are currently deliverable under the gating rule
-     * documented on {@link #step}: every individually enabled interrupt while in user mode, or
-     * only when {@code mstatus.MIE} is set while in machine mode. Shared by the pre-loop dispatch
-     * and the {@code WFI} handler so both agree on what counts as a pending interrupt.
+     * Returns the implemented {@code mip & mie} bits: the interrupts that are pending and locally
+     * enabled, whatever the global enable. Nonzero is {@code WFI}'s wake condition.
+     */
+    private static int wakeInterrupts(RV32IMAState state) {
+        return state.mip & state.mie & IMPLEMENTED_INTERRUPTS;
+    }
+
+    /**
+     * Returns the {@linkplain #wakeInterrupts wake bits} that are currently deliverable under the
+     * gating rule documented on {@link #step}: every one while in user mode, or only when {@code
+     * mstatus.MIE} is set while in machine mode.
      */
     private static int pendingEnabledInterrupts(RV32IMAState state) {
         boolean interruptsGloballyEnabled =
                 (state.extraflags & EXTRAFLAG_PRIV_MASK) == PRIV_USER || (state.mstatus & MSTATUS_MIE) != 0;
-        return interruptsGloballyEnabled ? (state.mip & state.mie) : 0;
+        return interruptsGloballyEnabled ? wakeInterrupts(state) : 0;
     }
 
     /**
@@ -1057,9 +1064,9 @@ public class RV32IMACore {
         return switch (csrno) {
             case 0x340 -> state.mscratch;
             case 0x305 -> state.mtvec;
-            case 0x304 -> state.mie;
+            case 0x304 -> state.mie & IMPLEMENTED_INTERRUPTS;
             case 0xC00 -> (int) cycle;
-            case 0x344 -> state.mip;
+            case 0x344 -> state.mip & IMPLEMENTED_INTERRUPTS;
             case 0x341 -> state.mepc;
             case 0x300 -> state.mstatus;
             case 0x342 -> state.mcause;
@@ -1095,11 +1102,10 @@ public class RV32IMACore {
                 state.mtvec = writeValue;
                 break;
             case 0x304:
-                state.mie = writeValue;
+                state.mie = writeValue & IMPLEMENTED_INTERRUPTS;
                 break;
             case 0x344:
-                state.mip = writeValue;
-                break;
+                break; // MTIP follows the compare; MSIP and MEIP belong to the embedder
             case 0x341:
                 state.mepc = writeValue;
                 break;
@@ -1440,9 +1446,16 @@ public class RV32IMACore {
      * {@code mip} write or an {@code MRET} recomputes {@code MTIP} from the latest sample without
      * sampling again.
      *
-     * <p><b>WFI.</b> If the hart is in the WFI stall state and no interrupt is pending, no
-     * instructions are executed and this method returns {@code 1} immediately. The caller should
-     * sleep or yield before calling again.
+     * <p><b>WFI.</b> The wake condition is a pending, locally enabled, implemented interrupt:
+     * {@code mip & mie & (MSIP | MTIP | MEIP)} is nonzero, whatever {@code mstatus.MIE}. Executing
+     * {@code WFI} retires it (pc and cycle advance); if the wake condition already holds, the call
+     * continues, and otherwise the hart stalls and the call returns {@code 1}. A stalled hart
+     * checks the condition at each call's entry, after the sample: without a wake, no
+     * instructions are executed and the call returns {@code 1} with pc and cycle unchanged. On a
+     * wake, the interrupt is taken if it is deliverable, and otherwise execution continues after
+     * the {@code WFI}. {@code WFI} never changes {@code mstatus}. The core never sleeps: the
+     * caller decides how long to block, must wake the hart when an interrupt becomes enabled or an
+     * earlier deadline is published, and must not spin on a due compare masked in {@code mie}.
      *
      * <p><b>Trap handling.</b> If an interrupt or exception occurs, the core commits trap state to
      * {@code mepc}, {@code mcause}, {@code mtval}, and {@code mstatus}, then redirects the PC to
@@ -1474,8 +1487,8 @@ public class RV32IMACore {
      *     null}.
      * @param csrHook optional hook for custom CSR accesses; may be {@code null}, in which case
      *     reads of non-built-in CSRs return {@code 0} and writes are silently discarded.
-     * @return {@code 0} after executing instructions or handling a trap; {@code 1} if the hart is
-     *     in WFI and no instruction was executed.
+     * @return {@code 1} if the hart stalled in {@code WFI}, either at entry with no instruction
+     *     executed or by executing {@code WFI}; {@code 0} otherwise.
      * @throws IllegalArgumentException if {@code count} is less than 1, before any time sample or
      *     state change.
      */
@@ -1498,9 +1511,7 @@ public class RV32IMACore {
             long now = timeSource.nowMicros();
             state.timerl = (int) now;
             state.timerh = (int) (now >>> 32);
-            if (updateTimerPending(state)) {
-                state.extraflags &= ~EXTRAFLAG_WFI;
-            }
+            updateTimerPending(state);
 
             // Check for a pending machine interrupt before starting the instruction loop. This core
             // models only M-mode and U-mode, so mstatus.MIE gates interrupts only while executing in
@@ -1510,13 +1521,11 @@ public class RV32IMACore {
             // external > software > timer.
             trap = pendingInterruptTrap(state);
 
-            // If WFI, don't run processor -- unless an enabled interrupt is already pending, in which
-            // case the stall ends here and the interrupt is delivered below. This check deliberately
-            // comes after pendingInterruptTrap so a pending bit that was set before the WFI
-            // executed (or set directly on mip by an embedder, without injectInterrupt's WFI clear)
-            // cannot leave the hart stalled with a deliverable interrupt.
+            // A stalled hart stays stalled until a pending interrupt is locally enabled, whatever
+            // the global enable. On a wake, a deliverable interrupt (trap != 0) is taken below;
+            // otherwise execution continues after the WFI.
             if ((state.extraflags & EXTRAFLAG_WFI) != 0) {
-                if (trap == 0) {
+                if (wakeInterrupts(state) == 0) {
                     return 1;
                 }
                 state.extraflags &= ~EXTRAFLAG_WFI;
@@ -1987,18 +1996,14 @@ public class RV32IMACore {
                                             trap = exceptionTrap(EXC_BREAKPOINT);
                                             break;
                                         case 0x105: // WFI
-                                            state.mstatus |= MSTATUS_MIE;
+                                            if (wakeInterrupts(state) != 0) {
+                                                // Already woken: WFI retires like any instruction
+                                                // and the call continues. An interrupt that is
+                                                // also deliverable was normally taken before it.
+                                                break;
+                                            }
                                             state.setCycle(cycle);
                                             state.pc = pc + instrLen;
-                                            if (pendingEnabledInterrupts(state) != 0) {
-                                                // An enabled interrupt is already pending (for example,
-                                                // MSIP injected before this WFI, or an interrupt that
-                                                // mstatus.MIE was masking until the line above set
-                                                // it). WFI completes immediately without stalling;
-                                                // the next step call delivers the interrupt.
-                                                dcBatchEnded = true;
-                                                return 0;
-                                            }
                                             state.extraflags |= EXTRAFLAG_WFI;
                                             return 1;
                                         default:

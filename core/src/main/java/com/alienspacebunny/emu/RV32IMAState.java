@@ -94,16 +94,20 @@ public class RV32IMAState {
 
     /**
      * Machine interrupt-enable register ({@code mie}). Bit 3 (MSIE) enables software interrupts,
-     * bit 7 (MTIE) enables the timer interrupt, bit 11 (MEIE) enables external interrupts.
+     * bit 7 (MTIE) enables the timer interrupt, bit 11 (MEIE) enables external interrupts. These
+     * are the only implemented bits: a guest write keeps only them, and guest reads, {@code WFI}
+     * wakeup and interrupt delivery ignore any other bit a host edit sets here.
      */
     public int mie;
 
     /**
      * Machine interrupt-pending register ({@code mip}). Bit 7 (MTIP) is managed entirely by the
      * core: set when the latest time sample is at or past {@code mtimecmp}, unsigned, and cleared
-     * otherwise. Bits
-     * 3 (MSIP) and 11 (MEIP) are set by the embedder, typically via {@link
-     * RV32IMACore#injectInterrupt}, and cleared by guest or embedder acknowledgement.
+     * otherwise. Bits 3 (MSIP) and 11 (MEIP) are set by the embedder, typically via {@link
+     * RV32IMACore#injectInterrupt}, and cleared by the embedder, for example when the guest
+     * acknowledges its device. All three are read-only to the guest: a guest write to {@code mip}
+     * changes nothing. Guest reads, {@code WFI} wakeup and interrupt delivery ignore any other bit
+     * a host edit sets here.
      */
     public int mip;
 
@@ -125,8 +129,9 @@ public class RV32IMAState {
      *
      * <ul>
      *   <li>Bits 0–1: privilege level. Machine mode = {@code 3}; user mode = {@code 0}.
-     *   <li>Bit 2: WFI flag. Set when the hart executes {@code WFI}; cleared when a pending
-     *       interrupt arrives.
+     *   <li>Bit 2: WFI flag. Set when an executed {@code WFI} stalls the hart; cleared at a
+     *       {@link RV32IMACore#step} entry that finds a pending, locally enabled interrupt (see
+     *       {@code step}'s WFI paragraph). An embedder may also clear it to release a stall.
      * </ul>
      */
     public int extraflags;

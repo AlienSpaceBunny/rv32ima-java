@@ -25,6 +25,17 @@ for how this file is updated as part of cutting a release.
 - **Breaking:** the timer compare is standard: `MTIP` is set exactly when time is at or past
   `mtimecmp`, unsigned, and a compare of zero no longer disables the timer. A new `RV32IMAState`
   starts at `TIMER_COMPARE_NEVER` instead of zero.
+- **Breaking:** `WFI` follows the privileged specification. It no longer sets `mstatus.MIE`; it
+  and a stalled hart wake on a pending, locally enabled interrupt (`mip & mie` for MSIP, MTIP or
+  MEIP), whatever the global enable. A woken hart takes the interrupt only if it is deliverable
+  and otherwise continues after `WFI`; an executed `WFI` that finds the wake condition already
+  true retires and the `step` call continues. A due compare masked in `mie` no longer ends a
+  stall.
+- **Breaking:** `RV32IMACore.injectInterrupt` no longer clears the WFI flag; the next `step`
+  decides the wakeup, so a source masked in `mie` no longer wakes a stalled hart.
+- **Breaking:** `mie` and `mip` implement only MSIP/MSIE, MTIP/MTIE and MEIP/MEIE. A guest write
+  to `mie` keeps only those enables, a guest write to `mip` changes nothing, and guest reads,
+  the WFI wake condition and delivery ignore any other bit a host edit sets.
 - The CLI derives time from a host-clock source, or from the cycle count with `-l`, as before.
 
 ### Fixed

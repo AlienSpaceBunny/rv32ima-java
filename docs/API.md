@@ -102,8 +102,8 @@ change.
   `RV32IMACore`'s internal 32-bit expansion of the 16-bit encoding, not the
   original 16 bits.
 
-Time and timer (see the `RV32IMACore` class Javadoc for the rationale behind
-the intentional WFI deviation):
+Time, timer and WFI (the `RV32IMACore` class and `step` Javadoc are
+authoritative):
 
 - Each `step` call samples the core's `MachineTimeSource` once, after
   validating `count` and before any instruction. Nothing inside the call
@@ -120,13 +120,17 @@ the intentional WFI deviation):
   `MRET` reevaluates interrupts, so a compare moved through MMIO before `MRET`
   does not re-enter the handler. A deadline crossed during a call is noticed
   at the next sample.
-- `WFI` unconditionally sets `mstatus.MIE` before entering the wait state so a
-  pending timer interrupt can wake the hart even if the guest had not enabled
-  interrupts. If an enabled interrupt is already pending once `MIE` is set,
-  `WFI` completes without stalling (`step` returns `0`) and the interrupt is
-  delivered on the next `step` call. A stalled hart also re-checks for a
-  deliverable interrupt at the top of every `step`, so a pending bit set on
-  `mip` directly (without `injectInterrupt`'s WFI clear) still wakes it.
+- `WFI` follows the privileged specification and never changes `mstatus`. Its
+  wake condition is a pending, locally enabled, implemented interrupt:
+  `mip & mie & (MSIP | MTIP | MEIP)` is nonzero, whatever `mstatus.MIE`.
+  Executing `WFI` retires it; if the condition already holds the call
+  continues, and otherwise the hart stalls and `step` returns `1`. A stalled
+  hart checks the condition at each call's entry, after the sample: without a
+  wake, `step` returns `1` with pc and cycle unchanged; on a wake the
+  interrupt is taken if deliverable, and otherwise execution continues after
+  the `WFI`. A due compare masked in `mie` does not wake a stalled hart. The
+  core never sleeps: the embedder decides how long to block and must not spin
+  on a masked, due compare.
 - `MRET` is machine-mode only: executed from user mode it traps
   illegal-instruction regardless of `mstatus.MPP`. `MRET`/`ECALL`/`EBREAK`/
   `WFI` with a non-zero `rd` or `rs1` field are illegal (reserved encodings).
@@ -143,8 +147,12 @@ Interrupt gating and injection:
 - Three machine interrupts are modeled: `MTIP` (bit 7, timer, core-managed from
   `mtimecmp` as above), `MSIP` (bit 3, software), and `MEIP` (bit 11, external).
   An embedder sets `MSIP`/`MEIP` directly on `state.mip`/`state.mie`, or via the
-  static helper `RV32IMACore.injectInterrupt(state, bit)`, which also clears the
-  hart's WFI flag so a stalled hart wakes.
+  static helper `RV32IMACore.injectInterrupt(state, bit)`. Neither touches the
+  WFI flag; a stalled hart wakes at its next `step` if the source is enabled.
+- Only those three bits are implemented. A guest write to `mie` keeps only
+  MSIE, MTIE and MEIE; a guest write to `mip` is legal and changes nothing.
+  Host-side edits are not masked, so guest reads, the WFI wake condition and
+  delivery all ignore any other bit.
 - All three are gated the same way: the bit must be set in both `mip` and `mie`,
   and either the hart is currently in user mode, or `mstatus.MIE` is set. This
   core models only machine and user privilege, so `mstatus.MIE` only masks

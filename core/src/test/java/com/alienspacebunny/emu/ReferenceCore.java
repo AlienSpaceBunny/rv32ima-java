@@ -21,6 +21,14 @@ import java.util.Objects;
  *       no zero special case, and is recomputed from the latest sample at interrupt reevaluation
  *       after a CSR write or {@code MRET}. The Javadoc of {@code step}'s timer paragraph and
  *       parameters changes with it.
+ *   <li>Standard WFI and implemented interrupt bits (step T4, {@code
+ *       docs/TIMER_COUNTER_DESIGN.md}, "WFI"): {@code WFI} no longer sets {@code mstatus.MIE}.
+ *       It and a stalled hart's entry check wake on {@code mip & mie & (MSIP | MTIP | MEIP)},
+ *       whatever the global enable; executing {@code WFI} with that condition already true
+ *       retires it and the call continues, and a due compare no longer ends a stall by itself.
+ *       {@code injectInterrupt} no longer clears the stall flag. Guest writes keep only MSIE,
+ *       MTIE and MEIE in {@code mie} and change nothing in {@code mip}; guest reads and delivery
+ *       mask both with the implemented bits.
  * </ul>
  *
  * <p><b>Intentional differences from {@link RV32IMACore}.</b> None yet. Each later behavior
@@ -58,6 +66,9 @@ final class ReferenceCore {
 
     /** {@code mip}/{@code mie} bit 7: machine timer interrupt pending/enable (MTIP/MTIE). */
     private static final int MIP_MTIP = 1 << 7;
+
+    /** MSIP, MTIP and MEIP (step T4): the only {@code mip}/{@code mie} bits implemented. */
+    private static final int IMPLEMENTED = (1 << 3) | (1 << 7) | (1 << 11);
 
     /** {@code mip}/{@code mie} bit 11: machine external interrupt pending/enable (MEIP/MEIE). */
     private static final int MIP_MEIP = 1 << 11;
@@ -156,7 +167,6 @@ final class ReferenceCore {
      */
     public static void injectInterrupt(RV32IMAState state, int interruptBit) {
         state.mip |= 1 << interruptBit;
-        state.extraflags &= ~EXTRAFLAG_WFI;
     }
 
     /**
@@ -168,7 +178,7 @@ final class ReferenceCore {
     private static int pendingEnabledInterrupts(RV32IMAState state) {
         boolean interruptsGloballyEnabled =
                 (state.extraflags & EXTRAFLAG_PRIV_MASK) == PRIV_USER || (state.mstatus & MSTATUS_MIE) != 0;
-        return interruptsGloballyEnabled ? (state.mip & state.mie) : 0;
+        return interruptsGloballyEnabled ? (state.mip & state.mie & IMPLEMENTED) : 0;
     }
 
     /**
@@ -951,9 +961,9 @@ final class ReferenceCore {
         return switch (csrno) {
             case 0x340 -> state.mscratch;
             case 0x305 -> state.mtvec;
-            case 0x304 -> state.mie;
+            case 0x304 -> state.mie & IMPLEMENTED;
             case 0xC00 -> (int) cycle;
-            case 0x344 -> state.mip;
+            case 0x344 -> state.mip & IMPLEMENTED;
             case 0x341 -> state.mepc;
             case 0x300 -> state.mstatus;
             case 0x342 -> state.mcause;
@@ -989,10 +999,9 @@ final class ReferenceCore {
                 state.mtvec = writeValue;
                 break;
             case 0x304:
-                state.mie = writeValue;
+                state.mie = writeValue & IMPLEMENTED;
                 break;
             case 0x344:
-                state.mip = writeValue;
                 break;
             case 0x341:
                 state.mepc = writeValue;
@@ -1072,7 +1081,6 @@ final class ReferenceCore {
         // Handle Timer interrupt.
         long timerMatch = state.getTimerMatch();
         if (Long.compareUnsigned(newTimer, timerMatch) >= 0) {
-            state.extraflags &= ~EXTRAFLAG_WFI;
             state.mip |= MIP_MTIP;
         } else {
             state.mip &= ~MIP_MTIP;
@@ -1108,7 +1116,7 @@ final class ReferenceCore {
         // executed (or set directly on mip by an embedder, without injectInterrupt's WFI clear)
         // cannot leave the hart stalled with a deliverable interrupt.
         if ((state.extraflags & EXTRAFLAG_WFI) != 0) {
-            if (trap == 0) {
+            if ((state.mip & state.mie & IMPLEMENTED) == 0) {
                 return 1;
             }
             state.extraflags &= ~EXTRAFLAG_WFI;
@@ -1792,17 +1800,11 @@ final class ReferenceCore {
                                             trap = exceptionTrap(EXC_BREAKPOINT);
                                             break;
                                         case 0x105: // WFI
-                                            state.mstatus |= MSTATUS_MIE;
+                                            if ((state.mip & state.mie & IMPLEMENTED) != 0) {
+                                                break; // already woken: retire and continue
+                                            }
                                             state.setCycle(cycle);
                                             state.pc = pc + instrLen;
-                                            if (pendingEnabledInterrupts(state) != 0) {
-                                                // An enabled interrupt is already pending (for example,
-                                                // MSIP injected before this WFI, or an interrupt that
-                                                // mstatus.MIE was masking until the line above set
-                                                // it). WFI completes immediately without stalling;
-                                                // the next step call delivers the interrupt.
-                                                return 0;
-                                            }
                                             state.extraflags |= EXTRAFLAG_WFI;
                                             return 1;
                                         default:

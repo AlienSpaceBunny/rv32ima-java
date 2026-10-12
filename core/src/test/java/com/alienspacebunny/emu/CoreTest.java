@@ -446,7 +446,7 @@ public class CoreTest {
         try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
             RV32IMAState state = machineState();
             state.mtvec = RAM_OFFSET + 0x80;
-            state.mstatus = 0x08; // MIE set (WFI instruction sets this before suspending)
+            state.mstatus = 0x08; // MIE set, so the wakeup is also delivered
             state.mie = 1 << 7; // MTIE set
             state.extraflags |= 4; // WFI active
             state.setTimerMatch(10);
@@ -587,14 +587,14 @@ public class CoreTest {
     }
 
     @Test
-    public void injectInterruptSetsPendingBitAndWakesFromWfi() {
+    public void injectInterruptSetsPendingBitAndLeavesWfiToNextStep() {
         RV32IMAState state = new RV32IMAState();
         state.extraflags |= 4; // WFI active
 
         RV32IMACore.injectInterrupt(state, 3); // MSIP
 
         assertEquals(1 << 3, state.mip);
-        assertEquals(0, state.extraflags & 4); // WFI cleared
+        assertEquals(4, state.extraflags & 4); // the next step's entry check decides the wakeup
     }
 
     // LR.W / SC.W tests
@@ -1921,29 +1921,27 @@ public class CoreTest {
             RV32IMAState state = machineState();
             state.mtvec = RAM_OFFSET + 0x80;
             state.mie = 1 << 3; // MSIE
-            state.mstatus = 0; // global MIE clear: the interrupt was masked until WFI
+            state.mstatus = 0; // global MIE clear: wakes WFI, but is not delivered
             RV32IMACore.injectInterrupt(state, 3); // MSIP pending before WFI executes
             ram.writeInt(RAM_OFFSET, 0x10500073); // wfi
+            ram.writeInt(RAM_OFFSET + 4, ADDI_X4_1);
 
-            int first = TestCores.create().step(state, ram, RAM_OFFSET, ramSize, 1, null, null);
+            int result = TestCores.create().step(state, ram, RAM_OFFSET, ramSize, 2, null, null);
 
-            assertEquals(0, first); // completed immediately, no stall
+            assertEquals(0, result); // completed immediately, no stall, and the call continued
             assertEquals(0, state.extraflags & 4);
-            assertEquals(RAM_OFFSET + 4, state.pc);
-
-            int second = TestCores.create().step(state, ram, RAM_OFFSET, ramSize, 1, null, null);
-
-            assertEquals(0, second);
-            assertEquals(0x80000003, state.mcause);
-            assertEquals(RAM_OFFSET + 4, state.mepc); // resumes after the WFI
-            assertEquals(RAM_OFFSET + 0x80, state.pc);
+            assertEquals(1, state.regs[4]);
+            assertEquals(RAM_OFFSET + 8, state.pc);
+            assertEquals(2, state.getCycle());
+            assertEquals(0, state.mstatus); // WFI does not set MIE
+            assertEquals(0, state.mcause);
         }
     }
 
     @Test
     public void pendingBitSetDirectlyOnMipWakesStalledHart() {
-        // An embedder may set mip directly rather than via injectInterrupt (which also clears the
-        // WFI flag); the stall must still end once the interrupt is deliverable.
+        // An embedder may set mip directly rather than via injectInterrupt; the stall must still
+        // end once the interrupt is pending and enabled.
         int ramSize = 1024;
         try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
             RV32IMAState state = machineState();
@@ -2052,7 +2050,7 @@ public class CoreTest {
     }
 
     @Test
-    public void csrWriteSettingPendingBitInMipDeliversBeforeNextInstruction() {
+    public void csrWriteToMipCannotRaiseAnInterrupt() {
         int ramSize = 1024;
         try (FFMMemoryBus ram = new FFMMemoryBus(ramSize, RAM_OFFSET)) {
             RV32IMAState state = machineState();
@@ -2066,9 +2064,10 @@ public class CoreTest {
 
             TestCores.create().step(state, ram, RAM_OFFSET, ramSize, 2, null, null);
 
-            assertEquals(0, state.regs[4]);
-            assertEquals(0x80000003, state.mcause);
-            assertEquals(RAM_OFFSET + 4, state.mepc);
+            assertEquals(0, state.mip); // MSIP is the embedder's, not the guest's
+            assertEquals(1, state.regs[4]);
+            assertEquals(0, state.mcause);
+            assertEquals(RAM_OFFSET + 8, state.pc);
         }
     }
 

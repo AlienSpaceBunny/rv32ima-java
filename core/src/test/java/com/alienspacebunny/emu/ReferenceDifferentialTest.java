@@ -529,6 +529,13 @@ public class ReferenceDifferentialTest {
                     ref.state.setTimerMatch(RV32IMAState.TIMER_COMPARE_NEVER);
                     dut.state.setTimerMatch(RV32IMAState.TIMER_COMPARE_NEVER);
                 }
+                case 19 -> {
+                    int reserved = rnd.nextInt() & ~0x888; // host edits are not masked
+                    ref.state.mip |= reserved;
+                    dut.state.mip |= reserved;
+                    ref.state.mie |= reserved;
+                    dut.state.mie |= reserved;
+                }
                 case 6, 7 -> {
                     ref.state.extraflags &= ~4; // release a WFI stall
                     dut.state.extraflags &= ~4;
@@ -790,7 +797,7 @@ public class ReferenceDifferentialTest {
     }
 
     @ParameterizedTest(name = "{0}")
-    @CsvSource({"lrsc", "userMode", "interrupts", "faults", "csrHook"})
+    @CsvSource({"lrsc", "userMode", "interrupts", "wfi", "faults", "csrHook"})
     public void directedProgramsMatchReference(String name) {
         switch (name) {
             case "lrsc" ->
@@ -851,8 +858,8 @@ public class ReferenceDifferentialTest {
                                 addi(5, 5, 1),
                                 csr(7, 0, 8, 0x300), // csrci mstatus, MIE
                                 csr(1, 15, 16, 0x304), // csrrw x15, mie, x16
-                                csr(2, 0, 17, 0x344), // csrs mip, x17
-                                csr(3, 0, 17, 0x344), // csrc mip, x17
+                                csr(2, 0, 17, 0x344), // csrs mip, x17: changes nothing
+                                csr(3, 0, 17, 0x344), // csrc mip, x17: changes nothing
                                 csr(1, 0, 15, 0x304), // restore mie
                                 WFI,
                                 csr(2, 0, 18, 0x304), // csrs mie, x18
@@ -861,6 +868,30 @@ public class ReferenceDifferentialTest {
                         directedState(0x888, 0x8).andThen(state -> {
                             state.regs[16] = 0x080; // MTIE only
                             state.regs[17] = 0x808; // MSIP and MEIP
+                        }));
+            case "wfi" ->
+                runDirected(
+                        name,
+                        directedProgram(
+                                csr(1, 0, 18, 0x304), // csrw mie, x18: undo the handler's masking
+                                WFI, // global enable clear: wakes and continues, or stalls
+                                addi(5, 5, 1),
+                                csr(2, 14, 0, 0x304), // csrr x14, mie
+                                csr(2, 14, 0, 0x344), // csrr x14, mip
+                                csr(1, 15, 19, 0x304), // csrrw x15, mie, x19: all ones
+                                csr(1, 0, 19, 0x344), // csrw mip, x19: changes nothing
+                                csr(3, 0, 19, 0x344), // csrc mip, x19
+                                csr(2, 14, 0, 0x344),
+                                csr(1, 0, 16, 0x304), // csrw mie, x16: MTIE only
+                                WFI, // MSIP and MEIP masked
+                                csr(1, 0, 18, 0x304), // csrw mie, x18
+                                csr(6, 0, 8, 0x300), // csrsi mstatus, MIE: takes what WFI woke on
+                                csr(7, 0, 8, 0x300), // csrci mstatus, MIE
+                                addi(5, 5, 1)),
+                        directedState(0x888, 0).andThen(state -> {
+                            state.regs[16] = 0x080; // MTIE only
+                            state.regs[19] = -1;
+                            state.setTimerMatch(0); // due until a host event moves it, so not every WFI stalls
                         }));
             case "faults" ->
                 runDirected(

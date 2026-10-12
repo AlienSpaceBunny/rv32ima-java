@@ -210,6 +210,9 @@ Starts after T7.
   faster than A1's on native. Nate decides whether the copy stays; the no-copy alternative gives
   1.08–1.17×. Evidence: [attempts-a2](performance/2026-10-12/attempts-a2/README.md). The bench's
   `--attempts` mode, planned for A3, landed with it.
+- **Ratification (2026-10-12):** Nate is agnostic and prefers one opinionated mechanism; V-32's
+  choice of what to consume decides. Asked in [V32_ATTEMPTS_RATIFICATION.md](V32_ATTEMPTS_RATIFICATION.md),
+  with a trial build `0.1.10-attempts-SNAPSHOT` (Nate authorized it).
 
 ### A3. Measurement
 

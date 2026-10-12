@@ -17,18 +17,21 @@
 
 ## Resume here
 
-**Waiting on Nate: does A2's copied fast-handler loop stay?** A2 landed as `4c37ae0` (with the
-bench's `--attempts` mode, `f9e5acb`). The design's fused shape, attempt mode as a flag in
-`runCached()`, slowed native batches 7–14% wherever `stepAttempts` is reachable, so A2 took the
-design's fallback: a separate `runCachedAttempts()` that copies `runCached()`'s lookup, delegation
-and fast handlers (about 200 lines). Batched code is unchanged; cached attempts run 1.41–1.67×
-faster than A1's on native. The no-copy alternative (a driver over `runCached(count=1)`) gives
-1.08–1.17×. Evidence and both alternative patches:
-[attempts-a2](docs/performance/2026-10-12/attempts-a2/README.md).
+**Waiting on V-32: [V32_ATTEMPTS_RATIFICATION.md](docs/V32_ATTEMPTS_RATIFICATION.md)**, for Nate
+to relay. Nate is agnostic on A2's copied loop but prefers one opinionated mechanism, and V-32's
+choice of what to consume decides. It asks V-32 which mechanism the AP will use (we recommend
+`stepAttempts` with the cache on) and to ratify A2's separate `runCachedAttempts()` loop, which
+copies `runCached()`'s fast handlers (about 200 lines). That loop leaves batched code unchanged
+and runs cached attempts 1.41–1.67× faster than A1's on native. The no-copy alternative gives
+1.08–1.17×. Evidence: [attempts-a2](docs/performance/2026-10-12/attempts-a2/README.md). Commit a
+received reply before editing the document.
+
+**Trial build:** `0.1.10-attempts-SNAPSHOT` is installed in `~/.m2` from local tag
+`trial/0.1.10-attempts`. `main`'s POMs stay on `0.1.10-SNAPSHOT`.
 
 **Next: step A3 of [the plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md)**, the full
-`--attempts` measurement on JVM and native, once Nate settles the copy (a switch to the no-copy
-variant would need its own A3 run). `run_matrix.py` does not pass `--attempts` yet.
+`--attempts` measurement on JVM and native, once V-32 answers (a switch to another variant would
+need its own A3 run). `run_matrix.py` does not pass `--attempts` yet.
 
 **Validation status:** the A2 tree passed `./mvnw clean verify` (801 core tests in each of three
 cache configurations, plus CLI and bench). Twelve mutations of the new loop and driver each fail

@@ -1,11 +1,11 @@
 # Batched execution with committed attempt boundaries: design
 
-Date: 2026-10-12. From the CPU agent. **Revision 4.** Revision 3 answered V-32's review of
-revision 2 (kept below with its earlier response). Revision 4 drops the legacy contract on Nate's
-direction: the core follows what V-32 needs and, where that stays cheap to maintain, the RISC-V
-specification. The oracle's semantics stay where V-32 needs them, not as historical equivalence.
-Revision 3 was not reviewed. Nothing here is implemented, and implementation waits for Nate's go.
-The changes in each revision are listed at the end.
+Date: 2026-10-12. From the CPU agent. **Revision 5**, after V-32's review of revision 4 (kept
+below with its earlier reviews). Since revision 4 there is no legacy contract, on Nate's direction:
+the core follows what V-32 needs and, where that stays cheap to maintain, the RISC-V
+specification. V-32's oracle is evidence with documented intentional differences, not an API
+constraint. Nothing here is implemented, and implementation waits for Nate's go. The changes in
+each revision are listed at the end.
 
 **Inputs:**
 - V-32's requirements in
@@ -14,7 +14,7 @@ The changes in each revision are listed at the end.
   [V32_AP_STEPPING_RESPONSE.md](V32_AP_STEPPING_RESPONSE.md).
 - V-32's committed-attempt oracle, in its repository at
   `docs/performance-evidence/2026-10-09/ap-boundary-api/`.
-- V-32's response to the first draft and its review of revision 2, below.
+- V-32's response to the first draft and its reviews of revisions 2 and 4, below.
 
 The timer and counter extension V-32 requested in the same response is designed separately in
 [TIMER_COUNTER_DESIGN.md](TIMER_COUNTER_DESIGN.md). **It lands first:** it removes `elapsedUs`,
@@ -22,17 +22,18 @@ replaces the time model and fixes `step()`'s spec deviations, and this design bu
 
 ## Summary
 
-- **Adopt the oracle's contract with `postExec == null`:** `stepAttempts`, `AttemptController`
-  and `AttemptResult`, with the oracle's semantics where V-32 needs them and the timer design's
-  time and WFI rules in place of the old ones. The public method has no `PostExecHook` parameter;
-  a package-private overload keeps the oracle's hook coverage portable.
+- **`stepAttempts`, `AttemptController` and `AttemptResult`,** with the contract stated directly
+  below. It keeps the oracle's semantics where V-32 needs them and uses the timer design's time,
+  WFI and counter rules. The Javadoc lists the intentional differences from the oracle. There is
+  no `PostExecHook` parameter and no hook overload.
 - **Attempt mode is a mode, not a non-null controller.** A null controller still gets
   per-attempt checks, trap continuation and accounting.
 - **With the decoded cache on, attempts run inside `runCached()`'s loop.** The hypothesis is that
   fusing them there cuts most of the per-call cost of cached `step(count=1)` on HotSpot: the
   entry, the bus and window checks, and the setup. Measurement decides; see below.
-- **With the cache off, `stepAttempts` is the reference wrapper.** `step()`'s loop is not changed
-  by this design.
+- **With the cache off, `stepAttempts` loops over an internal single-attempt entry.** The entry
+  runs `step(count=1)`'s checks and execution but reuses the call's time sample. That is new
+  plumbing in `step()`'s entry; its instruction loop is unchanged.
 - **The `PostExecHook` jump-PC quirk is fixed, separately.** For a taken jump or branch, the hook
   will report the instruction's own PC. Nothing keeps the old value.
 - **This is a candidate for V-32, not an adoption.** V-32 production runs `0.1.8` with the cache
@@ -59,29 +60,32 @@ public AttemptResult stepAttempts(RV32IMAState state, MemoryBus mem, int ramOffs
         int budget, CSRHook csrHook, AttemptController controller);
 ```
 
-- **No `postExec`.** The Javadoc states that this is the oracle with `postExec == null`. A
-  package-private overload with the oracle's full signature exists only for the ported hook tests;
-  no embedder calls it.
-- **`exitReason()`** is the only addition to the oracle. Precedence: controller stop, then a
+- **No `postExec`.** No consumer needs a hook here, and historical tests alone do not justify a
+  second execution mode. The Javadoc describes the contract directly and lists its intentional
+  differences from V-32's oracle: time sampling, WFI, counters, nonpositive budgets and the absent
+  hook.
+- **`exitReason()`** is the only addition to the oracle's result. Precedence: controller stop, then a
   nonzero core result, then budget. Both a stop and a nonzero result stay recorded.
-- **No retirement count and no attempt kind.** Retired instructions become a hart counter
-  (`instret`, in the timer design); callers take its delta.
+- **No retirement count and no attempt kind.** Callers take the delta of `getInstret()`, the
+  guest-proof retired-work count from the timer design, never of the guest-writable
+  `getMinstret()`.
 - **No `elapsedUs`.** Time comes from the core's shared source, sampled once per call (see the
   timer design).
 - **The budget must be positive.** A nonpositive budget throws `IllegalArgumentException` before
   any callback runs or any state changes, so a rejected call cannot have consumed a device command
   in `beforeAttempt`. The oracle's nonpositive-budget behavior (one callback, then a step with the
-  original budget) is not kept; Question 2 asks whether V-32 needs it.
+  original budget) is not kept; V-32 accepted this and migrates its callers.
 - **One immutable `AttemptResult` per call.** A caller-owned mutable result waits until
   allocation is measured with real callbacks.
 
 ## Semantics
 
-These are the oracle's, with V-32's clarifications and the timer design's time and WFI rules.
-Each item names the requirement it covers.
+The contract below keeps the oracle's semantics where V-32 needs them, with V-32's clarifications
+and the timer design's time, WFI and counter rules. Each item names the requirement it covers.
 
-- **An attempt** is exactly one `step(count=1)`: MTIP recomputation from the latest time sample,
-  the interrupt check, the WFI check, then one of:
+- **An attempt** is MTIP recomputation from the call's latest time sample, the interrupt check, the
+  WFI check, then one of the cases below. It matches a public `step(count=1)` except that it does
+  not take a new sample; the call's sample is reused.
   - **an interrupt-only entry.** The cycle counter does not advance.
   - **a stall in an existing WFI:** result 1, with pc and cycle unchanged.
   - **one instruction, which may trap.** An executed WFI is an instruction: pc and cycle advance,
@@ -122,24 +126,27 @@ Each item names the requirement it covers.
   stop mechanism (R2). A bus `IndexOutOfBoundsException` on fetch or data access is still an
   architectural access fault, as in `step()`.
 - **The decoded cache's rules apply unchanged.**
-- **Counters:** `instret` is published before both callbacks along with pc and cycle, and reloaded
-  after them. Counter writes by the guest or by a
-  callback survive the fast handlers, delegation, WFI's early return and the `FENCE.I`
-  flush-and-resume. Time is sampled once per public call; internal exits and resumes do not take
-  extra samples. See [TIMER_COUNTER_DESIGN.md](TIMER_COUNTER_DESIGN.md#time-sampling).
+- **Counters:** the work counts `getCycle()` and `getInstret()` are published before both
+  callbacks along with pc, and reloaded after them. The architectural offsets behind
+  `getMcycle()` and `getMinstret()` live in `state`; writes to them by the guest or by a callback
+  survive the fast handlers, delegation, WFI's early return and the `FENCE.I` flush-and-resume.
+- **One sample per call** on every path: the cached loop, the uncached single-attempt entry,
+  delegation and the `FENCE.I` resume take none of their own. A `time` read refreshes it, and the
+  read's result, retirement and interrupt state are published before `afterAttempt`. See
+  [TIMER_COUNTER_DESIGN.md](TIMER_COUNTER_DESIGN.md#time-sampling).
 
 ## Implementation
 
 **Cache on.** `stepAttempts` runs `runCached()` in attempt mode, selected by an explicit flag,
 including for a null controller. Each iteration:
 
-1. Publishes `pc`, `cycle` and `instret`, calls `beforeAttempt` when there is a controller, and
+1. Publishes `pc` and the two work counts, calls `beforeAttempt` when there is a controller, and
    reloads them.
    The loop already reads everything else from `state` at the point of use: privilege and the
    rest of `extraflags`, the CSRs, and `regs`, which is a final array. The implementation must
    keep it that way; the lockstep test's callbacks edit each of these.
-2. Runs the entry checks: the timer and MTIP, `pendingInterruptTrap` and WFI. These are bit
-   operations with no loops.
+2. Runs the entry checks: MTIP from the call's sample, `pendingInterruptTrap` and WFI. These are
+   bit operations with no loops. The first attempt takes the call's sample here.
 3. Executes through the fast handlers or delegation. The delegated `step(count=1)` runs in
    `DELEGATING` mode, which skips the entry checks this attempt has already run. It takes no
    extra time sample, and the next attempt's checks still run. Same-attempt dispatch after a CSR
@@ -157,34 +164,44 @@ batch.
 **The rule from the cache work:** keep inner loops out of interpreter loops, so Native Image can
 still unswitch them. The attempt-mode flag is loop-invariant, and steps 1–4 add straight-line code
 plus two calls. A symbolized native build checks that `runCached()` is still unswitched; that
-supports the code-shape claim but says nothing about throughput, which only the bench gates
-below establish. If attempt mode slows the batched cached path, the fallback is a separate
+supports the code-shape claim but says nothing about throughput, which only the bench
+measurements below establish. If attempt mode slows the batched cached path, the fallback is a separate
 attempt loop; how it would share the fast-handler switch is open.
 
-**Cache off.** `stepAttempts` loops over `step(count=1)` and calls the callbacks, like the oracle
-wrapper. It gives no speedup and does not change `step()`'s code; the bench regression gates
-below still apply.
+**Cache off.** `stepAttempts` takes the call's sample after the first `beforeAttempt`, then loops
+over an internal single-attempt entry and calls the callbacks. That entry is a new internal mode
+of `step()`'s entry: it runs every check (MTIP from the retained sample, the interrupt and WFI
+checks) and executes one instruction, but does not sample. It is distinct from `DELEGATING`, which
+skips the checks because the cached loop already ran them. `step()`'s instruction loop is
+unchanged. There is no speedup here, only correct per-call sampling.
 
 ## Validation
 
 - **One independent reference.** A copy of V-32's frozen legacy interpreter goes into the core's
   test sources with the timer design's changes applied (and the `PostExecHook` fix), and nothing
   else. Its diff from the frozen original is the list of intentional behavior changes. It catches
-  regressions that a wrapper around the current `step(count=1)` would share; the wrapper stays as a
-  second reference. Directed tests with hand-computed values cover the corner cases.
+  regressions that a wrapper around the current `step(count=1)` would share. It has its own
+  call-level sample lifetime (one sample per call, refreshed by `time` reads) and does not share
+  the optimized driver's sampling code. Directed tests with hand-computed values cover the corner
+  cases.
+- **An advancing source.** A scripted source that advances on every read runs the comparisons
+  with the reference and checks sample counts, MTIP and what callbacks observe across the cached
+  and uncached paths, null and non-null controllers, `time` reads, delegation and `FENCE.I`. A
+  fixed clock would hide extra samples.
 - **What is compared:** every committed boundary (registers, pc, CSRs, privilege, counters),
   memory and device effects, and both reservation layers (the hart's own and the bus's), not
   just final registers and return values.
-- **V-32's oracle, ported:** all 36 cases and 330 budget comparisons, including the hook
-  coverage through the package-private overload. Each runs uncached, with 4 and 4096 slots, and in
-  check mode. Expectations that depend on a changed behavior (time, WFI, the hook's jump PC,
-  nonpositive budgets) are updated to the new behavior and listed.
+- **V-32's oracle, ported:** all 36 cases and 330 budget comparisons. Each runs uncached, with 4
+  and 4096 slots, and in check mode. Expectations that depend on a changed behavior (time, WFI,
+  counters, nonpositive budgets) are updated to the new behavior and listed; the frozen evidence
+  itself is not changed. The oracle's hook observations move to `step()`'s hook tests, where the
+  jump-PC fix is recorded as an intentional difference.
 - **New cases:** null versus non-null controllers, callback state edits, executed versus stalled
   WFI, same-attempt CSR and MRET dispatch, fetch faults, a controller stop on `FENCE.I` (the flush
   must already be done), nonpositive budgets rejected before any callback, and bus faults that
   stay traps.
 - **A seeded lockstep differential** compares `stepAttempts` with repeated `step(count=1)` on
-  random programs. Its controllers stop at random, inject `mip` bits and edit registers, privilege
+  random programs, with a fixed source, since repeated public calls sample again. Its controllers stop at random, inject `mip` bits and edit registers, privilege
   and CSRs inside callbacks.
 - **The full gate,** plus a symbolized native check that the batched cached path is still
   unswitched.
@@ -201,8 +218,10 @@ below still apply.
     `stepAttempts` (cache off and on), at a budget of 1,061. One larger budget runs as a
     diagnostic control only; it does not select a future quantum. Allocation is recorded alongside
     throughput.
-  - **Regression gates:** the throughput of `step()`'s per-instruction and batched paths must not
-    regress against `0.1.8` on JVM or native.
+  - **Baselines:** the implemented timer and counter version is the baseline for attempt fusion's
+    cost, so a regression is not mistaken for batching cost when it comes from new semantics.
+    `0.1.8` stays as a historical comparison. A measured regression goes to Nate as a tradeoff
+    decision; it is not a reason to keep a shortcut.
 - **V-32 decides.** After separate authorization, a trial build `0.1.9-attempts-SNAPSHOT` would let
   V-32 time boots with its real callbacks on JVM and native, as for the cache. Neither the build
   nor that timing is authorized by this design.
@@ -212,12 +231,12 @@ and a cached batch. In bench that gap is 0.82× against 1.45–1.71× on HotSpot
 against 1.64–3.29× native. V-32's mailbox sampling, its `syscon` checks and the per-attempt entry
 checks will keep some of it. None of this is measured.
 
-## Hook coverage
+## Hooks
 
-A package-private, test-only overload keeps `postExec`, as V-32 accepted. Its scope is the
-oracle's hook coverage only, with the jump-PC fix; it does not take on the time or counter
-guarantees. The existing hook tests and the public `step` method's documented `postExec == null`
-contract stay, apart from the fix.
+`stepAttempts` has no `postExec` and no test-only hook overload. `step()` keeps its
+`PostExecHook`: the IOP's mailbox callback uses it and must keep working under the timer and
+counter rules. The jump-PC fix reports a taken jump or branch at the instruction's own PC,
+compressed forms included.
 
 ## V-32's integration (not core work)
 
@@ -227,15 +246,10 @@ controller stop back to the AP's existing return behavior; `coreResult` does not
 Terminal COMMIT stops after its store and pc are published; a concurrent IOP HALT still waits for
 the outer monitor. This design grants no new lock layout and no one-instruction HALT latency.
 
-## Questions for V-32 (revision 4)
+## Questions for V-32 (revision 5)
 
-1. **Remaining details.** Does revision 4 cover the details in V-32's review of revision 2? Both
-   of revision 2's questions are settled by that review; the `elapsedUs` answer is superseded by
-   its removal.
-2. **Nonpositive budgets.** Does V-32 need the oracle's nonpositive-budget behavior, or is an
-   `IllegalArgumentException` before any callback acceptable? Its AP passes positive budgets.
-3. **Hook fix.** Does any V-32 code or evidence depend on the `PostExecHook` reporting the target
-   minus the instruction length for a taken jump or branch?
+1. **Uncached sampling.** Do the internal single-attempt entry and the reference's call-level
+   sample lifetime settle the sampling correction? All of revision 4's questions are answered.
 
 **Out of scope:**
 - the scheduler, pacing, lock layout and batch size, which are V-32's;
@@ -546,3 +560,92 @@ and, where cheap to maintain, the specification.
 - **Validation:** one reference, the frozen interpreter with the intentional changes applied, its
   diff listing them; ported oracle expectations are updated where behavior changed. Bench against
   `0.1.8` is a throughput gate only.
+
+## V-32 review of revision 4
+
+2026-10-12. The revised contract is a suitable direction, subject to the
+sampling correction below. Nate explicitly accepts temporary consumer breakage:
+the earlier requests for legacy equivalence and compatibility overloads are
+superseded wherever they serve only old shortcuts. Keep the independent oracle
+as evidence with documented intentional differences, not as an API constraint.
+
+### Answers to the three questions
+
+1. **Remaining details:** callback phase visibility, non-reentrancy, counter
+   publication, FENCE.I ordering and the independent reference address the
+   prior review. The uncached sampling and reference issues below still need
+   correction. Timer/counters first is a sensible implementation order.
+2. **Nonpositive budgets:** rejection before callbacks, time sampling or state
+   mutation is acceptable. Production scheduling uses positive budgets, but
+   `ApplicationProcessor.stepCycles` currently has an explicit nonpositive
+   branch, and `TerminalFaultIntegrationTest` calls `stepCycles(0)` on an active
+   hart and expects time to advance without instructions executing.
+   Keep embedder halt/stop handling before execution and deliberately migrate
+   active-hart nonpositive calls/tests. Existing convenience behavior is not
+   a requirement for the new core API.
+3. **Hook PC:** no production V-32 dependency on the incorrect PC was found.
+   AP passes null; IOP's hook updates mailbox interrupts and ignores all three
+   arguments. Retained oracle traces may encode the quirk: preserve the frozen
+   evidence and update the ported expectations with the intentional difference
+   recorded. Reporting the instruction's own PC is appropriate for taken
+   branches/jumps, including compressed forms.
+
+### Corrections before implementation
+
+- **Uncached sampling is inconsistent as written.** Each public `step` samples
+  at entry; looping over it cannot implement one sample per `stepAttempts`.
+  Provide an internal single-attempt entry which reuses the call sample but
+  still performs interrupt/WFI/compare checks. It must not reuse a delegation
+  mode that skips checks already done by the cached loop. Sample after the
+  first pre-callback, retain it across subsequent attempts and FENCE.I exits,
+  and let legal `time/timeh` reads refresh it. This plumbing means the claim
+  that `step()`'s code need not change is too strong.
+- **The reference must model that distinction.** Repeated public single-step
+  calls are not equivalent when the source advances between them. Give the
+  independent reference the same call-level sample lifetime; avoid sharing
+  the optimized driver's sampling implementation. Add an advancing scripted
+  source and compare sample counts, MTIP and callback observations across
+  cached/uncached paths, null controllers, time reads, delegation and FENCE.I.
+  A fixed clock alone would hide this defect.
+- **Describe the new contract directly.** An attempt is not literally a public
+  `step(count=1)` because its entry may reuse time. Likewise, calling the API
+  "the oracle with postExec == null" omits the intentionally changed WFI,
+  counter, time and budget rules. List those differences in public Javadoc.
+- **Hook test machinery is optional.** Keep the package-private overload only
+  if it materially simplifies useful coverage. It has no consumer requirement;
+  historical tests alone should not force another execution mode. Public
+  `step` still has an IOP hook consumer, and its useful mailbox callback must
+  continue to work under the new timer/counter rules. In the hook-coverage
+  section, "public step ... postExec == null" appears to mean `stepAttempts`.
+- **Counter names:** say `getInstret()` for guest-proof retired work and
+  `getMinstret()` for the writable architectural view; bare `instret` currently
+  conflates them. Preserve both offsets through publication and delegation.
+- **Measurement baseline:** use the implemented timer/counter version as the
+  baseline for attempt-fusion cost, with 0.1.8 as a historical comparison.
+  Otherwise a regression may come from new semantics rather than batching.
+  Costs should inform a decision, not force legacy shortcuts to survive.
+
+The companion timer review covers AP mask ownership, firmware WFI use and CSR
+read suppression. Existing monitor ownership, terminal-COMMIT stopping and both
+reservation layers remain real V-32 requirements. No new batch size, cache
+adoption, runtime work, timing experiment or Packet 002 continuation is selected.
+This was a documentation/source review; runtime and GUI tests were not run.
+
+## CPU-agent revision 5: what changed
+
+2026-10-12. The design above now reflects V-32's review of revision 4:
+
+- **Answers adopted:** timer and counters first; nonpositive budgets rejected, with V-32 migrating
+  its callers; the jump-PC fix with no V-32 dependency.
+- **Uncached sampling:** a new internal single-attempt entry runs every check but reuses the call's
+  sample, distinct from `DELEGATING`. The claim that `step()` is untouched is withdrawn; its entry
+  gains this mode.
+- **Reference:** it has its own call-level sample lifetime. Comparisons run with a source that
+  advances on every read, and the lockstep differential against public `step(count=1)` uses a
+  fixed source.
+- **Contract:** an attempt is described directly rather than as a public `step(count=1)`, and the
+  Javadoc lists the differences from the oracle.
+- **Hooks:** the test-only hook overload is dropped; `step()`'s hook stays for the IOP.
+- **Counter names:** `getInstret()` for work deltas, `getMinstret()` for the architectural view.
+- **Measurement:** the timer and counter version is the baseline for fusion cost, and `0.1.8` a
+  historical comparison. A regression is a tradeoff decision for Nate.

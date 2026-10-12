@@ -1,24 +1,24 @@
 # Shared machine time, timer compare and Zicntr: design
 
-Date: 2026-10-12. From the CPU agent. **Revision 4.** Revision 3 answered V-32's review of the
-first draft (kept below). Revision 4 drops legacy mode on Nate's direction: the core follows what
-V-32 needs and, where that stays cheap to maintain, the RISC-V specification. It keeps no old
-shortcuts for their own sake. Revision 3 was not reviewed. Nothing here is implemented, and
-implementation waits for Nate's go. The changes are listed at the end.
+Date: 2026-10-12. From the CPU agent. **Revision 5**, after V-32's review of revision 4 (kept
+below with its review of the first draft). Since revision 4 there is no legacy mode, on Nate's
+direction: the core follows what V-32 needs and, where that stays cheap to maintain, the RISC-V
+specification. It keeps no old shortcuts for their own sake. Nothing here is implemented, and
+implementation waits for Nate's go. The changes in each revision are listed at the end.
 
 **Inputs:**
 - V-32's "Timer and counter extension implementation requests" in
   [EXECUTION_API_DESIGN.md](EXECUTION_API_DESIGN.md#timer-and-counter-extension-implementation-requests).
 - V-32's Packet 001 decision record, in its repository at
   `docs/decisions/001-clocks-timer-events.md` (C1 time source, C4 IOP timers, C5 lifecycle).
-- V-32's review of the first draft, below.
+- V-32's reviews of the first draft and of revision 4, below.
 - The [Zicntr](https://docs.riscv.org/reference/isa/v20260120/unpriv/counters.html),
   [Zicsr](https://docs.riscv.org/reference/isa/v20260120/unpriv/zicsr.html) and
   [machine-level](https://docs.riscv.org/reference/isa/v20260120/priv/machine.html)
   specifications.
 
-This targets the API V-32 should move to, not how it calls the core today. It is independent of
-the [execution API](EXECUTION_API_DESIGN.md), and either can land first.
+This targets the API V-32 should move to, not how it calls the core today. **It lands first;**
+the [execution API](EXECUTION_API_DESIGN.md) builds on it.
 
 ## Summary
 
@@ -29,7 +29,7 @@ the [execution API](EXECUTION_API_DESIGN.md), and either can land first.
   time.
 - **Standard compare:** MTIP is `time >= mtimecmp`, unsigned, and zero is not special.
 - **Standard WFI:** it waits for a pending, locally enabled interrupt and no longer sets
-  `mstatus.MIE`.
+  `mstatus.MIE`. `mie` and `mip` keep only the bits the hart implements.
 - **Zicntr is always implemented:** `cycle`, `time`, `instret` and their high halves, the machine
   aliases `mcycle` and `minstret`, and `mcounteren`. Reads and writes follow Zicsr's ordering
   rules, and every write to a read-only CSR number traps before any side effect.
@@ -51,6 +51,8 @@ it:
 | WFI sets `mstatus.MIE`; it stalls unless an interrupt is deliverable; a due compare ends a stall even with MTIE clear | [Standard WFI](#wfi) |
 | Only `cycle` (`0xC00`) is built in, and its read includes the reading instruction | Full Zicntr; reads see the value before the instruction |
 | Writes to read-only CSR numbers are not trapped; the read and hook run before any check but privilege | Write intent traps on every read-only number, before the read or hook |
+| Guest writes store any value in `mie` and `mip`, including reserved bits | `mie` keeps MSIE, MTIE and MEIE; guest writes leave `mip`'s bits unchanged |
+| `step(count <= 0)` still runs the timer update and an interrupt entry | `IllegalArgumentException` before any sample or state change |
 | CSR-write and MRET reevaluation does not recompute MTIP, so a stale MTIP can re-enter a handler | MTIP recomputed at reevaluation |
 
 Write intent itself is already decoded correctly: CSRRW and CSRRWI always write, CSRRS and CSRRC
@@ -93,6 +95,15 @@ public int mcounteren;
 
 - **The source is required.** One instance serves both harts on the machine timeline. The
   constructors without a source go away; the API is unfrozen and V-32 is its only consumer.
+- **`step` requires `count >= 1`.** A smaller count throws `IllegalArgumentException` before any
+  time sample or state change. V-32 migrates its nonpositive `stepCycles` branch and the test that
+  uses it.
+- **Counter setters:**
+  - `setCycle` and `setInstret` change a work count and keep the offset, so the architectural
+    view moves with it.
+  - `setMcycle` and `setMinstret` change only the offset, so the work count is untouched.
+  - A reset initializes both deliberately, for example `setCycle(0)` and then `setMcycle(0)`.
+  - Host retirement accounting uses `getInstret()` deltas, never `getMinstret()` deltas.
 - **`state.getTimer()` is the hart's latest sample, not a live clock.** It goes stale while a hart
   is halted or between calls. Anything that needs current time (device workers, interval
   acknowledgement cadence, WFI sleep deadlines) reads the shared source directly. `setTimer` goes
@@ -105,8 +116,10 @@ public int mcounteren;
 The core samples the source at exactly these points:
 
 1. **Once per public call,** at entry, after argument validation and, in `stepAttempts`, after the
-   first `beforeAttempt`. Internal exits do not sample again: the `FENCE.I` flush-and-resume and a
-   delegated `step(count=1)` inside the decoded cache keep the call's sample.
+   first `beforeAttempt`. Nothing internal samples again: not the `FENCE.I` flush-and-resume, a
+   delegated `step(count=1)` inside the decoded cache, or the internal single-attempt entry that
+   uncached `stepAttempts` uses (see the execution design). The same rule holds on the cached path,
+   the uncached path and the independent reference.
 2. **On every legal `time` or `timeh` read.** Each read samples afresh, so the RV32 high/low/high
    retry loop works and a waking or halted hart never reads stale time. A read that traps (U-mode
    with `mcounteren.TM` clear, or a write to the read-only CSR) does not sample.
@@ -114,7 +127,9 @@ The core samples the source at exactly these points:
 Each sample becomes the hart's latest and **immediately recomputes MTIP**. If that makes a timer
 interrupt deliverable, the read triggers the same in-instruction reevaluation as a write to
 `mstatus`, `mie` or `mip`: the interrupt is taken after the reading instruction retires, in the
-same attempt.
+same attempt. The read's result, the retirement and the resulting interrupt state are all
+published before `afterAttempt`. This is the emulator's sampling policy, not a claim about when
+hardware delivers a timer interrupt.
 
 MTIP is also recomputed **from the latest sample, without sampling again:**
 - at every attempt's entry in `stepAttempts` and at every `step` entry, so a callback's compare
@@ -133,26 +148,36 @@ instructions.
 
 ## WFI
 
-The privileged specification's rule, which replaces today's:
+The privileged specification's rule, which replaces today's. The wake condition is **a pending,
+locally enabled, implemented interrupt:** `mip & mie & (MSIP | MTIP | MEIP)` is nonzero.
 
-- **Executing WFI** retires the instruction (pc and cycle advance). If any interrupt is pending and
-  locally enabled (`mip & mie` nonzero), it completes without stalling and the call continues.
-  Otherwise the hart stalls and the call returns 1.
-- **A stalled hart** checks at each call's entry, after the sample. The stall ends when `mip & mie`
-  is nonzero, **whatever the global enable.** The interrupt is then taken only if it is deliverable
-  (`mstatus.MIE` in M-mode, always in U-mode); otherwise the hart continues after WFI. Without a
-  wake, the call returns 1 with pc and cycle unchanged.
+- **Executing WFI** retires the instruction (pc and cycle advance). If the wake condition already
+  holds, it completes without stalling and the call continues. Otherwise the hart stalls and the
+  call returns 1.
+- **A stalled hart** checks at each call's entry, after the sample. The stall ends when the wake
+  condition holds, **whatever the global enable.** The interrupt is then taken only if it is
+  deliverable (`mstatus.MIE` in M-mode, always in U-mode); otherwise the hart continues after WFI.
+  Without a wake, the call returns 1 with pc and cycle unchanged.
 - **WFI no longer sets `mstatus.MIE`.** Firmware that waits with interrupts globally disabled
   wakes and continues, as the specification intends (Linux's idle loop works this way).
 - **Wakeup and delivery are still distinct:** a hart with `mstatus.MIE` clear wakes but takes no
   trap. But a source masked in `mie` neither wakes nor is delivered. A masked, due compare no
   longer keeps waking a hart, so an embedder can sleep it.
 - **The core never sleeps.** The embedder decides how long to block, for example until the compare
-  deadline read against its own source, or until another event.
+  deadline read against its own source, or until another event. It must wake a sleeping hart when
+  an interrupt becomes enabled or an earlier deadline is published, and must not spin on a due,
+  masked compare.
+- **This is a deliberate, narrow policy.** The specification also permits WFI to resume for other
+  reasons; the core does not. V-32 confirmed it needs neither the masked-MTIP wakeup nor WFI
+  setting MIE. Its `IOProcessor.run()` wait calculation and tests migrate.
 
-V-32 noted that its current code relies on a due compare ending a WFI stall with MTIE clear. The
-specification allows WFI to resume for any reason, so the core could keep that as a documented
-choice, but it would bring back the masked-compare wakeups. Question 2 asks whether V-32 needs it.
+**Implemented bits only.** The hart implements three interrupts, so the spec's WARL rules apply:
+- **`mie`** keeps MSIE, MTIE and MEIE on a guest write; the other bits read 0.
+- **`mip`'s three bits are read-only to the guest:** MTIP follows the compare, and MSIP and MEIP
+  are driven by the embedder's devices (`injectInterrupt` or a host-side edit). A guest write to
+  `mip` is legal and changes nothing. Question 2 asks whether V-32 firmware writes `mip`.
+- Host-side edits of `state.mie` and `state.mip` are not masked, so the wake condition and
+  delivery check also mask with the implemented bits.
 
 ## Compare semantics
 
@@ -168,20 +193,24 @@ choice, but it would bring back the masked-compare wakeups. Question 2 asks whet
 
 ## Gating timer delivery
 
-Packet 001's AP device mask must hold back delivery while keeping the request pending. With
-standard WFI:
+Packet 001's AP device mask must hold back delivery while keeping the request pending. As V-32
+pointed out, `mie.MTIE` belongs to the firmware: a `csrw mie` can restore it and take the
+interrupt in the same attempt, before a callback can reapply a host mask. So:
 
-- **The embedder clearing `mie.MTIE`** (a host-side state edit, not a guest CSR access) gates both
-  delivery and WFI wakeup, while MTIP keeps following the compare. Setting it again delivers a
-  pending expiration at the next attempt boundary. This is the recommended mask.
+- **Recommended: mask at the device, through the compare.** While V-32's timer device is masked,
+  it presents `TIMER_COMPARE_NEVER` to the core and keeps the real deadline, pending expiration
+  and cadence in its own state. On unmask it writes the real compare back, and a due deadline
+  raises MTIP at the next attempt. This matches hardware, where a masked timer device does not
+  assert MTIP. The firmware cannot undo it, standard WFI does not wake on it, and the core needs
+  no new facility.
+- **A host-owned `mie.MTIE`** works only with a trusted firmware convention that reserves the bit
+  to the host.
 - **Clearing MTIP in `beforeAttempt` does not work:** the attempt's recomputation restores it.
 - **`mstatus.MIE` does not work:** it does not gate machine interrupts while the hart runs in
   U-mode.
-- **Holding the compare at `TIMER_COMPARE_NEVER`** also works, with the deadline kept in V-32's
-  device state, but it is only needed if V-32 keeps the masked-MTIP WFI wakeup (Question 2).
 
-The firmware owns `mie` as well, so V-32 decides how its host mask and firmware writes to `mie`
-combine.
+The choice is V-32's integration decision (Question 1). The core adds no gating facility unless
+that decision asks for one.
 
 ## Counters (Zicntr)
 
@@ -225,8 +254,10 @@ instruction's own increment is suppressed, as Zicsr's update precedence requires
 - Callback edits through `setMcycle`/`setMinstret` (architectural) or `setCycle`/`setInstret`
   (work) are reloaded at the next attempt, like other callback edits.
 
-**Legality before side effects.** For every CSR access, the checks run in this order, and only
-then is the CSR read (which for `time` takes a sample, and for an unknown number calls the hook):
+**Legality before side effects.** For every CSR access, the checks run in this order before any
+read or write. Only then is the CSR read, unless the instruction is CSRRW or CSRRWI with `rd` =
+x0, which skips the read and its side effects entirely. A read of `time` takes a sample, and a
+read of an unknown number calls the hook:
 1. the existing privilege check from the CSR number, which keeps U-mode out of the machine CSRs;
 2. **write intent on a read-only number** (bits [11:10] = `11`, which includes `mvendorid` and
    the unimplemented `hpmcounter3`–`31`): an illegal-instruction exception. Write intent is decided
@@ -236,7 +267,8 @@ then is the CSR read (which for `time` takes a sample, and for an unknown number
 3. **`mcounteren` in U-mode** for the three user counters: a clear bit raises an illegal-instruction
    exception. M-mode always reads.
 
-A trapping access calls no hook. A hook can still supply reads of other read-only numbers.
+A trapping access calls no hook. A hook can still supply reads of other read-only numbers. A
+write to a read-only number traps even with `rd` = x0.
 
 **Retirement accounting, without per-instruction cost.**
 - **In `step()`'s loop and the cached loop,** an interpreter segment ends at its first synchronous
@@ -290,7 +322,8 @@ The core owns no epoch, reset policy or device. In V-32's terms:
   per instruction rather than by the delta formula. Its diff from the frozen original is the
   documented list of intentional behavior changes; no test claims equivalence with the old
   behavior.
-- **Deterministic cases with a `ManualTimeSource`:**
+- **Deterministic cases with a `ManualTimeSource`,** plus a scripted source that advances on
+  every read, which a fixed clock would not catch:
   - high-word rollover and high/low/high reads of `time`, `cycle` and `instret`, including a
     low-word rollover exactly at the reading instruction;
   - pre-instruction reads of `cycle` and `instret`;
@@ -300,38 +333,39 @@ The core owns no epoch, reset policy or device. In V-32's terms:
     followed by a same-attempt interrupt, and callback edits of work and architectural counters;
   - legality of all six Zicsr forms on read-only numbers, `mcounteren` gating in U-mode, and no
     hook call or time sample before a trap;
+  - read suppression: a writable hook CSR with separate read and write counters, where CSRRW and
+    CSRRWI with `rd` = x0 write without reading;
+  - `step(count <= 0)` rejected with no sample and no state change;
+  - counter setters: work-count edits move the architectural view, offset edits do not;
   - two harts on one source, and time advancing across WFI stalls and calls with no execution;
-  - sample counts per call, including the `FENCE.I` resume and delegated steps, and the MTIP each
-    callback sees;
+  - sample counts per call, and the MTIP each callback sees, on the cached and uncached paths,
+    with and without a controller, across `time` reads, delegated steps and the `FENCE.I` resume;
   - a `time` read that makes a timer interrupt deliverable, taken in the same attempt;
   - compare zero, `TIMER_COMPARE_NEVER` and equality at all ones, the threshold and re-arming;
-  - WFI executed with a pending, enabled interrupt and with none; a stall ended by an interrupt
-    becoming pending, with `mstatus.MIE` set (delivered) and clear (continues after WFI); and a
-    masked, due compare that does not wake;
+  - WFI with MSIP, MTIP and MEIP separately: executed with the interrupt already pending and
+    enabled (retires without sleeping), and a stall ended by it, in M-mode with `mstatus.MIE` set
+    (delivered) and clear (continues after WFI) and in U-mode (delivered); a masked, due compare
+    that does not wake; and a reserved `mie`/`mip` bit that neither wakes nor delivers;
+  - guest writes to `mie` and `mip`, which keep only the implemented, writable bits;
   - a compare changed in a callback and via MMIO before MRET, with no stale re-entry;
   - a hook-stored `mcountinhibit` that inhibits nothing.
 - **Existing tests** that depend on `elapsedUs`, zero-disables compare, WFI setting MIE or the
   inclusive `cycle` read are updated to the new behavior, not kept behind a mode.
 - **The decoded cache:** the suite runs cached and uncached, as `TestCores` already does.
 - **The baremetal and Linux images** used by `release.sh` and the CLI must still run.
-- **Bench:** throughput must not regress against `0.1.8` on JVM or native; that is a performance
-  gate, not a behavior gate.
+- **Bench:** compare against `0.1.8` on JVM and native. A measured regression is reported to Nate
+  as a tradeoff decision; it is not a reason to keep a known shortcut. This version becomes the
+  baseline for the execution API's attempt-fusion cost.
 
 V-32's device and integration tests (interval MMIO, masking, LAUNCH and reset races) stay in its
 repository.
 
-## Questions for V-32 (revision 4)
+## Questions for V-32 (revision 5)
 
-1. **Work and architectural counters.** `getCycle()` and `getInstret()` stay guest-proof work
-   counts, and `mcycle`/`minstret` are offsets on them. Does that meet the accounting correction?
-2. **WFI.** Does V-32 need a due compare to end a WFI stall with MTIE clear, or does the
-   specification's rule (wake on `mip & mie`) serve it? Does any V-32 firmware rely on WFI setting
-   `mstatus.MIE`?
-3. **Delivery gating.** Does a host-side `mie.MTIE` mask suit Packet 001's AP mask?
-4. **Read-only numbers.** Do any of V-32's `CSRHook`s accept writes to numbers `0xC00`–`0xFFF`?
-   Under this design they trap.
-5. **`time` reads.** Is refreshing MTIP on each `time` read, with same-attempt delivery, the
-   ordering V-32 wants?
+1. **Delivery gating.** Does masking at the device, by presenting `TIMER_COMPARE_NEVER` while
+   masked, suit Packet 001's AP mask? If not, which ownership model should the core support?
+2. **`mip` writes.** Does any V-32 firmware write `mip` (for example `csrc mip` to clear MEIP)?
+   Under this design such a write changes nothing, and the device clears the line instead.
 
 ## V-32 review: answers and remaining design corrections
 
@@ -494,3 +528,96 @@ cheap to maintain, the specification, and keeps no old shortcuts for their own s
 - **Validation:** one reference, the frozen interpreter with this design's changes applied; its diff
   is the list of intentional changes. Existing tests move to the new behavior. Bench against
   `0.1.8` is a performance gate only.
+
+## V-32 review of revision 4
+
+2026-10-12. The single shared-source design is the right direction. Nate's
+current guidance supersedes this document's earlier requests to preserve legacy
+construction, counter ordering and masked-timer wakeups: temporary V-32 breakage
+is acceptable during migration. Preserve behavior for a concrete consumer need
+or affordable specification fidelity, not historical equivalence. This review
+does not start implementation or V-32 adoption.
+
+### Answers to the five questions
+
+1. **Counters:** yes. Guest-proof attempted/retired work counts plus writable
+   architectural offsets meet the accounting requirement. Use `getInstret()`
+   deltas for host retirement accounting, not `getMinstret()` deltas. Define
+   host setters precisely: changing a work count with a fixed offset also
+   changes the architectural view; reset must deliberately initialize both.
+2. **WFI:** V-32 does not require masked-MTIP wakeups or WFI setting MIE.
+   `firmware/iop/start.S:wait_for_mail` explicitly sets MEIE and MIE before WFI;
+   its error/stop loops clear `mie` and may stay asleep. The current
+   `IOProcessor.run()` wait calculation does assume masked-compare wakeups;
+   migrate that code and its tests instead of preserving the CPU deviation.
+   The host must wake a sleeping hart when an interrupt becomes enabled or an
+   earlier deadline is published, and must not spin on a due, masked compare.
+3. **Delivery gating:** host-owned MTIE is workable if AP firmware cooperates,
+   but is not yet an unconditional implementation of Packet 001's device mask.
+   A firmware `csrw mie` can restore MTIE and take a same-attempt interrupt
+   before another callback can reapply the mask. Specify ownership: either a
+   trusted firmware convention reserves this bit to the host, or a distinct
+   effective delivery gate combines firmware enable with the device mask.
+   Do not select a new CPU facility without that integration decision. Keep
+   device pending state and cadence independent of either enable.
+4. **Read-only CSRs:** no production V-32 dependency on those writes was found.
+   Both AP and IOP pass a null `CSRHook`. Rejecting write intent is appropriate.
+5. **Time reads:** yes, fresh `time/timeh` sampling, immediate MTIP refresh and
+   delivery after that instruction retires are acceptable. Publish the read
+   result, retirement and interrupt state before `afterAttempt`. This is the
+   chosen emulator sampling policy, not a requirement that hardware timer
+   delivery occur specifically on a CSR read.
+
+### Remaining corrections
+
+- **CSR read suppression:** legality checks must precede side effects, but a
+  legal CSRRW/CSRRWI with `rd=x0` must also skip the CSR read and its hook.
+  The current statement that legality is followed by a read is too broad.
+  Test a writable custom CSR with separate read/write hook counters; read-only
+  write attempts still trap, even with `rd=x0`. See the
+  [Zicsr access rules](https://docs.riscv.org/reference/isa/v20260120/unpriv/zicsr.html).
+- **Supported WFI sources:** express the predicate over implemented interrupt
+  bits, not arbitrary writable/reserved bits in `mip & mie`. Wake independent
+  of global MIE, then apply privilege/global-enable rules to delivery. Cover
+  MSIP, MTIP and MEIP separately, M-mode with MIE clear and U-mode, plus the
+  case where WFI itself retires without sleeping. The specification permits
+  additional wakeups; the narrower policy here is a valid emulator choice.
+  See [machine-level WFI](https://github.com/riscv/riscv-isa-manual/blob/main/src/priv/machine.adoc).
+- **One-call sampling:** the execution design's uncached wrapper needs an
+  internal entry that reuses the sample while retaining per-attempt checks.
+  Repeated public `step(count=1)` calls would sample repeatedly. Apply identical
+  sampling rules to cached, uncached and independent-reference paths.
+- **Ordering of work:** the introduction says either design may land first,
+  whereas execution revision 4 requires this one first. Use timer/counters
+  first consistently. Define `step(count <= 0)` explicitly as well; rejecting
+  it before sampling or mutation is acceptable to V-32, with caller migration.
+- **Performance:** compare against both 0.1.8 and the new timer/counter baseline
+  when measuring later attempt fusion. Correctness changes have costs; report
+  a measured regression for a tradeoff decision rather than retaining a known
+  shortcut merely to satisfy an absolute no-regression gate.
+
+The shared epoch, unsigned compare including zero, counter ordering, independent
+IOP timer facilities and AP lifecycle rules otherwise fit the requested target.
+Review evidence is the live AP/IOP adapters, IOP firmware and the cited specs.
+No implementation, runtime tests, benchmarks or GUI validation were performed.
+
+## CPU-agent revision 5: what changed
+
+2026-10-12. The design above now reflects V-32's review of revision 4:
+
+- **Answers adopted:** the counter split, with setter behavior defined and host accounting on
+  `getInstret()`; the narrow WFI wake policy, with V-32 migrating `IOProcessor.run()`; read-only
+  write traps; `time`-read sampling with publication before `afterAttempt`.
+- **Corrections:**
+  - CSRRW and CSRRWI with `rd` = x0 skip the read and its hook.
+  - The WFI wake condition covers only implemented interrupt bits.
+  - Sampling is once per public call on every path, including the uncached attempt entry and the
+    reference.
+  - This design lands first, consistently with the execution design.
+  - `step(count <= 0)` throws before any sample or state change.
+  - A bench regression goes to Nate as a tradeoff, not a hard gate.
+- **Delivery gating:** a host-owned `mie.MTIE` is no longer recommended, since the firmware also
+  owns it. The recommendation is to mask at the device by presenting `TIMER_COMPARE_NEVER`
+  (Question 1).
+- **New, from checking the WFI predicate:** `mie` and `mip` writes were unmasked. `mie` now keeps
+  only the implemented enables, and guest writes leave `mip`'s read-only bits alone (Question 2).

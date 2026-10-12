@@ -24,16 +24,17 @@
 
 ## Resume / pending
 
-1. **Execution API and timer/counter designs: both at revision 4, awaiting V-32's review.**
+1. **Execution API and timer/counter designs: both at revision 5, awaiting V-32's review.**
    - **Direction (Nate, 2026-10-12):** design only for V-32's needs and, where cheap, the RISC-V
-     spec. No legacy mode; old shortcuts are dropped, and bench against `0.1.8` is a throughput
-     gate only. Revision 3 was superseded before V-32 reviewed it.
+     spec. No legacy mode; old shortcuts are dropped. Bench regressions go to Nate as tradeoffs.
+     V-32 has Nate's direction verbatim and accepts temporary breakage during migration.
    - [TIMER_COUNTER_DESIGN.md](docs/TIMER_COUNTER_DESIGN.md) lands first: one shared time source
-     replaces `elapsedUs`; standard compare and WFI (no MIE-setting); Zicntr always on with
-     pre-instruction reads; every read-only CSR number traps on write; work counts separate from
-     guest-writable counters. Five questions for V-32.
-   - [EXECUTION_API_DESIGN.md](docs/EXECUTION_API_DESIGN.md) builds on it: no `elapsedUs`,
-     nonpositive budgets rejected, `PostExecHook` jump-PC quirk fixed separately. Three questions.
+     replaces `elapsedUs`; standard compare and WFI; WARL `mie`/`mip`; Zicntr always on; read-only
+     CSR numbers trap on write; work counts separate from guest-writable counters;
+     `step(count <= 0)` rejected. Two questions (device-level timer mask, firmware `mip` writes).
+   - [EXECUTION_API_DESIGN.md](docs/EXECUTION_API_DESIGN.md) builds on it: one sample per call on
+     every path via an internal single-attempt entry; no hook overload; timer version as the
+     fusion baseline. One question (uncached sampling).
    - Nate relays both to Codex. V-32's reply is design only; it does not authorize
      implementation.
    - **After V-32 answers:** settle each design and get Nate's go. Then:
@@ -49,8 +50,8 @@
    - [Plan](docs/DECODED_ICACHE_PLAN.md) and [protocol](docs/DECODED_ICACHE_PROTOCOL.md).
    - V-32's trial: 4K AP slots cut boot time by 36–44% on JVM and 38–42% on native.
    - Production enablement is V-32's change.
-3. **`PostExecHook` jump-PC quirk:** decided by the 2026-10-12 direction; fix it (report the
-   instruction's own PC) as a separate change. V-32 is asked whether anything depends on it.
+3. **`PostExecHook` jump-PC quirk:** fix it as a separate change (report the instruction's own PC,
+   compressed forms included). V-32 found no dependency on it.
 4. **Housekeeping:**
    - Local branches that can be deleted: `feature/decoded-icache` (already gone from `origin`)
      and `claude-review`.

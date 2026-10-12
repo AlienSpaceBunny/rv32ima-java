@@ -36,7 +36,7 @@ report that instead.
 
 - `core` must not depend on `cli`. The CLI depends on core and is distributed as
   a fat jar through GitHub Releases, not as a Central artifact.
-- `RV32IMACore.step()`'s long body and eight-parameter signature are deliberate
+- `RV32IMACore.step()`'s long body and seven-parameter signature are deliberate
   interpreter idioms. Cold F/A arms live in `executeColdOpcode` (packed `long`
   result) to keep the hot loop small for Native Image; measure hot-path changes
   with `bench/` on JVM and native. Trap dispatch uses cause-plus-one (`trap == 0`
@@ -58,6 +58,10 @@ report that instead.
 - Maintain `docs/README.md` as the documentation index and `CHECKPOINT.md` as the
   current resume note. Preserve `docs/FEATURE_REQUEST_PLAN.md`'s design text and
   record completed items in place with their landing commits; it remains a spec.
+- **Standing instruction:** fix outdated documentation (active docs, Javadoc,
+  `AGENTS.md` itself) as you encounter it, without asking first, and mention the
+  fix in your report. Commit it separately from unrelated code changes. Leave
+  `docs/archive/` and received exchange sections as historical records.
 
 ## Tools and file access
 

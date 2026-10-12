@@ -19,16 +19,24 @@
 
 ## Resume here
 
-**Next: step A3 of [the plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md)**, the full
-`--attempts` measurement on JVM and native. V-32's path (cached, 4096 slots) is the headline. Its
-budget of 1,061 attempts per call is a legacy value V-32 will likely retune, so A3 also runs
-smaller and larger diagnostic budgets; nothing in the core should depend on 1,061. `run_matrix.py` does not pass `--attempts` yet. Keep both cached loops'
+**Waiting on Nate: A3's `step(count=1)` regression** ([evidence](docs/performance/2026-10-12/attempts/README.md)).
+A3 is measured: V-32's cached `stepAttempts` path is 1.21–1.76× faster than its former cached
+`step(count=1)` loop, batches are unchanged, and the budget barely matters. The `step(count=1)`
+paths, which V-32's AP no longer uses, are 2–7% slower than in the timer version, probably from
+A1's `attemptEntry` check in `step()`'s entry. Proposed: accept. Alternative: a variant that
+moves the attempt entry out of `step()`, measured the same way.
+
+**Then: step A4 of [the plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md)**, the phase close
+(docs, CHANGELOG review, `./release.sh`, version bump, install, push, archive the execution
+design's review history). V-32's AP budget of 1,061 attempts per call is a legacy value V-32
+will likely retune; nothing in the core should depend on it. Keep both cached loops'
 independent-reference differential and mutation coverage (V-32's ratification condition).
 
 **Trial build:** `0.1.10-attempts-SNAPSHOT` is installed in `~/.m2` from local tag
 `trial/0.1.10-attempts`, which V-32 now consumes. `main`'s POMs stay on `0.1.10-SNAPSHOT`.
 
-**Validation status:** the A2 tree passed `./mvnw clean verify` (801 core tests in each of three
+**Validation status:** the bench `--step-loop` tree (`79cf4f7`) passed `./mvnw clean verify`;
+the core is unchanged since A2. The A2 tree passed `./mvnw clean verify` (801 core tests in each of three
 cache configurations, plus CLI and bench). Twelve mutations of the new loop and driver each fail
 tests. Not run for A2: `./release.sh` (required at A4). `release.sh` rewrites
 `baremetal/baremetal.elf` and its debug listing with debug-string noise only; restore them rather

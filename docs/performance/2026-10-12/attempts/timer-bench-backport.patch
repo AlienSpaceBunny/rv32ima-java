@@ -1,0 +1,48 @@
+diff -ru bench/src/main/java/com/alienspacebunny/bench/Workloads.java bench/src/main/java/com/alienspacebunny/bench/Workloads.java
+--- bench/src/main/java/com/alienspacebunny/bench/Workloads.java	2026-10-12 15:39:33.713550781 -0700
++++ bench/src/main/java/com/alienspacebunny/bench/Workloads.java	2026-10-12 15:41:44.701791263 -0700
+@@ -24,7 +24,6 @@
+ 
+ import com.alienspacebunny.emu.AccessContext;
+ import com.alienspacebunny.emu.AccessKind;
+-import com.alienspacebunny.emu.AttemptController;
+ import com.alienspacebunny.emu.DecodedCacheConfig;
+ import com.alienspacebunny.emu.IsaConfig;
+ import com.alienspacebunny.emu.ManualTimeSource;
+@@ -202,17 +201,15 @@
+      * mailbox into {@code mip.MEIP}, as the AP refreshes its pending interrupts, and the second
+      * callback checks a volatile stop flag. Nothing sets either, so the guest runs undisturbed.
+      */
+-    static final class ApController implements AttemptController {
++    static final class ApController {
+         private static final int MEIP = 1 << 11;
+         volatile int mailbox;
+         volatile boolean stop;
+ 
+-        @Override
+         public void beforeAttempt(RV32IMAState state) {
+             state.mip = (state.mip & ~MEIP) | (mailbox & MEIP);
+         }
+ 
+-        @Override
+         public boolean afterAttempt(RV32IMAState state, int coreResult) {
+             state.mip = (state.mip & ~MEIP) | (mailbox & MEIP);
+             return stop;
+@@ -237,15 +234,8 @@
+             return;
+         }
+         if (attemptsBudget > 0) {
+-            int budget = attemptsBudget;
+-            while (core.stepAttempts(s, bus, 0, MEM_SIZE, budget, null, AP_CONTROLLER)
+-                            .coreResult()
+-                    == 0) {
+-                if (++calls > maxCalls) {
+-                    throw new IllegalStateException(name + ": no WFI after " + calls + " stepAttempts calls");
+-                }
+-            }
+-            return;
++            // Backport to the timer version, which has no stepAttempts: only --step-loop runs.
++            throw new IllegalArgumentException("this core has no stepAttempts; use --step-loop");
+         }
+         while (core.step(s, bus, 0, MEM_SIZE, chunk, null, null) == 0) {
+             if (++calls > maxCalls) {

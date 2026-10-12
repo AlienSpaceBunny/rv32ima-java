@@ -1,0 +1,280 @@
+{
+  "started": "2026-10-12T16:05:14-0700",
+  "git_rev": "999fbe83f82ba6d804d64f7854565821cb48ce1a",
+  "git_dirty": false,
+  "jar": "bench/out/jars/t7-v018.jar",
+  "jar_sha256": "2be3ab05535f8db39f531f030149655ca227637b855e8eca8f0f157ab16de51e",
+  "java": "openjdk version \"25.0.4.1\" 2026-08-18 LTS\nOpenJDK Runtime Environment Corretto-25.0.4.8.1 (build 25.0.4.1+8-LTS)\nOpenJDK 64-Bit Server VM Corretto-25.0.4.8.1 (build 25.0.4.1+8-LTS, mixed mode, sharing)",
+  "native_images": {
+    "bench/out/native-t7-v018/poly": {
+      "sha256": "1696146f8ee8d0cc082fc4983701a3907b924012286257fd89c0de22bf2f8691",
+      "compiler": "Graal compiler: optimization level: 2, target machine: compatibility"
+    },
+    "bench/out/native-t7-v018/mono-bytearray": {
+      "sha256": "416642d92706824f0fdac0f9ee05c3776e918cf45db59832f8696b8fdb6a988d",
+      "compiler": "Graal compiler: optimization level: 2, target machine: compatibility"
+    }
+  },
+  "warmup_seconds": 10,
+  "samples_per_fork": 3,
+  "forks": 2,
+  "cpus": "2,3",
+  "processes": [
+    {
+      "name": "f1-jvm-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/t7-v018.jar",
+        "--bus",
+        "bytearray",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 12.5
+    },
+    {
+      "name": "f1-poly-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-t7-v018/poly",
+        "--bus",
+        "bytearray",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 15.5
+    },
+    {
+      "name": "f1-mono-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-t7-v018/mono-bytearray",
+        "--bus",
+        "bytearray",
+        "--label",
+        "mono",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 15.4
+    },
+    {
+      "name": "f1-jvm-dc4096-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/t7-v018.jar",
+        "--decoded-cache",
+        "4096",
+        "--bus",
+        "bytearray",
+        "--label",
+        "jvm-dc4096",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 12.6
+    },
+    {
+      "name": "f1-poly-dc4096-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-t7-v018/poly",
+        "--decoded-cache",
+        "4096",
+        "--bus",
+        "bytearray",
+        "--label",
+        "poly-dc4096",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 15.5
+    },
+    {
+      "name": "f1-mono-dc4096-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-t7-v018/mono-bytearray",
+        "--decoded-cache",
+        "4096",
+        "--bus",
+        "bytearray",
+        "--label",
+        "mono-dc4096",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3"
+      ],
+      "exit": 0,
+      "seconds": 15.0
+    },
+    {
+      "name": "f2-mono-dc4096-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-t7-v018/mono-bytearray",
+        "--decoded-cache",
+        "4096",
+        "--bus",
+        "bytearray",
+        "--label",
+        "mono-dc4096",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 15.0
+    },
+    {
+      "name": "f2-poly-dc4096-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-t7-v018/poly",
+        "--decoded-cache",
+        "4096",
+        "--bus",
+        "bytearray",
+        "--label",
+        "poly-dc4096",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 15.5
+    },
+    {
+      "name": "f2-jvm-dc4096-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/t7-v018.jar",
+        "--decoded-cache",
+        "4096",
+        "--bus",
+        "bytearray",
+        "--label",
+        "jvm-dc4096",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 12.3
+    },
+    {
+      "name": "f2-mono-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-t7-v018/mono-bytearray",
+        "--bus",
+        "bytearray",
+        "--label",
+        "mono",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 15.4
+    },
+    {
+      "name": "f2-poly-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "bench/out/native-t7-v018/poly",
+        "--bus",
+        "bytearray",
+        "--label",
+        "poly",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 15.5
+    },
+    {
+      "name": "f2-jvm-bytearray",
+      "argv": [
+        "taskset",
+        "-c",
+        "2,3",
+        "/home/nate/.jdks/corretto-25.0.4.1/bin/java",
+        "-jar",
+        "bench/out/jars/t7-v018.jar",
+        "--bus",
+        "bytearray",
+        "--label",
+        "jvm",
+        "--warmup-seconds",
+        "10",
+        "--samples",
+        "3",
+        "--reverse"
+      ],
+      "exit": 0,
+      "seconds": 12.4
+    }
+  ],
+  "finished": "2026-10-12T16:08:07-0700",
+  "complete": true
+}

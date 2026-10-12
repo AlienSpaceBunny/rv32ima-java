@@ -22,7 +22,7 @@ commit in the status table, as in [FEATURE_REQUEST_PLAN.md](FEATURE_REQUEST_PLAN
 | T6 | Zicntr counters and `time` reads | Done | `23bbc03` |
 | T7 | Timer phase close: docs, bench, release check, V-32 handoff | Done (`0.1.10-SNAPSHOT`) | `d6948c8`, `ebe694a`, `0c46c8f`, version bump |
 | A1 | `stepAttempts` API and uncached path | Done | `5c1a58c`, `83308f3` |
-| A2 | Fused cached path | Not started | |
+| A2 | Fused cached path | Done as a separate loop; the copy awaits Nate | `f9e5acb` (bench), `4c37ae0` |
 | A3 | Bench `--attempts` measurement | Not started | |
 | A4 | Execution phase close | Not started | |
 
@@ -203,6 +203,13 @@ Starts after T7.
   Advancing-source comparisons against the reference across cached and uncached paths, null
   controllers, `time` reads, delegation and `FENCE.I`, at 4 and 4096 slots and in check mode.
 - **Check:** a symbolized native build showing the batched cached loop still unswitched.
+- **Outcome (2026-10-12):** the attempt mode as a flag in `runCached()` was not unswitched on
+  Native Image and slowed batches 7–14% wherever `stepAttempts` is reachable. A2 therefore landed
+  the design's fallback: a separate `runCachedAttempts()` loop that copies `runCached()`'s lookup,
+  delegation and fast handlers. Its batched code is unchanged, and cached attempts run 1.41–1.67×
+  faster than A1's on native. Nate decides whether the copy stays; the no-copy alternative gives
+  1.08–1.17×. Evidence: [attempts-a2](performance/2026-10-12/attempts-a2/README.md). The bench's
+  `--attempts` mode, planned for A3, landed with it.
 
 ### A3. Measurement
 

@@ -1,0 +1,62 @@
+--- a/core/src/main/java/com/alienspacebunny/emu/RV32IMACore.java
++++ b/core/src/main/java/com/alienspacebunny/emu/RV32IMACore.java
+@@ -2309,6 +2309,9 @@
+         if (budget <= 0) {
+             throw new IllegalArgumentException("budget must be at least 1: " + budget);
+         }
++        if (dcMode == DC_MODE_ON) {
++            return runAttemptsCached(state, mem, ramOffset, ramSize, budget, csrHook, controller);
++        }
+         int attempts = 0;
+         int result;
+         boolean stopped;
+@@ -2331,6 +2334,49 @@
+         return new AttemptResult(result, attempts, stopped);
+     }
+ 
++    private AttemptResult runAttemptsCached(
++            RV32IMAState state,
++            MemoryBus mem,
++            int ramOffset,
++            int ramSize,
++            int budget,
++            CSRHook csrHook,
++            AttemptController controller) {
++        int attempts = 0;
++        while (true) {
++            if (controller != null) {
++                controller.beforeAttempt(state);
++            }
++            if (attempts == 0) {
++                sampleTime(state);
++            } else {
++                updateTimerPending(state);
++            }
++            attempts++;
++            int interrupt = pendingInterruptTrap(state);
++            int result = 0;
++            if ((state.extraflags & EXTRAFLAG_WFI) != 0 && wakeInterrupts(state) == 0) {
++                result = 1;
++            } else {
++                state.extraflags &= ~EXTRAFLAG_WFI;
++                if (interrupt != 0) {
++                    state.pc = commitTrap(state, state.pc - 4, interrupt, 0, 0, 4);
++                } else {
++                    result = runCached(state, mem, ramOffset, ramSize, 1, null, csrHook);
++                    if (dcFenceI) {
++                        dcFenceI = false;
++                        flushDecodedCache();
++                        result = 0;
++                    }
++                }
++            }
++            boolean stopped = controller != null && controller.afterAttempt(state, result);
++            if (stopped || result != 0 || attempts == budget) {
++                return new AttemptResult(result, attempts, stopped);
++            }
++        }
++    }
++
+     /**
+      * Commits a trap or interrupt to the machine CSRs and enters machine mode. {@code pc} is the
+      * trapping instruction's PC, or for an interrupt the next instruction's PC minus {@code

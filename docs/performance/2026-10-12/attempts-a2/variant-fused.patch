@@ -1,0 +1,236 @@
+--- a/core/src/main/java/com/alienspacebunny/emu/RV32IMACore.java
++++ b/core/src/main/java/com/alienspacebunny/emu/RV32IMACore.java
+@@ -1629,7 +1629,7 @@
+             }
+ 
+             if (trap == 0 && dcMode == DC_MODE_ON) {
+-                int result = runCached(state, mem, ramOffset, ramSize, count, postExec, csrHook);
++                int result = runCached(state, mem, ramOffset, ramSize, count, postExec, csrHook, false, null, 0);
+                 return dcFenceI
+                         ? continueAfterFenceI(state, mem, ramOffset, ramSize, count, postExec, csrHook, result)
+                         : result;
+@@ -2215,9 +2215,9 @@
+         return 0;
+     }
+ 
+-    // Set while stepAttempts runs one attempt through step(): step()'s entry then recomputes
+-    // MTIP from the call's sample instead of sampling. Unlike DC_MODE_DELEGATING, every entry
+-    // check still runs.
++    // Set while stepAttempts runs one attempt through step() on a core without a decoded cache
++    // (a cached core runs attempts in runCached): step()'s entry then recomputes MTIP from the
++    // call's sample instead of sampling. Unlike DC_MODE_DELEGATING, every entry check still runs.
+     private boolean attemptEntry;
+ 
+     /**
+@@ -2309,6 +2309,9 @@
+         if (budget <= 0) {
+             throw new IllegalArgumentException("budget must be at least 1: " + budget);
+         }
++        if (dcMode == DC_MODE_ON) {
++            return runAttemptsCached(state, mem, ramOffset, ramSize, budget, csrHook, controller);
++        }
+         int attempts = 0;
+         int result;
+         boolean stopped;
+@@ -2332,6 +2335,35 @@
+     }
+ 
+     /**
++     * {@link #stepAttempts} with the decoded cache: the attempts run inside {@link #runCached}'s
++     * loop. As for a batch, a delegated {@code FENCE.I} leaves that loop and the flush runs here
++     * (see {@link #continueAfterFenceI}). It completes before that attempt's {@code afterAttempt},
++     * even when the callback stops the call. Resuming takes no new time sample and no second
++     * {@code beforeAttempt} for that attempt.
++     */
++    private AttemptResult runAttemptsCached(
++            RV32IMAState state,
++            MemoryBus mem,
++            int ramOffset,
++            int ramSize,
++            int budget,
++            CSRHook csrHook,
++            AttemptController controller) {
++        int result = runCached(state, mem, ramOffset, ramSize, budget, null, csrHook, true, controller, 0);
++        while (dcFenceI) {
++            dcFenceI = false;
++            flushDecodedCache();
++            int attempts = attemptsConsumed;
++            boolean stopped = controller != null && controller.afterAttempt(state, 0);
++            if (stopped || attempts == budget) {
++                return new AttemptResult(0, attempts, stopped);
++            }
++            result = runCached(state, mem, ramOffset, ramSize, budget, null, csrHook, true, controller, attempts);
++        }
++        return new AttemptResult(result, attemptsConsumed, attemptsStopped);
++    }
++
++    /**
+      * Commits a trap or interrupt to the machine CSRs and enters machine mode. {@code pc} is the
+      * trapping instruction's PC, or for an interrupt the next instruction's PC minus {@code
+      * instrLen}; {@code ir} and {@code rval} supply {@code mtval}.
+@@ -2757,7 +2789,7 @@
+             if (remaining == 0) {
+                 return 0;
+             }
+-            result = runCached(state, mem, ramOffset, ramSize, remaining, postExec, csrHook);
++            result = runCached(state, mem, ramOffset, ramSize, remaining, postExec, csrHook, false, null, 0);
+             if (!dcFenceI) {
+                 return result;
+             }
+@@ -2769,6 +2801,15 @@
+      * interrupt. Semantics and batch boundaries are those of {@link #step}'s loop. Returns {@link
+      * #step}'s result, or minus the number of instructions run if it stopped early after a
+      * delegated {@code FENCE.I}, leaving {@code dcFenceI} set for the caller to flush.
++     *
++     * <p>With {@code attemptMode}, it runs {@link #stepAttempts}'s attempts instead: each
++     * iteration is one attempt with its own entry checks and callbacks, a trap continues into its
++     * handler, and {@code count} is the budget, of which {@code attemptsDone} are already
++     * consumed. It returns the last attempt's result and leaves the attempts consumed and whether
++     * the controller stopped in {@link #attemptsConsumed} and {@link #attemptsStopped}. After a
++     * delegated {@code FENCE.I} it returns 0 with {@code dcFenceI} set and that attempt's {@code
++     * afterAttempt} not yet called; see {@link #runAttemptsCached}. The flag is a parameter, not
++     * a field, so it is loop-invariant and Native Image can unswitch the loop on it.
+      */
+     private int runCached(
+             RV32IMAState state,
+@@ -2777,7 +2818,10 @@
+             int ramSize,
+             int count,
+             PostExecHook postExec,
+-            CSRHook csrHook) {
++            CSRHook csrHook,
++            boolean attemptMode,
++            AttemptController controller,
++            int attemptsDone) {
+         if (mem != dcBus
+                 || state != dcState
+                 || state.hartId != dcHartId
+@@ -2801,7 +2845,43 @@
+         long cycle = state.getCycle();
+         long retiredBase = state.getInstret() - cycle; // as in step()'s loop
+ 
+-        for (int icount = 0; icount < count; icount++) {
++        for (int icount = attemptsDone; icount < count; icount++) {
++            if (attemptMode) {
++                // Publish the boundary, finish the previous attempt with its afterAttempt (it
++                // returned 0, or the call would have ended), start this one, and reload what the
++                // callbacks may have changed. Everything else is read from state where it is used.
++                state.pc = pc;
++                state.setInstret(retiredBase + cycle);
++                state.setCycle(cycle);
++                if (controller != null) {
++                    if (icount != attemptsDone && controller.afterAttempt(state, 0)) {
++                        attemptsConsumed = icount;
++                        attemptsStopped = true;
++                        return 0;
++                    }
++                    controller.beforeAttempt(state);
++                }
++                // step()'s entry checks, with the call's one sample on its first attempt.
++                if (icount == 0) {
++                    sampleTime(state);
++                } else {
++                    updateTimerPending(state);
++                }
++                int interrupt = pendingInterruptTrap(state);
++                if ((state.extraflags & EXTRAFLAG_WFI) != 0) {
++                    if (wakeInterrupts(state) == 0) {
++                        return endAttempts(state, controller, icount + 1, 1);
++                    }
++                    state.extraflags &= ~EXTRAFLAG_WFI;
++                }
++                pc = state.pc;
++                cycle = state.getCycle();
++                retiredBase = state.getInstret() - cycle;
++                if (interrupt != 0) {
++                    pc = commitTrap(state, pc - 4, interrupt, 0, 0, 4); // as step()'s entry dispatch
++                    continue;
++                }
++            }
+             int privilege = state.extraflags & EXTRAFLAG_PRIV_MASK;
+             int ofsPc = pc - ramOffset;
+             int slot = 0;
+@@ -2814,12 +2894,15 @@
+                 if (tags[slot] != tag || op == 0) {
+                     op = dcCacheable(pc, ofsPc, ramSize) ? dcFill(state, mem, pc, privilege, slot, tag) : 0;
+                     if (op == DC_FETCH_FAULT) {
+-                        // As step()'s loop's fetch fault: no hook call, mtval = pc.
++                        // As step()'s loop's fetch fault: no hook call, mtval = pc; attempted,
++                        // not retired.
+                         pc = commitTrap(state, pc, exceptionTrap(EXC_INSTRUCTION_ACCESS_FAULT), 0, pc, 4);
+-                        state.setInstret(retiredBase + cycle);
+-                        state.setCycle(cycle + 1);
+-                        state.pc = pc;
+-                        return 0;
++                        cycle++;
++                        retiredBase--;
++                        if (attemptMode) {
++                            continue; // a trap ends the attempt, not the call
++                        }
++                        break;
+                     }
+                 } else if (dcCheckMode) {
+                     dcCheck(state, mem, pc, privilege, slot);
+@@ -2844,11 +2927,22 @@
+                 } finally {
+                     dcMode = DC_MODE_ON;
+                 }
+-                if (result != 0 || dcBatchEnded) {
+-                    return result; // WFI, a trap or an interrupt ends the batch, as in the loop
+-                }
+-                if (dcFenceI) {
+-                    return -(icount + 1); // the delegated step already wrote pc and cycle back
++                if (attemptMode) {
++                    // A trap or interrupt ends only the attempt; the delegated step published it.
++                    if (result != 0) {
++                        return endAttempts(state, controller, icount + 1, result);
++                    }
++                    if (dcFenceI) {
++                        attemptsConsumed = icount + 1; // runAttemptsCached flushes, then calls afterAttempt
++                        return 0;
++                    }
++                } else {
++                    if (result != 0 || dcBatchEnded) {
++                        return result; // WFI, a trap or an interrupt ends the batch, as in the loop
++                    }
++                    if (dcFenceI) {
++                        return -(icount + 1); // the delegated step already wrote pc and cycle back
++                    }
+                 }
+                 pc = state.pc;
+                 cycle = state.getCycle();
+@@ -2968,10 +3062,11 @@
+                 int ir = dcWords[slot];
+                 if (postExec != null) postExec.onPostExec(pc, ir, trap);
+                 pc = commitTrap(state, pc, trap, ir, rval, instrLen);
+-                state.setInstret(retiredBase + cycle - 1);
+-                state.setCycle(cycle);
+-                state.pc = pc;
+-                return 0;
++                retiredBase--; // attempted, not retired
++                if (attemptMode) {
++                    continue; // a trap ends the attempt, not the call
++                }
++                break;
+             }
+             if (rd != 0) {
+                 regs[rd] = rval;
+@@ -2983,6 +3078,17 @@
+         state.setInstret(retiredBase + cycle);
+         state.setCycle(cycle);
+         state.pc = pc;
+-        return 0;
++        return attemptMode ? endAttempts(state, controller, count, 0) : 0;
++    }
++
++    // runCached's attempt-mode results besides the last attempt's result; see runCached.
++    private int attemptsConsumed;
++    private boolean attemptsStopped;
++
++    /** Ends runCached's attempts after a published attempt: its afterAttempt, then the results. */
++    private int endAttempts(RV32IMAState state, AttemptController controller, int attempts, int result) {
++        attemptsConsumed = attempts;
++        attemptsStopped = controller != null && controller.afterAttempt(state, result);
++        return result;
+     }
+ }

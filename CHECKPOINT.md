@@ -3,8 +3,8 @@
 ## Current state
 
 - **`main` is on `0.1.10-SNAPSHOT`, installed to `~/.m2`** (not tagged or published). It carries
-  the timer/counter phase (T1–T7) and, not yet installed, step A1. `v0.1.8` is installed locally
-  and tagged on `origin`. The version bump for phase A waits for A4.
+  the timer/counter phase (T1–T7) and, not yet installed, steps A1 and A2. `v0.1.8` is installed
+  locally and tagged on `origin`. The version bump for phase A waits for A4.
 - **V-32 trial:** [the handoff](docs/V32_TIMER_PHASE_HANDOFF.md) lists the breaking changes and
   V-32's migration sites, for Nate to relay. Wait for V-32's test report before archiving it.
 - **Work directly on `main`** and push after each validated step, until API stabilization for
@@ -17,23 +17,24 @@
 
 ## Resume here
 
-**Step A2 of [the plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md): the fused cached path**,
-per [the execution API design](docs/EXECUTION_API_DESIGN.md) (revision 6). Not started. Today a
-cached core's `stepAttempts` runs each attempt as a cached single-instruction batch through the
-same internal entry as the uncached path; A2 moves attempts into `runCached()`'s loop behind an
-explicit flag. A2's tests include the seeded lockstep against repeated `step(count=1)` with a
-fixed source, and the delegated `time` read retained across a `FENCE.I` resume.
+**Waiting on Nate: does A2's copied fast-handler loop stay?** A2 landed as `4c37ae0` (with the
+bench's `--attempts` mode, `f9e5acb`). The design's fused shape, attempt mode as a flag in
+`runCached()`, slowed native batches 7–14% wherever `stepAttempts` is reachable, so A2 took the
+design's fallback: a separate `runCachedAttempts()` that copies `runCached()`'s lookup, delegation
+and fast handlers (about 200 lines). Batched code is unchanged; cached attempts run 1.41–1.67×
+faster than A1's on native. The no-copy alternative (a driver over `runCached(count=1)`) gives
+1.08–1.17×. Evidence and both alternative patches:
+[attempts-a2](docs/performance/2026-10-12/attempts-a2/README.md).
 
-A1 landed as `5c1a58c` (an executed, stalling `WFI` calls the `PostExecHook`) and `83308f3`
-(`stepAttempts`, `AttemptController`, `AttemptResult`; the reference core's attempt driver; V-32's
-oracle ported as `AttemptBoundaryTest`; new cases in `StepAttemptsTest`). The internal entry is an
-`attemptEntry` flag that `step()` tests once per call; it adds no work to the instruction loop.
+**Next: step A3 of [the plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md)**, the full
+`--attempts` measurement on JVM and native, once Nate settles the copy (a switch to the no-copy
+variant would need its own A3 run). `run_matrix.py` does not pass `--attempts` yet.
 
-**Validation status:** the A1 tree passed `./mvnw clean verify` (788 core tests in each of three
-cache configurations, plus CLI and bench). A mutation that makes the attempt entry sample fails 38
-of the new tests. Not run for A1: `./release.sh` and bench (neither required by the plan until
-A3/A4). `release.sh` rewrites `baremetal/baremetal.elf` and its debug listing with debug-string
-noise only; restore them rather than committing.
+**Validation status:** the A2 tree passed `./mvnw clean verify` (801 core tests in each of three
+cache configurations, plus CLI and bench). Twelve mutations of the new loop and driver each fail
+tests. Not run for A2: `./release.sh` (required at A4). `release.sh` rewrites
+`baremetal/baremetal.elf` and its debug listing with debug-string noise only; restore them rather
+than committing.
 
 ## Rules for this work
 
@@ -49,8 +50,9 @@ noise only; restore them rather than committing.
   loop unswitching. Verify with a symbolized build, as in
   [the cache evidence](docs/performance/2026-10-10/decoded-cache/README.md).
 - **Core design:** the core stays independent of the CLI and any memory backend. `step()`'s long
-  body is deliberate; cold F/A arms live in `executeColdOpcode`; trap dispatch uses an internal
-  cause-plus-one encoding. The Javadoc is authoritative; [API.md](docs/API.md) summarizes it.
+  body is deliberate; cold F/A arms live in `executeColdOpcode`; `runCachedAttempts` copies
+  `runCached`'s fast handlers, so change both; trap dispatch uses an internal cause-plus-one
+  encoding. The Javadoc is authoritative; [API.md](docs/API.md) summarizes it.
 - **F directed rounding** needs the exact residual alongside the double approximation; keep the
   independent differential tests when changing that arithmetic.
 - **Working with V-32:** Codex works on V-32 (`../emulator`), Claude on this repo, and Nate relays.

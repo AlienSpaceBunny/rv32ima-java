@@ -1,0 +1,11 @@
+nm -S sizes of RV32IMACore loops in mono-bytearray images built with -H:-DeleteLocalSymbols (hex bytes), and ByteArrayBus.readInt call sites
+a1 runCached size=0x0000000000004c81 readInt-calls=2
+a1 step size=0x0000000000005a31 readInt-calls=6
+b runCached size=0x0000000000004c81 readInt-calls=2
+b step size=0x0000000000005a31 readInt-calls=6
+c runCached size=0x0000000000004c81 readInt-calls=2
+c step size=0x0000000000005a31 readInt-calls=6
+fused runCached size=0x0000000000006589 readInt-calls=2
+fused step size=0x0000000000005b41 readInt-calls=6
+c runCachedAttempts size=0x0000000000005aa1
+c runCached vs a1 runCached: identical instructions except two field offsets (0x5e/0x5f -> 0x62/0x63); start address mod 64: a1 32, b 32, c 0

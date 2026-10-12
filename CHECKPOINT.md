@@ -15,26 +15,27 @@
 
 ## Resume here
 
-**Step T5 of [the plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md): read-only CSR write
-traps**, on `main`. Not started. Apply each behavior change to
-`ReferenceCore` in the same commit and list it under "Changes from the baseline" in its class
-Javadoc. New tests live in `TimerTest` or a CSR-focused class; directed differential cases in
-`ReferenceDifferentialTest` (its `csrHook` program already writes read-only numbers).
+**Step T6 of [the plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md): Zicntr counters and
+`time` reads**, on `main`. Not started. Apply each behavior change to `ReferenceCore` in the same
+commit and list it under "Changes from the baseline" in its class Javadoc. T6 changes what a
+`cycle` read returns (the value before the reading instruction), so `CoreTest`'s
+`userModeCanReadUserAccessibleCsr` (expects 43 after `setCycle(42)`) changes with it. Retirement
+accounting must add no per-instruction work to `step()`'s loop or `runCached()`.
 
 Landed on `main`: T1 (hook jump-PC fix) at `3f4fdda`, T2 (reference core and differential) at
-`08d26db`, T3 (shared time source, standard compare) at `fdd68f0`, and T4
-(standard WFI, implemented-only `mie`/`mip`, `injectInterrupt` no longer clears the stall flag)
-at `525c925`. Update the plan's status table and this section as steps land.
+`08d26db`, T3 (shared time source, standard compare) at `fdd68f0`, T4 (standard WFI,
+implemented-only `mie`/`mip`) at `525c925`, and T5 (read-only CSR write traps, tests in
+`CsrTest` and the differential's `readOnlyCsr` case) at `5abce6e`. Update the plan's status table
+and this section as steps land.
 
 T4's WFI/`PostExecHook` question is settled for A1 (V-32's recommendation, in the plan's A1
 step). V-32's [packets 001–003 review](docs/V32_PACKET_REVIEW_2026-10-12.md) needs nothing from
 the core; its core-side notes are appended.
 
-**Validation status:** `525c925` passed `./mvnw clean verify` (642
-core tests in each of three cache configurations, plus CLI and bench) and `./release.sh`. No
-bench run yet; T7's full matrix covers T1 and later steps (T3 adds one source read and compare
-per `step` call; T4 changes only entry, CSR and WFI paths). The `v0.1.8` tag passed `release:perform` (570 core
-tests in each of three cache configurations, plus CLI and bench) and `release.sh`.
+**Validation status:** `5abce6e` passed `./mvnw clean verify` (674 core tests in each of three
+cache configurations, plus CLI and bench) and `./release.sh`. No bench run yet; T7's full matrix
+covers T1 and later steps (T3 adds one source read and compare per `step` call; T4 and T5 change
+only entry, CSR and WFI paths). The `v0.1.8` tag passed `release:perform` and `release.sh`.
 
 ## Rules for this work
 

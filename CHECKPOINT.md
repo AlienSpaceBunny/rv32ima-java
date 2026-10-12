@@ -24,16 +24,16 @@
 
 ## Resume / pending
 
-1. **Execution API and timer/counter designs: both at revision 3, awaiting V-32's review.**
-   - [EXECUTION_API_DESIGN.md](docs/EXECUTION_API_DESIGN.md): V-32's review of revision 2 is
-     adopted (callback phases, no reentrancy, early validation, measurement wording, reference for
-     new behavior). One confirmation question.
-   - [TIMER_COUNTER_DESIGN.md](docs/TIMER_COUNTER_DESIGN.md): V-32's answers and corrections are
-     adopted (exact sample points, pre-instruction counter reads, write precedence, legality before
-     side effects, work counts separate from guest-writable counters, WFI wake versus delivery).
-     Four questions for V-32.
-   - **For Nate:** whether Zicntr mode traps writes to every read-only CSR number or only the
-     counters, and whether legacy mode gets the stale-MTIP fix (default: no).
+1. **Execution API and timer/counter designs: both at revision 4, awaiting V-32's review.**
+   - **Direction (Nate, 2026-10-12):** design only for V-32's needs and, where cheap, the RISC-V
+     spec. No legacy mode; old shortcuts are dropped, and bench against `0.1.8` is a throughput
+     gate only. Revision 3 was superseded before V-32 reviewed it.
+   - [TIMER_COUNTER_DESIGN.md](docs/TIMER_COUNTER_DESIGN.md) lands first: one shared time source
+     replaces `elapsedUs`; standard compare and WFI (no MIE-setting); Zicntr always on with
+     pre-instruction reads; every read-only CSR number traps on write; work counts separate from
+     guest-writable counters. Five questions for V-32.
+   - [EXECUTION_API_DESIGN.md](docs/EXECUTION_API_DESIGN.md) builds on it: no `elapsedUs`,
+     nonpositive budgets rejected, `PostExecHook` jump-PC quirk fixed separately. Three questions.
    - Nate relays both to Codex. V-32's reply is design only; it does not authorize
      implementation.
    - **After V-32 answers:** settle each design and get Nate's go. Then:
@@ -49,9 +49,8 @@
    - [Plan](docs/DECODED_ICACHE_PLAN.md) and [protocol](docs/DECODED_ICACHE_PROTOCOL.md).
    - V-32's trial: 4K AP slots cut boot time by 36–44% on JVM and 38–42% on native.
    - Production enablement is V-32's change.
-3. **For Nate's decision, not blocking:** the existing `PostExecHook` quirk. For a taken jump
-   or branch, the hook reports the target minus the instruction length, not the instruction's
-   PC. It is not fixed, and the new API should not inherit it.
+3. **`PostExecHook` jump-PC quirk:** decided by the 2026-10-12 direction; fix it (report the
+   instruction's own PC) as a separate change. V-32 is asked whether anything depends on it.
 4. **Housekeeping:**
    - Local branches that can be deleted: `feature/decoded-icache` (already gone from `origin`)
      and `claude-review`.

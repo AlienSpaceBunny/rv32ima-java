@@ -621,3 +621,64 @@ No implementation, runtime tests, benchmarks or GUI validation were performed.
   (Question 1).
 - **New, from checking the WFI predicate:** `mie` and `mip` writes were unmasked. `mie` now keeps
   only the implemented enables, and guest writes leave `mip`'s read-only bits alone (Question 2).
+
+## V-32 review of revision 5
+
+2026-10-12. Revision 5 resolves the previous counter, CSR-read-suppression and
+sampling findings. Device-side masking is a workable integration direction;
+the distinctions below are needed to preserve Packet 001. No legacy mode is
+requested, and this review does not authorize implementation or adoption.
+
+### Answers to the two questions
+
+1. **Delivery gating:** yes, presenting a distant compare while masked can
+   serve V-32 without a new core gating API. Treat the core compare as the
+   effective delivery deadline, separate from the device's retained deadline.
+   The AP-readable pending bit must still reflect expiration of the retained
+   deadline while masked. It must not simply mirror the now-cleared core MTIP.
+   Masking must neither acknowledge an expiration nor advance its cadence;
+   rearming/cancellation remains the way to clear device timer pending.
+2. **`mip` writes:** no such writes were found in the live `firmware`,
+   `baremetal` or production Java sources. `MailboxHook.updateInterrupt`
+   asserts/clears MEIP on the host from mailbox and terminal-device state;
+   firmware acknowledges through MMIO. Guest writes leaving MSIP/MTIP/MEIP
+   unchanged fit this consumer and the
+   [machine interrupt CSR rules](https://github.com/riscv/riscv-isa-manual/blob/main/src/priv/machine.adoc).
+
+### Remaining integration details
+
+- **Unmasking versus a stale sample:** restoring the real compare does not
+  necessarily deliver an already-pending expiration at the next attempt.
+  Example: the batch samples 100 us, the retained deadline is 110 us, and an
+  MMIO store unmasks at real time 120 us. The next attempt still compares 100
+  against 110. Packet 001 requires an eligible pending source to request
+  service at the next boundary. V-32 must arrange a fresh sample before that
+  boundary, for example by ending this call after the unmasking store and
+  starting another before executing the next instruction. Document that
+  obligation rather than promising that restoring the compare alone suffices.
+  No general per-attempt sampling or new core API is requested here.
+- **LAUNCH and ACK:** replace the lifecycle statement that successful LAUNCH
+  leaves the core compare alone. LAUNCH retains the device request/deadline
+  and cadence, but sets the AP delivery mask, so under this scheme the core
+  compare becomes `TIMER_COMPARE_NEVER`. A masked AP ACK similarly updates
+  the retained deadline while leaving the effective compare masked. HALT and
+  RESUME preserve masks; AP RESET cancels the request. Apply mask, ACK and
+  queued command changes under one device ownership/generation protocol.
+- **Describe the masking mechanism accurately:** this is V-32's adapter for
+  its interval device, not a standard RISC-V timer mask. The core continues
+  to compare against its effective `mtimecmp`. As already documented, all
+  ones is a distant deadline, not an absolute disable at that timestamp.
+- **CSR reads after host edits:** writes and interrupt predicates are now
+  masked, but explicitly mask guest reads of `mie`/`mip` too. Otherwise a
+  host edit containing a reserved bit contradicts the promised read-as-zero
+  behavior. Add a readback case alongside the no-wake/no-delivery case.
+- **WFI test setup:** when an interrupt is already deliverable at call entry,
+  the interrupt-only attempt occurs before WFI executes. To test WFI retiring
+  with a pending, locally enabled source, use M-mode with global MIE clear.
+  Test U-mode/preexisting deliverable interrupts as entry traps, and test
+  U-mode stalled wakeup by injecting the interrupt after WFI has stalled.
+
+Add V-32 integration cases for masked pending reads, ACK while masked,
+LAUNCH with an overdue retained request, and the advancing-clock unmask
+example. Core tests cover CSR readback and WFI ordering. These are validation
+requirements for implementation, not tests run by this review.

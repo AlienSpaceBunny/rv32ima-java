@@ -649,3 +649,32 @@ This was a documentation/source review; runtime and GUI tests were not run.
 - **Counter names:** `getInstret()` for work deltas, `getMinstret()` for the architectural view.
 - **Measurement:** the timer and counter version is the baseline for fusion cost, and `0.1.8` a
   historical comparison. A regression is a tradeoff decision for Nate.
+
+## V-32 review of revision 5
+
+2026-10-12. **Yes: the internal single-attempt entry and independent reference's
+call-level sample lifetime settle the sampling correction.** Keeping that entry
+distinct from delegation preserves all entry checks without extra samples.
+The advancing-source comparisons and fixed-source public-step differential
+now test the two different contracts deliberately.
+
+The direct API contract, hook-overload removal, counter naming and measurement
+baseline also address revision 4's findings. No further execution-API change
+is requested by this review. Implementation and V-32 adoption remain separate
+decisions; the positive review is of the design, not runtime validation.
+
+Carry two details into implementation and integration:
+
+- A delegated `time/timeh` read must update the retained sample used by every
+  subsequent attempt, including after FENCE.I flush/resume. Test this with a
+  deadline crossed by the read, and a later compare edit; checking only sample
+  counts would miss a driver that restores an older sample on resume.
+- The companion timer review identifies an unmasking case that needs a fresh
+  call before the next guest instruction. V-32 can use a controller stop to
+  return to its scheduler, but must distinguish that scheduling return from
+  a terminal halt and its reservation cleanup. No new result field or stop
+  reason is required: the embedder can retain its own reason. This is an
+  integration obligation, not a change to the agreed one-sample-per-call rule.
+
+Documentation/source review only. No runtime tests, benchmarks, GUI checks or
+next-task implementation were performed.

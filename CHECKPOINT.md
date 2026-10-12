@@ -2,43 +2,34 @@
 
 ## Current state
 
-- **`main` is on `0.1.10-SNAPSHOT`, installed to `~/.m2`** (not tagged or published). It carries
-  the timer/counter phase (T1–T7) and, not yet installed, steps A1 and A2. `v0.1.8` is installed
-  locally and tagged on `origin`. The version bump for phase A waits for A4.
-- **V-32 adopted the trial** `0.1.10-attempts-SNAPSHOT` (V-32 `70237cf`): the AP's single
-  mechanism is `stepAttempts` with a 4096-slot cache; the separate cached attempt loop is
-  ratified; no core API blocker
-  ([exchange, archived](docs/archive/V32_ATTEMPTS_RATIFICATION.md)).
+- **`main` is on `0.1.11-SNAPSHOT`, installed to `~/.m2`** (not tagged or published). It carries
+  the complete timer/counter and execution API phases
+  ([plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md), T1–T7 and A1–A4). Its core source is
+  identical to the trial `0.1.10-attempts-SNAPSHOT` (local tag `trial/0.1.10-attempts`) that V-32
+  `70237cf` consumes. `v0.1.8` is installed locally and tagged on `origin`.
+- **V-32 adopted `stepAttempts`:** the AP's single mechanism is cached `stepAttempts` (4096
+  slots); the separate cached attempt loop is ratified on condition that both cached loops keep
+  their independent-reference differential and mutation coverage.
+- **Accepted tradeoffs** (Nate, 2026-10-12): T7's `step(count=1)` and HotSpot uncached batched
+  costs, and A3's further 2–7% on `step(count=1)`. V-32's AP budget of 1,061 is a legacy value
+  it will likely retune; nothing in the core depends on it.
 - **Work directly on `main`** and push after each validated step, until API stabilization for
   `0.2.0` (Nate, 2026-10-12).
-- **T7 bench tradeoff accepted** (Nate, 2026-10-12): `step(count=1)` about 1.12× slower natively
-  and HotSpot uncached batched about 5% slower stay as they are; V-32 picks its execution mode
-  (`step` or `stepAttempts`, cache on or off) once the core is stable
-  ([evidence](docs/performance/2026-10-12/timer-counters/README.md)). Blocked and deferred items
-  are in [docs/BACKLOG.md](docs/BACKLOG.md).
 
 ## Resume here
 
-**A3 is done** ([evidence](docs/performance/2026-10-12/attempts/README.md)): V-32's cached
-`stepAttempts` path is 1.21–1.76× faster than its former cached `step(count=1)` loop, batches are
-unchanged, and the budget barely matters. Nate accepted the 2–7% `step(count=1)` regression
-(2026-10-12). A follow-up question from Nate arrived truncated; get the rest before A4.
+**Relay [V32_EXECUTION_PHASE_HANDOFF.md](docs/V32_EXECUTION_PHASE_HANDOFF.md)** (Nate): phase A
+closed, A3's results, and the test guests and code V-32 may borrow. Nothing is requested of
+V-32; archive the handoff once relayed.
 
-**Next: step A4 of [the plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md)**, the phase close
-(docs, CHANGELOG review, `./release.sh`, version bump, install, push, archive the execution
-design's review history). V-32's AP budget of 1,061 attempts per call is a legacy value V-32
-will likely retune; nothing in the core should depend on it. Keep both cached loops'
-independent-reference differential and mutation coverage (V-32's ratification condition).
+**Next work needs Nate's pick.** Candidates from [docs/BACKLOG.md](docs/BACKLOG.md): the
+remaining-old-shortcuts audit (scheduled for after phase A), or the API-freeze review toward
+`0.2.0` ([RELEASE_TODO.md](RELEASE_TODO.md)).
 
-**Trial build:** `0.1.10-attempts-SNAPSHOT` is installed in `~/.m2` from local tag
-`trial/0.1.10-attempts`, which V-32 now consumes. `main`'s POMs stay on `0.1.10-SNAPSHOT`.
-
-**Validation status:** the bench `--step-loop` tree (`79cf4f7`) passed `./mvnw clean verify`;
-the core is unchanged since A2. The A2 tree passed `./mvnw clean verify` (801 core tests in each of three
-cache configurations, plus CLI and bench). Twelve mutations of the new loop and driver each fail
-tests. Not run for A2: `./release.sh` (required at A4). `release.sh` rewrites
-`baremetal/baremetal.elf` and its debug listing with debug-string noise only; restore them rather
-than committing.
+**Validation status:** the `0.1.11-SNAPSHOT` tree passed `./release.sh` (`./mvnw clean verify`:
+801 core tests in each of three cache configurations, CLI, bench; then a fresh baremetal build
+and run). `release.sh` rewrites `baremetal/baremetal.elf` and its debug listing with debug-string
+noise only; restore them rather than committing.
 
 ## Rules for this work
 

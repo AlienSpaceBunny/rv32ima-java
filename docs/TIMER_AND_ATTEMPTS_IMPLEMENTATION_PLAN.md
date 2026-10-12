@@ -1,6 +1,6 @@
 # Timer/counters and execution API: implementation plan
 
-Date: 2026-10-12. **Approved to start** (Nate, 2026-10-12). This plan orders the work for the two
+Date: 2026-10-12. **Complete** (`0.1.11-SNAPSHOT`); approved to start by Nate on 2026-10-12. This plan orders the work for the two
 settled designs:
 
 1. [TIMER_COUNTER_DESIGN.md](TIMER_COUNTER_DESIGN.md) (revision 6), which lands first;
@@ -24,7 +24,7 @@ commit in the status table, as in [FEATURE_REQUEST_PLAN.md](FEATURE_REQUEST_PLAN
 | A1 | `stepAttempts` API and uncached path | Done | `5c1a58c`, `83308f3` |
 | A2 | Fused cached path | Done as a separate loop, ratified by V-32 | `f9e5acb` (bench), `4c37ae0` |
 | A3 | Bench `--attempts` measurement | Done; `step(count=1)` regression accepted | `79cf4f7` (bench) |
-| A4 | Execution phase close | Not started | |
+| A4 | Execution phase close | Done (`0.1.11-SNAPSHOT`) | `08bc5b8`, version bump |
 
 ## Rules for every step
 
@@ -240,6 +240,12 @@ loop is V-32's former AP shape. The 1,061 budget is a legacy value, likely to be
 Docs, CHANGELOG, landing commits, bump, install, push. Archive the execution design's version
 with V-32's review sections, as T7 does for the timer design. A trial snapshot for V-32 needs
 Nate's separate authorization.
+
+- **Outcome (2026-10-12):** the execution design is trimmed to the implemented spec, its review
+  history archived. `./release.sh` passed (801 core tests in each of three cache configurations,
+  CLI, bench, fresh baremetal build). `0.1.11-SNAPSHOT` is installed; its core is identical to
+  the trial V-32 already runs. [The handoff](V32_EXECUTION_PHASE_HANDOFF.md) also lists the test
+  guests and code V-32 may borrow (Nate's request).
 
 ## Out of scope
 

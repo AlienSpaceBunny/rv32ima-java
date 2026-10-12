@@ -11,7 +11,7 @@
 
     <groupId>com.alienspacebunny</groupId>
     <artifactId>rv32emu-parent</artifactId>
-    <version>0.1.10-SNAPSHOT</version>
+    <version>0.1.11-SNAPSHOT</version>
     <packaging>pom</packaging>
 
     <name>RV32IMA Emulator (parent)</name>

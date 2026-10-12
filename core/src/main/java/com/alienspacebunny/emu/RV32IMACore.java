@@ -1018,8 +1018,10 @@ public class RV32IMACore {
         /**
          * Observes an instruction that just executed or is about to trap.
          *
-         * @param pc the guest PC of the instruction, not yet advanced to the next instruction
-         *     (which may be {@code pc + 2} or {@code pc + 4}; see {@code IsaConfig.hasC}).
+         * @param pc the guest PC of the instruction itself, not the next instruction's (which may
+         *     be {@code pc + 2} or {@code pc + 4}; see {@code IsaConfig.hasC}). This holds for a
+         *     taken jump, branch or {@code MRET} too, compressed forms included: the hook sees
+         *     the instruction's own PC, not its target.
          * @param ir the 32-bit word the opcode decoder acted on; zero if fetch failed before
          *     decoding. For a compressed (RVC) instruction (Phase 4, {@code IsaConfig.hasC}), this
          *     is {@code RV32IMACore}'s internal 32-bit expansion of the 16-bit encoding, not the
@@ -1550,6 +1552,9 @@ public class RV32IMACore {
                 // or AMO does can change it before the AccessContext below is built.
                 int privilege = state.extraflags & EXTRAFLAG_PRIV_MASK;
                 int ofsPc = pc - ramOffset;
+                // A taken jump, branch or MRET redirects pc to "target - instrLen" below; the hook
+                // still reports the instruction's own PC.
+                int instrPc = pc;
 
                 if (Integer.compareUnsigned(ofsPc, ramSize) >= 0) {
                     trap = exceptionTrap(EXC_INSTRUCTION_ACCESS_FAULT);
@@ -2020,7 +2025,7 @@ public class RV32IMACore {
                     }
 
                     if (trap != 0) {
-                        if (postExec != null) postExec.onPostExec(pc, ir, trap);
+                        if (postExec != null) postExec.onPostExec(instrPc, ir, trap);
                         break;
                     }
 
@@ -2029,7 +2034,7 @@ public class RV32IMACore {
                     }
                 }
 
-                if (postExec != null) postExec.onPostExec(pc, ir, trap);
+                if (postExec != null) postExec.onPostExec(instrPc, ir, trap);
                 pc += instrLen;
 
                 if (reevaluateInterrupts) {
@@ -2701,9 +2706,7 @@ public class RV32IMACore {
             if (rd != 0) {
                 regs[rd] = rval;
             }
-            // step()'s loop redirects pc to "target - instrLen" before its hook call, so a taken jump
-            // or branch reports that value rather than its own PC; match it exactly.
-            if (postExec != null) postExec.onPostExec(nextPc - instrLen, dcWords[slot], 0);
+            if (postExec != null) postExec.onPostExec(pc, dcWords[slot], 0);
             pc = nextPc;
         }
 

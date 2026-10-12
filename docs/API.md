@@ -89,7 +89,9 @@ provided mutable `RV32IMAState` and `MemoryBus`.
 - `postExec`, when provided, is called once per instruction cycle: after a
   non-trapping instruction commits its result but before the PC advances (by 2
   or 4 bytes, depending on whether the instruction was compressed), or before a
-  trapping instruction's trap state is committed. It is not called when
+  trapping instruction's trap state is committed. Its `pc` is always the
+  instruction's own PC, including for a taken jump, branch or `MRET`. It is not
+  called when
   instruction fetch itself fails — PC outside the window, misaligned, or the bus
   rejecting the fetch as described above. For a compressed instruction, the
   `ir` value passed to `postExec` (and used for `mtval` on an

@@ -8,6 +8,11 @@ for how this file is updated as part of cutting a release.
 
 ## [Unreleased]
 
+### Fixed
+- `PostExecHook.onPostExec` now reports a taken jump, branch or `MRET` at the instruction's own
+  PC, compressed forms included, with the decoded cache on or off. It previously reported the
+  target minus the instruction length.
+
 ## [0.1.8] - 2026-10-11
 
 First local, git-tagged release (`v0.1.8`); not published. Covers all changes since

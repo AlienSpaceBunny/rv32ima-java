@@ -67,10 +67,11 @@
         mathematical result (see the Phase 5b design note on that method), and a float midpoint is
         always exactly representable in double (float's 24-bit mantissa is far below double's 53),
         so an exact equality check is the correct way to detect a genuine tie; an epsilon
-        comparison would be wrong here, not safer.
+        comparison would be wrong here, not safer. The test-only ReferenceCore is a copy of an
+        earlier RV32IMACore and carries the same method.
     -->
     <Match>
-        <Class name="com.alienspacebunny.emu.RV32IMACore"/>
+        <Class name="~com\.alienspacebunny\.emu\.(RV32IMACore|ReferenceCore)"/>
         <Method name="roundToFloat"/>
         <Bug pattern="FE_FLOATING_POINT_EQUALITY"/>
     </Match>

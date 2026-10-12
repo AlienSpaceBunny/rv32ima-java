@@ -30,7 +30,9 @@ Remove an item when it is done, and note where its result went.
   - `IsaConfig.hasU = false` reproduces the non-standard `misa` bit 22, with compatibility
     constructors to keep it;
   - `mvendorid` returns `0xff0ff0ff`;
-  - `mstatus` and other CSRs accept any written value instead of their WARL fields.
+  - `mstatus` and other CSRs accept any written value instead of their WARL fields. One visible
+    effect, seen in T2's differential: MRET with `mstatus.MPP` = 1 or 2 runs the hart at that
+    unmodeled privilege instead of a legal one.
 
   Check each for a V-32 dependency first. Start after the execution API phase.
 - **D extension:** only the `misa` flag exists; no decode.

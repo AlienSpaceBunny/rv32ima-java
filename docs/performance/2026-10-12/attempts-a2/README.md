@@ -2,7 +2,7 @@
 
 Evidence for step A2 of [the plan](../../../TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md). It
 records why the landed cached path is a separate attempt loop, the
-[design](../../../EXECUTION_API_DESIGN.md#implementation)'s named fallback, and not a mode of
+[design](../../../archive/EXECUTION_API_DESIGN_REV6_WITH_REVIEWS_2026-10-12.md#implementation)'s named fallback, and not a mode of
 `runCached()`. **One decision is Nate's:** the separate loop copies `runCached()`'s fast
 handlers. Variant B below avoids the copy and gives up most of the attempt speedup.
 

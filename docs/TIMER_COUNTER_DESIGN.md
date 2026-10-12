@@ -10,7 +10,7 @@ change lists are archived in
 
 **Inputs:**
 - V-32's "Timer and counter extension implementation requests" in
-  [EXECUTION_API_DESIGN.md](EXECUTION_API_DESIGN.md#timer-and-counter-extension-implementation-requests).
+  [the archived execution design](archive/EXECUTION_API_DESIGN_REV6_WITH_REVIEWS_2026-10-12.md#timer-and-counter-extension-implementation-requests).
 - V-32's Packet 001 decision record, in its repository at
   `docs/decisions/001-clocks-timer-events.md` (C1 time source, C4 IOP timers, C5 lifecycle).
 - V-32's reviews of the first draft and of revisions 4 and 5, in the archived copy.

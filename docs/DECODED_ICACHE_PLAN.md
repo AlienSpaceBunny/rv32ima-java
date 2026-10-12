@@ -25,11 +25,11 @@ The evidence is in
 
 - [DECODED_ICACHE_PROTOCOL.md](DECODED_ICACHE_PROTOCOL.md) is the coherence contract, accepted
   by V-32.
-- [CPU_REVIEW_FOLLOWUP_RESPONSE.md](CPU_REVIEW_FOLLOWUP_RESPONSE.md) records the agreements,
+- [CPU_REVIEW_FOLLOWUP_RESPONSE.md](archive/CPU_REVIEW_FOLLOWUP_RESPONSE.md) records the agreements,
   Nate's decisions and V-32's AP loop.
 - History: the [scope draft](archive/DECODED_ICACHE_SCOPE_DRAFT_2026-10-10.md),
-  [V-32's review](DECODED_ICACHE_ADVISORY_REVIEW.md) and its
-  [follow-up](CPU_ARCHITECTURE_REVIEW_FOLLOWUP.md).
+  [V-32's review](archive/DECODED_ICACHE_ADVISORY_REVIEW.md) and its
+  [follow-up](archive/CPU_ARCHITECTURE_REVIEW_FOLLOWUP.md).
 
 ## What is being built
 
@@ -153,7 +153,7 @@ under `bench/out/`, and the reference built from `main` in the same session.
       Run one check-mode boot first, then matched boot timing against `0.1.7-SNAPSHOT`.
    4. Expect a small boot effect: V-32's AP calls `step(count=1)` per instruction under the
       `syscon` monitor, and spins on WFI (see the
-      [addendum](CPU_REVIEW_FOLLOWUP_RESPONSE.md#addendum-the-aps-wfi-and-attempt-loop-read-2026-10-10)).
+      [addendum](archive/CPU_REVIEW_FOLLOWUP_RESPONSE.md#addendum-the-aps-wfi-and-attempt-loop-read-2026-10-10)).
       A cache cannot remove that overhead.
 7. **After Nate's decision:** merge to `main` with the version bump per `AGENTS.md`. V-32 then
    adopts on its own schedule, after wiring its flush boundaries and firmware `FENCE.I`.

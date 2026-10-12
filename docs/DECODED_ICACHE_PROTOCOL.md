@@ -1,8 +1,8 @@
 # Decoded instruction cache: coherence protocol (for V-32 confirmation)
 
-Drafted 2026-10-10 after V-32's [advisory review](DECODED_ICACHE_ADVISORY_REVIEW.md) and Nate's
+Drafted 2026-10-10 after V-32's [advisory review](archive/DECODED_ICACHE_ADVISORY_REVIEW.md) and Nate's
 decisions. **Status: accepted by V-32 as the integration target** (`../emulator` `77b2e47`,
-copied in [the follow-up](CPU_ARCHITECTURE_REVIEW_FOLLOWUP.md#response-to-the-updated-cpu-protocol)),
+copied in [the follow-up](archive/CPU_ARCHITECTURE_REVIEW_FOLLOWUP.md#response-to-the-updated-cpu-protocol)),
 with the caveats recorded under [Confirm](#confirm). The overall
 design is in [DECODED_ICACHE_PLAN.md](DECODED_ICACHE_PLAN.md). Implementation proceeds on a
 branch in parallel, because nothing here changes the default-off behaviour.
@@ -69,7 +69,7 @@ review.
 
 ## The follow-up's three code-publication cases
 
-The [follow-up](CPU_ARCHITECTURE_REVIEW_FOLLOWUP.md) separates three cases.
+The [follow-up](archive/CPU_ARCHITECTURE_REVIEW_FOLLOWUP.md) separates three cases.
 
 1. **Immutable XIP ROM:** explicitly cacheable populated ranges. Hart permissions are kept by
    Rule 4, and image replacement or remap flushes by Rule 2.

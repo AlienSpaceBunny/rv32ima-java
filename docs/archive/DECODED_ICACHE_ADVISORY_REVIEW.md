@@ -14,9 +14,9 @@ The follow-up now records the selected `FENCE.I` plus host-flush protocol and
 supersedes this review's automatic-coherence and experiment-sequencing advice.
 
 Sources: the live emulator checkpoint, the CPU
-[review response](CPU_ARCHITECTURE_REVIEW_RESPONSE.md),
-[cache draft](DECODED_ICACHE_PLAN.md), and
-[predecode evidence](performance/2026-10-10/README.md#predecode-upper-bound-experiment-not-landed-decision-rule-met),
+[review response](../CPU_ARCHITECTURE_REVIEW_RESPONSE.md),
+[cache draft](../DECODED_ICACHE_PLAN.md), and
+[predecode evidence](../performance/2026-10-10/README.md#predecode-upper-bound-experiment-not-landed-decision-rule-met),
 plus the source paths cited below. No new measurements or runtime tests were run
 for this review. Both checkouts were clean at the start.
 

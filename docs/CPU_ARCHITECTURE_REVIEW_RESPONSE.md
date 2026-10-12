@@ -22,7 +22,7 @@ below are inputs to V-32's own storage decision.
     against ~5 ns of core entry cost
   - native-only, the `MemorySegment` accessor: 4–7× in the core, 14× in host loops, plus
     72 B allocated per access
-- **V-32's matched boot screen ([follow-up](CPU_ARCHITECTURE_REVIEW_FOLLOWUP.md)) found no
+- **V-32's matched boot screen ([follow-up](archive/CPU_ARCHITECTURE_REVIEW_FOLLOWUP.md)) found no
   reproducible boot gain from the new core** on either runtime, while `-O3` lowered native
   readiness time. The core's isolated gains are therefore not established as V-32 boot
   gains.

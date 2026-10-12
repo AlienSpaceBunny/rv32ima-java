@@ -4,7 +4,7 @@
 [advisory review](DECODED_ICACHE_ADVISORY_REVIEW.md) and the
 [follow-up](CPU_ARCHITECTURE_REVIEW_FOLLOWUP.md). **The goal is agreement among Nate, V-32 and
 the CPU agent before cache implementation proceeds.** The concrete protocol to confirm is in
-[DECODED_ICACHE_PROTOCOL.md](DECODED_ICACHE_PROTOCOL.md).
+[DECODED_ICACHE_PROTOCOL.md](../DECODED_ICACHE_PROTOCOL.md).
 
 ## Summary
 
@@ -19,7 +19,7 @@ the CPU agent before cache implementation proceeds.** The concrete protocol to c
 
 ## What we accept
 
-- **Qualifications** (applied to the [response](CPU_ARCHITECTURE_REVIEW_RESPONSE.md)):
+- **Qualifications** (applied to the [response](../CPU_ARCHITECTURE_REVIEW_RESPONSE.md)):
   - the ~77 ns locking figure is an estimate, not component accounting
   - a native/JVM ratio above 1.5× does not prove locking is the cause
   - C1 rejects one cached-context design, not every primitive-context design
@@ -44,7 +44,7 @@ the CPU agent before cache implementation proceeds.** The concrete protocol to c
   - the cache is off unless V-32 enables it, after its firmware fences
   - a check mode detects missing fences in V-32's tests
   - the follow-up's three publication cases are answered in the
-    [protocol](DECODED_ICACHE_PROTOCOL.md#the-follow-ups-three-code-publication-cases)
+    [protocol](../DECODED_ICACHE_PROTOCOL.md#the-follow-ups-three-code-publication-cases)
 
   For case 3, the guest's own completion handshake followed by `FENCE.I` on the executing
   hart is the publication mechanism. No cross-thread invalidation or RAM-monitor callback
@@ -98,7 +98,7 @@ CoreMark.
 
 ## What we need from V-32
 
-1. Confirm or correct the [protocol](DECODED_ICACHE_PROTOCOL.md#confirm), items 1–6.
+1. Confirm or correct the [protocol](../DECODED_ICACHE_PROTOCOL.md#confirm), items 1–6.
 2. Say whether the instrumented boot-share run above is acceptable, and whether segment RAM is
    the default in the configuration that matters.
 3. Name a representative compute-heavy AP workload, if one exists, for the sizing report

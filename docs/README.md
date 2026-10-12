@@ -25,9 +25,6 @@
 | [V32_CACHE_MERGE_AND_EXECUTION_API_FEEDBACK.md](V32_CACHE_MERGE_AND_EXECUTION_API_FEEDBACK.md) | **Current.** V-32's trial result and merge recommendation, plus its requirements for a batched execution API with per-attempt boundaries. Input to the execution API design. |
 | [V32_AP_STEPPING_RESPONSE.md](V32_AP_STEPPING_RESPONSE.md) | V-32's answer on AP stepping: `step(count=1)` is its current path (cache off there on HotSpot is an acceptable fallback); committed per-instruction boundaries could live inside a batched call; pacing belongs to the embedder; the core API is unstable and changes are coordinated between the repos. |
 | [DECODED_ICACHE_PROTOCOL.md](DECODED_ICACHE_PROTOCOL.md) | Cache coherence protocol (`FENCE.I` plus embedder flush) and V-32 case mapping, accepted by V-32. |
-| [CPU_REVIEW_FOLLOWUP_RESPONSE.md](CPU_REVIEW_FOLLOWUP_RESPONSE.md) | CPU agent's reply to V-32's cache review and boot follow-up: agreements, Nate's decisions, boot-result analysis, and an addendum on V-32's AP WFI/attempt loop. |
-| [DECODED_ICACHE_ADVISORY_REVIEW.md](DECODED_ICACHE_ADVISORY_REVIEW.md) | V-32's advisory review of the cache scope (copied from V-32 at `805d76d`): answers to the nine questions, contract changes needed, experiment bounds. |
-| [CPU_ARCHITECTURE_REVIEW_FOLLOWUP.md](CPU_ARCHITECTURE_REVIEW_FOLLOWUP.md) | V-32's follow-up (copied at `805d76d`): matched boot results and code-publication cases. |
 | [../bench/README.md](../bench/README.md) | Unpublished throughput harness: workloads, bench-only buses, native images, how to run the matrix. |
 | [RV64_FEASIBILITY_NOTES.md](RV64_FEASIBILITY_NOTES.md) | Speculative notes on whether/how this library could add RV64 support alongside RV32. No decision made, no work started or scheduled. |
 
@@ -38,6 +35,9 @@ preserved; link targets are adjusted for the archive layout or the source reposi
 
 | Document | Superseded by |
 |---|---|
+| [archive/CPU_REVIEW_FOLLOWUP_RESPONSE.md](archive/CPU_REVIEW_FOLLOWUP_RESPONSE.md) | Completed: CPU agent's reply to V-32's cache review and boot follow-up (agreements, Nate's decisions, boot-result analysis, an addendum on V-32's former AP loop). Its outcomes are the [cache plan](DECODED_ICACHE_PLAN.md) and [protocol](DECODED_ICACHE_PROTOCOL.md). |
+| [archive/DECODED_ICACHE_ADVISORY_REVIEW.md](archive/DECODED_ICACHE_ADVISORY_REVIEW.md) | V-32's advisory review of the cache scope (copied at `77b2e47`), answered by the reply above. |
+| [archive/CPU_ARCHITECTURE_REVIEW_FOLLOWUP.md](archive/CPU_ARCHITECTURE_REVIEW_FOLLOWUP.md) | V-32's follow-up (copied at `77b2e47`): matched boot results and code-publication cases, answered by the reply above. |
 | [archive/V32_ATTEMPTS_RATIFICATION.md](archive/V32_ATTEMPTS_RATIFICATION.md) | Completed exchange: the CPU agent asked which execution mechanism the AP will use, with trial build `0.1.10-attempts-SNAPSHOT`. V-32's reply, appended verbatim: `stepAttempts` with a 4096-slot cache as the AP's only mechanism, the separate cached attempt loop ratified, and the timer migration done (278 V-32 tests passing). Outcome recorded in the [implementation plan](TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md). |
 | [archive/V32_TIMER_PHASE_HANDOFF.md](archive/V32_TIMER_PHASE_HANDOFF.md) | Completed handoff of the timer phase (`0.1.10-SNAPSHOT`): breaking changes and V-32 migration sites. V-32 migrated; its report is in the ratification reply above. |
 | [archive/TIMER_COUNTER_DESIGN_REV6_WITH_REVIEWS_2026-10-12.md](archive/TIMER_COUNTER_DESIGN_REV6_WITH_REVIEWS_2026-10-12.md) | The [implemented timer/counter design](TIMER_COUNTER_DESIGN.md); keeps V-32's reviews of every revision and the per-revision change lists. |

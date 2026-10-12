@@ -12,7 +12,7 @@ the subsequent protocol discussion, not a demonstrated boot-speed benefit.**
 
 Read this alongside the [initial advisory review](DECODED_ICACHE_ADVISORY_REVIEW.md).
 The CPU agent has already copied that review into its own repository at `f1678af`.
-This follow-up and its [full boot evidence](../../emulator/docs/performance-evidence/2026-10-10/core-boot/README.md)
+This follow-up and its [full boot evidence](https://github.com/AlienSpaceBunny/v32-emulator/blob/77b2e47b2f8a74b6aeac62862541c17158e7dbab/docs/performance-evidence/2026-10-10/core-boot/README.md)
 are in the emulator repository and can be read directly from this shared workspace.
 
 ## What the boot comparison adds

@@ -2,8 +2,8 @@
 
 ## Current state
 
-- **`main` is on `0.1.9-SNAPSHOT`.** Its code is unchanged since the local `v0.1.8` release
-  (installed in `~/.m2`, not published); everything since is design documentation.
+- **`main` is on `0.1.9-SNAPSHOT`.** Since the local `v0.1.8` release (installed in `~/.m2`, not
+  published) its only code change is T1's hook fix; the rest is design documentation.
 - **Next work is approved:** implement the settled timer/counter design, then the execution API
   design, following [the implementation plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md).
   Both designs are at revision 6 and confirmed by V-32.
@@ -12,13 +12,15 @@
 
 ## Resume here
 
-**Step T1 of [the plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md): the `PostExecHook`
-jump-PC fix.** Not started. Then T2 (the independent reference core) on
-`feature/timer-counters`. Update the plan's status table and this section as steps land.
+**Step T2 of [the plan](docs/TIMER_AND_ATTEMPTS_IMPLEMENTATION_PLAN.md): the independent
+reference core and differential harness**, on a new `feature/timer-counters` branch from `main`.
+Not started. T1 (the `PostExecHook` jump-PC fix) landed on `main` in `3f4fdda`; it also fixes
+MRET, which had the same quirk, so the T2 reference carries that too. Update the plan's status
+table and this section as steps land.
 
-**Validation status:** `main` at `0.1.9-SNAPSHOT` passed `./mvnw install` with the full gate
-before the design work; only docs have changed since. The `v0.1.8` tag passed `release:perform`
-(570 core tests in each of three cache configurations, plus CLI and bench) and `release.sh`.
+**Validation status:** `main` at `3f4fdda` passed `./mvnw clean verify` (594 core tests in each
+of three cache configurations, plus CLI and bench). No bench run for T1; T7's full matrix covers
+it. The `v0.1.8` tag passed `release:perform` (570 core tests in each of three cache configurations, plus CLI and bench) and `release.sh`.
 
 ## Rules for this work
 
